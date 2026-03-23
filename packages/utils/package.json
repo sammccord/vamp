@@ -1,0 +1,70 @@
+{
+  "name": "@framework/utils",
+  "version": "0.0.0",
+  "description": "A starter for creating a TypeScript package.",
+  "homepage": "https://github.com/author/library#readme",
+  "bugs": {
+    "url": "https://github.com/author/library/issues"
+  },
+  "license": "MIT",
+  "author": "Author Name <author.name@mail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/author/library.git"
+  },
+  "files": [
+    "dist",
+    "schema"
+  ],
+  "type": "module",
+  "exports": {
+    "./bebop": "./dist/bebop.mjs",
+    "./context-logger": "./dist/context-logger.mjs",
+    "./create-duplex-iterator": "./dist/create-duplex-iterator.mjs",
+    "./create-event-iterator": "./dist/create-event-iterator.mjs",
+    "./debug-logger": "./dist/debug-logger.mjs",
+    "./error": "./dist/error.mjs",
+    "./extension-channel": "./dist/extension-channel.mjs",
+    "./extension-router": "./dist/extension-router.mjs",
+    "./memory-storage": "./dist/memory-storage.mjs",
+    "./pino-logger": "./dist/pino-logger.mjs",
+    "./sync-storage": "./dist/sync-storage.mjs",
+    "./worker-channel": "./dist/worker-channel.mjs",
+    "./worker-router": "./dist/worker-router.mjs",
+    "./ws-channel": "./dist/ws-channel.mjs",
+    "./ws-router": "./dist/ws-router.mjs",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "bebopc build && vp pack",
+    "dev": "bebopc build && vp pack --watch",
+    "test": "vp test",
+    "typecheck": "tsc --noEmit",
+    "release": "bumpp",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@tempojs/client": "catalog:",
+    "@tempojs/common": "catalog:",
+    "@tempojs/server": "catalog:",
+    "bebop": "catalog:",
+    "debug": "catalog:",
+    "lodash-es": "catalog:",
+    "pino": "catalog:",
+    "tseep": "catalog:",
+    "webextension-polyfill": "catalog:",
+    "websocket-ts": "catalog:"
+  },
+  "devDependencies": {
+    "@types/debug": "catalog:",
+    "@types/lodash-es": "catalog:",
+    "@types/node": "^25.5.0",
+    "@types/webextension-polyfill": "catalog:",
+    "@typescript/native-preview": "7.0.0-dev.20260315.1",
+    "bebop-tools": "catalog:",
+    "bumpp": "^11.0.0",
+    "typescript": "^5.9.3",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,0 +1,3 @@
+message State {
+	1 -> string ns;
+}

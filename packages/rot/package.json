@@ -1,0 +1,72 @@
+{
+  "name": "@framework/rot",
+  "version": "0.0.0",
+  "description": "A starter for creating a TypeScript package.",
+  "homepage": "https://github.com/author/library#readme",
+  "bugs": {
+    "url": "https://github.com/author/library/issues"
+  },
+  "license": "MIT",
+  "author": "Author Name <author.name@mail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/author/library.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    "./color": "./dist/color.mjs",
+    "./constants": "./dist/constants.mjs",
+    "./engine": "./dist/engine.mjs",
+    "./eventqueue": "./dist/eventqueue.mjs",
+    "./fov/discrete-shadowcasting": "./dist/fov/discrete-shadowcasting.mjs",
+    "./fov/fov": "./dist/fov/fov.mjs",
+    "./fov/precise-shadowcasting": "./dist/fov/precise-shadowcasting.mjs",
+    "./fov/recursive-shadowcasting": "./dist/fov/recursive-shadowcasting.mjs",
+    "./lighting": "./dist/lighting.mjs",
+    "./map/arena": "./dist/map/arena.mjs",
+    "./map/cellular": "./dist/map/cellular.mjs",
+    "./map/digger": "./dist/map/digger.mjs",
+    "./map/dividedmaze": "./dist/map/dividedmaze.mjs",
+    "./map/dungeon": "./dist/map/dungeon.mjs",
+    "./map/ellermaze": "./dist/map/ellermaze.mjs",
+    "./map/features": "./dist/map/features.mjs",
+    "./map/iceymaze": "./dist/map/iceymaze.mjs",
+    "./map/map": "./dist/map/map.mjs",
+    "./map/rogue": "./dist/map/rogue.mjs",
+    "./map/uniform": "./dist/map/uniform.mjs",
+    "./MinHeap": "./dist/MinHeap.mjs",
+    "./noise/noise": "./dist/noise/noise.mjs",
+    "./noise/simplex": "./dist/noise/simplex.mjs",
+    "./path/astar": "./dist/path/astar.mjs",
+    "./path/dijkstra": "./dist/path/dijkstra.mjs",
+    "./path/path": "./dist/path/path.mjs",
+    "./rng": "./dist/rng.mjs",
+    "./scheduler/action": "./dist/scheduler/action.mjs",
+    "./scheduler/scheduler": "./dist/scheduler/scheduler.mjs",
+    "./scheduler/simple": "./dist/scheduler/simple.mjs",
+    "./scheduler/speed": "./dist/scheduler/speed.mjs",
+    "./stringgenerator": "./dist/stringgenerator.mjs",
+    "./text": "./dist/text.mjs",
+    "./util": "./dist/util.mjs",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "typecheck": "tsc --noEmit",
+    "release": "bumpp",
+    "prepublishOnly": "pnpm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@typescript/native-preview": "7.0.0-dev.20260315.1",
+    "bumpp": "^11.0.0",
+    "typescript": "^5.9.3",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  }
+}

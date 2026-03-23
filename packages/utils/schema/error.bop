@@ -1,0 +1,7 @@
+struct Error {
+  uint32 code;
+  string tag;
+  string stack;
+  string msg;
+  map[string, string] details;
+}

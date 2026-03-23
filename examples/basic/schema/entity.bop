@@ -1,0 +1,9 @@
+import "../node_modules/@framework/utils/schema/pool.bop"
+
+message Entity {
+	1 -> guid id;
+	2 -> guid root;
+	3 -> guid parent;
+	4 -> guid[] children;
+	5 -> pool health;
+}

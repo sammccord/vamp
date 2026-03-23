@@ -1,0 +1,16 @@
+message pool {
+	1 -> uint32 points;
+	2 -> uint32 min;
+	3 -> uint32 max;
+	4 -> int32 rate;
+  5 -> uint32 interval;
+}
+
+// Pool delta - points is CRDT counter, others are last-write-wins
+message poolDelta {
+  1 -> int32 points;      // Delta for CRDT counter (+/-)
+  2 -> int32 min;        // Delta for CRDT counter (+/-)
+  3 -> int32 max;        // Delta for CRDT counter (+/-)
+  4 -> int32 rate;        // Delta for CRDT counter (+/-)
+  5 -> int32 interval;   // Delta for CRDT counter (+/-)
+}

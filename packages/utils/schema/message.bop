@@ -1,0 +1,12 @@
+message Message {
+    1 -> uint32 methodId;
+    2 -> guid messageId;
+    3 -> date timestamp;
+    4 -> date deadline;
+    5 -> byte[] data;
+    6 -> string credential;
+    7 -> byte status;
+    8 -> uint8 previousAttempts;
+    9 -> string msg;
+    10 -> string authorization;
+}
