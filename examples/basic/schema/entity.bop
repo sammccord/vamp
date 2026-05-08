@@ -5,5 +5,5 @@ message Entity {
 	2 -> guid root;
 	3 -> guid parent;
 	4 -> guid[] children;
-	5 -> pool health;
+	5 -> Pool health;
 }

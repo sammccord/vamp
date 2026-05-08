@@ -7,18 +7,14 @@
   "name": "basic",
   "main": "src/index.ts",
   "compatibility_date": "2026-03-17",
-  "migrations": [
-    {
-      "new_sqlite_classes": ["MyDurableObject"],
-      "tag": "v1",
-    },
-  ],
+  "migrations": [{ "new_sqlite_classes": ["GameECS"], "tag": "v2" }],
   "durable_objects": {
     "bindings": [
       {
-        "class_name": "MyDurableObject",
-        "name": "MY_DURABLE_OBJECT",
+        "class_name": "GameECS",
+        "name": "GAME_ECS",
       },
+      { "class_name": "GameStorage", "name": "GAME_STORAGE" },
     ],
   },
   "observability": {

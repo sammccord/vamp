@@ -1,0 +1,8 @@
+{
+  "schemas": {
+    "entity": "schema/entity.bop",
+    "actions": "schema/actions.bop",
+    "state": "schema/state.bop"
+  },
+  "outFile": "./src/ecs.generated.ts"
+}

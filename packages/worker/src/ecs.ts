@@ -4,7 +4,7 @@ import {
   type BaseEntity,
   ECS,
   type ECSOptions,
-  type GenericEvent,
+  type GenericAction,
   MutationRecord,
 } from "@framework/ecs";
 import { Message } from "@framework/utils/bebop";
@@ -31,7 +31,7 @@ export type RPCContext<
   UserSession extends {},
   Context extends Record<string, unknown>,
   UpdateArguments extends Array<unknown>,
-  Events extends GenericEvent,
+  Events extends GenericAction,
   E extends BaseEntity = BaseEntity,
   D = unknown,
 > = [ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Events, E, D>, WebSocket];
@@ -40,7 +40,7 @@ export class ECSDurableObject<
   UserSession extends {},
   Context extends Record<string, unknown>,
   UpdateArguments extends Array<unknown>,
-  Events extends GenericEvent,
+  Events extends GenericAction,
   E extends BaseEntity = BaseEntity,
   D = unknown,
 > extends DurableObject {
@@ -119,9 +119,9 @@ export class ECSDurableObject<
     this.connectToDoc(configuration.document ?? "global");
 
     // TODO
-    this.log.info("registering services", {
-      // log the service to trigger the service's decorator
-    });
+    // this.log.info("registering services", {
+    //   // log the service to trigger the service's decorator
+    // });
 
     this.ecs = new ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Events, E, D>(
       new Map<string, E>(),
@@ -168,8 +168,8 @@ export class ECSDurableObject<
   }
 
   connectToDoc(docName: string) {
-    const stub = this.env.ENTITIES!.get(
-      this.env.ENTITIES!.idFromName(docName),
+    const stub = this.env.GAME_STORAGE!.get(
+      this.env.GAME_STORAGE!.idFromName(docName),
     )! as unknown as YStreamProviderStub;
     this.client = new YStreamClient(this.doc, { stub });
     this.ctx.waitUntil(this.client.connect());

@@ -44,8 +44,12 @@
     "@typescript/native-preview": "7.0.0-dev.20260316.1",
     "bumpp": "^11.0.1",
     "typescript": "^5.9.3",
+    "undici-types": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:"
+  },
+  "peerDependencies": {
+    "y-durablestream": "catalog:"
   }
 }

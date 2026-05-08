@@ -1,10 +1,10 @@
 union Actions {
-	1 -> Attack {
+	1 -> message Attack {
 		1 -> guid source;
 		2 -> guid target;
 		3 -> uint32 damage;
 	}
-	2 -> TakeDamage {
+	2 -> message TakeDamage {
 		1 -> guid source;
 		2 -> guid target;
 		3 -> uint32 damage;

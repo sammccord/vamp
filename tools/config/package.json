@@ -1,16 +1,10 @@
 {
   "name": "@framework/config",
   "version": "0.0.0",
-  "description": "A starter for creating a TypeScript package.",
-  "homepage": "https://github.com/author/library#readme",
-  "bugs": {
-    "url": "https://github.com/author/library/issues"
-  },
+  "description": "ECS code generator CLI for @framework",
   "license": "MIT",
-  "author": "Author Name <author.name@mail.com>",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/author/library.git"
+  "bin": {
+    "framework-config": "./dist/cli.mjs"
   },
   "files": [
     "dist"
@@ -18,6 +12,7 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
+    "./cli": "./dist/cli.mjs",
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -28,19 +23,20 @@
     "release": "bumpp",
     "prepublishOnly": "pnpm run build"
   },
+  "dependencies": {
+    "bebop": "catalog:",
+    "chokidar": "^3.6.0",
+    "citty": "^0.1.6",
+    "jsonc-parser": "^3.3.1"
+  },
   "devDependencies": {
-    "@types/node": "^25.5.0",
-    "@typescript/native-preview": "7.0.0-dev.20260316.1",
-    "bumpp": "^11.0.1",
-    "typescript": "^5.9.3",
+    "@framework/ecs": "workspace:*",
+    "@framework/utils": "workspace:*",
+    "@framework/worker": "workspace:*",
+    "@types/node": "catalog:",
+    "bebop-tools": "catalog:",
+    "typescript": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
-  },
-  "peerDependencies": {
-    "@framework/config": "workspace:*",
-    "@framework/ecs": "workspace:*",
-    "@framework/rot": "workspace:*",
-    "@framework/utils": "workspace:*",
-    "@framework/worker": "workspace:*"
   }
 }
