@@ -7,18 +7,18 @@
     "dev": "wrangler dev",
     "start": "wrangler dev",
     "cf-typegen": "wrangler types",
-    "generate": "framework-config generate"
+    "generate": "vamp-config generate"
   },
   "dependencies": {
-    "@framework/ecs": "workspace:*",
-    "@framework/utils": "workspace:*",
-    "@framework/worker": "workspace:*",
+    "@vamp/ecs": "workspace:*",
+    "@vamp/utils": "workspace:*",
+    "@vamp/worker": "workspace:*",
     "bebop": "catalog:",
     "hono": "catalog:"
   },
   "devDependencies": {
-    "@framework/config": "workspace:*",
     "@types/node": "^25.5.0",
+    "@vamp/config": "workspace:*",
     "bebop-tools": "catalog:",
     "typescript": "^5.5.2",
     "wrangler": "^4.75.0"

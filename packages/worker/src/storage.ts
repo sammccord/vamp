@@ -1,4 +1,4 @@
-import { type BaseEntity } from "@framework/ecs";
+import { type BaseEntity } from "@vamp/ecs";
 import { type Env } from "cloudflare:workers";
 import type { YDocStorage } from "y-durablestream";
 import { DurableObjectSqlStorage, YStreamProvider } from "y-durablestream";

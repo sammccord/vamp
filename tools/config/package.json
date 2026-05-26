@@ -1,10 +1,10 @@
 {
-  "name": "@framework/config",
+  "name": "@vamp/config",
   "version": "0.0.0",
-  "description": "ECS code generator CLI for @framework",
+  "description": "ECS code generator CLI for @vamp",
   "license": "MIT",
   "bin": {
-    "framework-config": "./dist/cli.mjs"
+    "vamp-config": "./dist/cli.mjs"
   },
   "files": [
     "dist"
@@ -30,10 +30,10 @@
     "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
-    "@framework/ecs": "workspace:*",
-    "@framework/utils": "workspace:*",
-    "@framework/worker": "workspace:*",
     "@types/node": "catalog:",
+    "@vamp/ecs": "workspace:*",
+    "@vamp/utils": "workspace:*",
+    "@vamp/worker": "workspace:*",
     "bebop-tools": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:",

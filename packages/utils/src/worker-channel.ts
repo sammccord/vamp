@@ -349,7 +349,7 @@ export class TempoWorkerChannel extends BaseChannel {
     payload: Uint8Array,
     _context: ClientContext,
     method: MethodInfo<BebopRecord, BebopRecord>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Message {
     const customMetadata = new Metadata();
     customMetadata.set("path", `/${method.service}/${method.name}`);
@@ -417,7 +417,7 @@ export class TempoWorkerChannel extends BaseChannel {
     request: TRequest,
     context: ClientContext,
     method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Promise<TResponse> {
     try {
       // Prepare request data based on content type
@@ -492,7 +492,7 @@ export class TempoWorkerChannel extends BaseChannel {
     generator: () => AsyncGenerator<TRequest, void, undefined>,
     context: ClientContext,
     method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Promise<TResponse> {
     try {
       if (this.hooks !== undefined) {
@@ -545,7 +545,7 @@ export class TempoWorkerChannel extends BaseChannel {
     request: TRequest,
     context: ClientContext,
     method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Promise<AsyncGenerator<TResponse, void, undefined>> {
     try {
       // Prepare request data based on content type
@@ -609,7 +609,7 @@ export class TempoWorkerChannel extends BaseChannel {
     generator: () => AsyncGenerator<TRequest, void, undefined>,
     context: ClientContext,
     method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Promise<AsyncGenerator<TResponse, void, undefined>> {
     try {
       if (this.hooks !== undefined) {

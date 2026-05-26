@@ -1,5 +1,5 @@
 {
-  "name": "@framework/worker",
+  "name": "@vamp/worker",
   "version": "0.0.0",
   "description": "A starter for creating a TypeScript package.",
   "homepage": "https://github.com/author/library#readme",
@@ -29,10 +29,10 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@framework/ecs": "workspace:*",
-    "@framework/utils": "workspace:*",
     "@tempojs/common": "catalog:",
     "@tempojs/server": "catalog:",
+    "@vamp/ecs": "workspace:*",
+    "@vamp/utils": "workspace:*",
     "pino": "catalog:",
     "tseep": "catalog:",
     "y-durablestream": "catalog:",

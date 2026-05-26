@@ -1,6 +1,6 @@
-# @framework/utils
+# @vamp/utils
 
-Low-level utilities for building bebop/tempo-based applications. Provides the shared wire schema, transport channel/router implementations, error types, loggers, and async iteration primitives used across the framework.
+Low-level utilities for building bebop/tempo-based applications. Provides the shared wire schema, transport channel/router implementations, error types, loggers, and async iteration primitives used across the vamp.
 
 - **bebop** — binary serialization library for fast, compact data interchange
 - **tempo** — typed RPC layer built on top of bebop
@@ -54,14 +54,14 @@ The universal envelope for all RPC calls. Fields are optional (bebop message typ
 
 ## Subpath Exports
 
-### `@framework/utils/bebop` — Generated Schema Bindings
+### `@vamp/utils/bebop` — Generated Schema Bindings
 
 Auto-generated. Exports `Error`, `Message`, and `BEBOP_SCHEMA`.
 
 Each type exports as both an interface and a factory/static object (the bebop pattern):
 
 ```ts
-import { Message, Error } from "@framework/utils/bebop";
+import { Message, Error } from "@vamp/utils/bebop";
 
 // Encode
 const bytes = Message.encode({ methodId: 1, messageId: crypto.randomUUID(), data: payload });
@@ -76,10 +76,10 @@ record.encode(); // Uint8Array
 
 ---
 
-### `@framework/utils/error` — Typed Errors
+### `@vamp/utils/error` — Typed Errors
 
 ```ts
-import { SystemError, ErrorTags } from "@framework/utils/error";
+import { SystemError, ErrorTags } from "@vamp/utils/error";
 ```
 
 **`SystemError<Tag>`** extends `TempoError` from `@tempojs/common`. Wraps a bebop `Error` struct. Use this as the base for all thrown errors in the framework.
@@ -115,10 +115,10 @@ const err = SystemError.generic(caughtError, ErrorTags.Unknown);
 
 ---
 
-### `@framework/utils/context-logger` — Base Logger
+### `@vamp/utils/context-logger` — Base Logger
 
 ```ts
-import { ContextLogger } from "@framework/utils/context-logger";
+import { ContextLogger } from "@vamp/utils/context-logger";
 ```
 
 Extends `ConsoleLogger` from `@tempojs/common`. Adds structured `bindings` (key-value context attached to every log line) and methods for deriving child loggers.
@@ -137,10 +137,10 @@ const correlated = logger.correlate("db-query", correlationId, false, { table: "
 
 ---
 
-### `@framework/utils/debug-logger` — Debug-Namespace Logger
+### `@vamp/utils/debug-logger` — Debug-Namespace Logger
 
 ```ts
-import { DebugLogger } from "@framework/utils/debug-logger";
+import { DebugLogger } from "@vamp/utils/debug-logger";
 ```
 
 Uses the `debug` package. Each log level gets its own namespace: `<sourceName>:trace`, `<sourceName>:info`, etc. Enable output with the `DEBUG` environment variable.
@@ -157,10 +157,10 @@ const child = logger.clone("auth", false, { userId: "123" });
 
 ---
 
-### `@framework/utils/pino-logger` — Pino Structured Logger
+### `@vamp/utils/pino-logger` — Pino Structured Logger
 
 ```ts
-import { PinoLogger } from "@framework/utils/pino-logger";
+import { PinoLogger } from "@vamp/utils/pino-logger";
 import pino from "pino";
 ```
 
@@ -178,11 +178,11 @@ const child = logger.clone("auth");
 
 ---
 
-### `@framework/utils/create-event-iterator` — Push-Based Async Generator
+### `@vamp/utils/create-event-iterator` — Push-Based Async Generator
 
 ```ts
-import { createEventIterator } from "@framework/utils/create-event-iterator";
-import type { Subscriber, Context, CleanupFn } from "@framework/utils/create-event-iterator";
+import { createEventIterator } from "@vamp/utils/create-event-iterator";
+import type { Subscriber, Context, CleanupFn } from "@vamp/utils/create-event-iterator";
 ```
 
 Converts any push-based event source (EventEmitter, WebSocket messages, browser events) into an `AsyncGenerator`. The subscriber receives `{ emit, cancel }` and returns an optional cleanup function.
@@ -206,11 +206,11 @@ Call `cancel()` from within the subscriber (e.g. on a "close" event) to end iter
 
 ---
 
-### `@framework/utils/create-duplex-iterator` — Bidirectional Async Stream
+### `@vamp/utils/create-duplex-iterator` — Bidirectional Async Stream
 
 ```ts
-import { createDuplexIterator } from "@framework/utils/create-duplex-iterator";
-import type { Writer } from "@framework/utils/create-duplex-iterator";
+import { createDuplexIterator } from "@vamp/utils/create-duplex-iterator";
+import type { Writer } from "@vamp/utils/create-duplex-iterator";
 ```
 
 Combines an outgoing `AsyncGenerator<BebopRecord>` with an incoming event source. For each outgoing record it calls `emitter`, then yields the next incoming event. Used internally by duplex-stream RPC methods.
@@ -235,11 +235,11 @@ for await (const incoming of stream) {
 
 ---
 
-### `@framework/utils/ws-channel` — WebSocket Tempo Client Channel
+### `@vamp/utils/ws-channel` — WebSocket Tempo Client Channel
 
 ```ts
-import { TempoWSChannel } from "@framework/utils/ws-channel";
-import type { TempoWSChannelOptions } from "@framework/utils/ws-channel";
+import { TempoWSChannel } from "@vamp/utils/ws-channel";
+import type { TempoWSChannelOptions } from "@vamp/utils/ws-channel";
 ```
 
 A `BaseChannel` implementation that transports tempo RPC calls over a WebSocket connection (using the `websocket-ts` library with auto-reconnect support). The wire format is `Message` encoded as bebop binary.
@@ -266,10 +266,10 @@ All four tempo method types (unary, server-stream, client-stream, duplex) are su
 
 ---
 
-### `@framework/utils/ws-router` — WebSocket Tempo Server Router
+### `@vamp/utils/ws-router` — WebSocket Tempo Server Router
 
 ```ts
-import { TempoWsRouter } from "@framework/utils/ws-router";
+import { TempoWsRouter } from "@vamp/utils/ws-router";
 ```
 
 A `BaseRouter` that dispatches incoming `ArrayBuffer` WebSocket messages to registered tempo service methods. Extend or instantiate with a `ServiceRegistry` and optional `AuthInterceptor`.
@@ -289,10 +289,10 @@ Server-stream and duplex-stream methods must be implemented as `async function*`
 
 ---
 
-### `@framework/utils/worker-channel` — Bun Worker Tempo Client Channel
+### `@vamp/utils/worker-channel` — Bun Worker Tempo Client Channel
 
 ```ts
-import { TempoWorkerChannel } from "@framework/utils/worker-channel";
+import { TempoWorkerChannel } from "@vamp/utils/worker-channel";
 ```
 
 A `BaseChannel` that communicates with a Bun `Worker` using `postMessage` / `onmessage`. Messages are transferred as `Uint8Array` with zero-copy buffer transfer.
@@ -308,10 +308,10 @@ The `worker` property exposes the underlying `Bun.Worker` instance if you need d
 
 ---
 
-### `@framework/utils/worker-router` — Bun Worker Tempo Server Router
+### `@vamp/utils/worker-router` — Bun Worker Tempo Server Router
 
 ```ts
-import { TempoWorkerRouter } from "@framework/utils/worker-router";
+import { TempoWorkerRouter } from "@vamp/utils/worker-router";
 ```
 
 Runs inside a Bun Worker (`declare var self: Bun.Worker`). Dispatches incoming `Buffer` messages to registered tempo service methods, writing responses back via `postMessage`.
@@ -333,10 +333,10 @@ Supports client-stream cancellation: a `CANCELLED` status message from the clien
 
 ---
 
-### `@framework/utils/extension-channel` — Browser Extension Channel (Client)
+### `@vamp/utils/extension-channel` — Browser Extension Channel (Client)
 
 ```ts
-import { TempoExtensionChannel } from "@framework/utils/extension-channel";
+import { TempoExtensionChannel } from "@vamp/utils/extension-channel";
 ```
 
 A `BaseChannel` for browser extensions. Sends messages via `browser.runtime.sendMessage` and receives responses via `browser.runtime.onMessage`. Uses `webextension-polyfill` for cross-browser compatibility.
@@ -350,11 +350,11 @@ Messages are encoded as `Array<number>` (bebop bytes as a plain array) to satisf
 
 ---
 
-### `@framework/utils/extension-router` — Browser Extension Router (Server)
+### `@vamp/utils/extension-router` — Browser Extension Router (Server)
 
 ```ts
-import { TempoExtensionRouter, ExtensionBaseRouter } from "@framework/utils/extension-router";
-import { TempoExtensionRouterConfiguration } from "@framework/utils/extension-router";
+import { TempoExtensionRouter, ExtensionBaseRouter } from "@vamp/utils/extension-router";
+import { TempoExtensionRouterConfiguration } from "@vamp/utils/extension-router";
 ```
 
 Runs in the extension background script. Dispatches incoming `Message` objects (decoded from `browser.runtime.onMessage`) to registered tempo service methods and sends responses back via `tabs.sendMessage`.
@@ -375,10 +375,10 @@ browser.runtime.onMessage.addListener(async (raw, sender) => {
 
 ---
 
-### `@framework/utils/memory-storage` — In-Memory Credential Storage
+### `@vamp/utils/memory-storage` — In-Memory Credential Storage
 
 ```ts
-import { MemoryStorageStrategy } from "@framework/utils/memory-storage";
+import { MemoryStorageStrategy } from "@vamp/utils/memory-storage";
 ```
 
 Implements `CredentialStorage` from `@tempojs/client` using a `Map`. Suitable for testing or short-lived processes where persistence is not required.
@@ -392,10 +392,10 @@ await storage.removeCredential("session");
 
 ---
 
-### `@framework/utils/sync-storage` — WebExtension Sync Storage
+### `@vamp/utils/sync-storage` — WebExtension Sync Storage
 
 ```ts
-import { SyncStorageStrategy } from "@framework/utils/sync-storage";
+import { SyncStorageStrategy } from "@vamp/utils/sync-storage";
 ```
 
 Implements `CredentialStorage` backed by `browser.storage.sync` (via `webextension-polyfill`). Use in browser extension contexts where credentials should persist across browser sessions and sync across devices.

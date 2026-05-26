@@ -24,7 +24,7 @@ catalog:
   typescript: ^5
   undici-types: ^8.0.2
   vite: npm:@voidzero-dev/vite-plus-core@latest
-  vite-plus: latest
+  vite-plus: ^0.1.22
   vitest: npm:@voidzero-dev/vite-plus-test@latest
   webextension-polyfill: ^0.12.0
   websocket-ts: ^2.2.1

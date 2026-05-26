@@ -1,7 +1,7 @@
 import { defineCommand } from "citty";
 import { execSync } from "node:child_process";
 import { resolve } from "node:path";
-import { loadBebopConfig, loadFrameworkConfig } from "../config/loader";
+import { loadBebopConfig, loadVampConfig } from "../config/loader";
 import { generate } from "../generators/codegen";
 
 export const generateCommand = defineCommand({
@@ -29,8 +29,8 @@ export const generateCommand = defineCommand({
   },
   async run({ args }) {
     const cwd = args.cwd;
-    const frameworkConfig = loadFrameworkConfig(cwd);
-    const bebopConfig = loadBebopConfig(cwd, frameworkConfig.bebopConfig);
+    const vampConfig = loadVampConfig(cwd);
+    const bebopConfig = loadBebopConfig(cwd, vampConfig.bebopConfig);
 
     const runGenerate = () => {
       if (!args["skip-bebopc"]) {
@@ -44,7 +44,7 @@ export const generateCommand = defineCommand({
       }
 
       console.log("Generating ECS types...");
-      const outPath = generate(cwd, bebopConfig, frameworkConfig);
+      const outPath = generate(cwd, bebopConfig, vampConfig);
       console.log(`Generated ${outPath}`);
       return true;
     };
@@ -56,9 +56,9 @@ export const generateCommand = defineCommand({
 
     const chokidar = await import("chokidar");
     const schemaPaths = [
-      resolve(cwd, frameworkConfig.schemas.entity),
-      resolve(cwd, frameworkConfig.schemas.actions),
-      resolve(cwd, frameworkConfig.schemas.state),
+      resolve(cwd, vampConfig.schemas.entity),
+      resolve(cwd, vampConfig.schemas.actions),
+      resolve(cwd, vampConfig.schemas.state),
     ];
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;

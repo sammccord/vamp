@@ -11,13 +11,13 @@ export function emitHelpers(entity: SchemaDefinition, schema: ParsedSchema): str
     emitMaterializeDelta(entity, schema),
     emitMergeDelta(entity, schema),
     emitAccumulateDelta(entity, schema),
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function needsPoolHelper(entity: SchemaDefinition, schema: ParsedSchema): boolean {
-  return entity.fields.some(
-    (f) => !f.isArray && !isScalar(f.typeName) && hasDeltaDef(f, schema),
-  );
+  return entity.fields.some((f) => !f.isArray && !isScalar(f.typeName) && hasDeltaDef(f, schema));
 }
 
 function emitPoolHelper(entity: SchemaDefinition, schema: ParsedSchema): string {
@@ -40,9 +40,7 @@ function emitMaterializeDelta(entity: SchemaDefinition, schema: ParsedSchema): s
     }
     if (!isScalar(f.typeName) && hasDeltaDef(f, schema)) {
       const baseMsg = schema.definitions.get(f.typeName);
-      const defaultFields = baseMsg
-        ? baseMsg.fields.map((bf) => `${bf.name}: 0`).join(", ")
-        : "";
+      const defaultFields = baseMsg ? baseMsg.fields.map((bf) => `${bf.name}: 0`).join(", ") : "";
       return `    ${f.name}: delta.${f.name} ? applyPoolDelta(base?.${f.name} ?? { ${defaultFields} }, delta.${f.name}) : base?.${f.name} ?? { ${defaultFields} }`;
     }
     if (isScalar(f.typeName)) {

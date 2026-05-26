@@ -8,8 +8,7 @@ import { stateTemplate } from "../templates/state.bop";
 export const initCommand = defineCommand({
   meta: {
     name: "init",
-    description:
-      "Scaffold schema/ dir, template .bop files, and create bebop.json + framework.json",
+    description: "Scaffold schema/ dir, template .bop files, and create bebop.json + vamp.json",
   },
   args: {
     cwd: {
@@ -43,7 +42,7 @@ export const initCommand = defineCommand({
       }
     }
 
-    // Create bebop.json (pure bebopc config, no framework keys)
+    // Create bebop.json (pure bebopc config, no vamp keys)
     const bebopConfigPath = resolve(cwd, "bebop.json");
     if (existsSync(bebopConfigPath)) {
       console.log("Skipping bebop.json (already exists)");
@@ -56,12 +55,12 @@ export const initCommand = defineCommand({
       console.log("Created bebop.json");
     }
 
-    // Create framework.json
-    const frameworkConfigPath = resolve(cwd, "framework.json");
-    if (existsSync(frameworkConfigPath)) {
-      console.log("Skipping framework.json (already exists)");
+    // Create vamp.json
+    const vampConfigPath = resolve(cwd, "vamp.json");
+    if (existsSync(vampConfigPath)) {
+      console.log("Skipping vamp.json (already exists)");
     } else {
-      const frameworkConfig = {
+      const vampConfig = {
         schemas: {
           entity: "schema/entity.bop",
           actions: "schema/actions.bop",
@@ -69,8 +68,8 @@ export const initCommand = defineCommand({
         },
         outFile: "./src/ecs.generated.ts",
       };
-      writeFileSync(frameworkConfigPath, JSON.stringify(frameworkConfig, null, 2) + "\n", "utf-8");
-      console.log("Created framework.json");
+      writeFileSync(vampConfigPath, JSON.stringify(vampConfig, null, 2) + "\n", "utf-8");
+      console.log("Created vamp.json");
     }
   },
 });

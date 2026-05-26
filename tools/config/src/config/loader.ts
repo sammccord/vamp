@@ -18,24 +18,24 @@ export function loadBebopConfig(cwd: string, configPath?: string): BebopConfig {
   return config;
 }
 
-export function loadFrameworkConfig(cwd: string): FrameworkConfig {
-  const configPath = resolve(cwd, "framework.json");
+export function loadVampConfig(cwd: string): FrameworkConfig {
+  const configPath = resolve(cwd, "vamp.json");
   let raw: string;
   try {
     raw = readFileSync(configPath, "utf-8");
   } catch {
-    throw new Error(`framework.json not found in ${cwd}`);
+    throw new Error(`vamp.json not found in ${cwd}`);
   }
   const config = parseJsonc(raw) as FrameworkConfig;
   if (!config) {
-    throw new Error(`Failed to parse framework.json in ${cwd}`);
+    throw new Error(`Failed to parse vamp.json in ${cwd}`);
   }
   const { schemas, outFile } = config;
   if (!schemas?.entity || !schemas?.actions || !schemas?.state) {
-    throw new Error("framework.schemas must define entity, actions, and state paths");
+    throw new Error("vamp.schemas must define entity, actions, and state paths");
   }
   if (!outFile) {
-    throw new Error("framework.outFile is required");
+    throw new Error("vamp.outFile is required");
   }
   return config;
 }

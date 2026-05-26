@@ -1,8 +1,20 @@
 import type { ParsedSchema, SchemaDefinition, SchemaField } from "./parse-bop";
 
 const SCALAR_TYPES = new Set([
-  "bool", "byte", "uint8", "int16", "uint16", "int32", "uint32",
-  "int64", "uint64", "float32", "float64", "string", "guid", "date",
+  "bool",
+  "byte",
+  "uint8",
+  "int16",
+  "uint16",
+  "int32",
+  "uint32",
+  "int64",
+  "uint64",
+  "float32",
+  "float64",
+  "string",
+  "guid",
+  "date",
 ]);
 
 export function scalarToTs(type: string): string {

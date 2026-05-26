@@ -1,4 +1,4 @@
-import "../node_modules/@framework/utils/schema/pool.bop"
+import "../node_modules/@vamp/utils/schema/pool.bop"
 
 message Entity {
 	1 -> guid id;

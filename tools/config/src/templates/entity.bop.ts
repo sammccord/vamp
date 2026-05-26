@@ -1,4 +1,4 @@
-export const entityTemplate = `import "../node_modules/@framework/utils/schema/pool.bop"
+export const entityTemplate = `import "../node_modules/@vamp/utils/schema/pool.bop"
 
 message Entity {
 \t1 -> guid id;

@@ -418,7 +418,7 @@ export class TempoWSChannel extends BaseChannel {
     payload: Uint8Array,
     _context: ClientContext,
     method: MethodInfo<BebopRecord, BebopRecord>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Promise<Message> {
     const messageId = crypto.randomUUID();
     const requestInit: Message = {
@@ -502,7 +502,7 @@ export class TempoWSChannel extends BaseChannel {
     request: TRequest,
     context: ClientContext,
     method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Promise<TResponse> {
     try {
       await this.waitForOpen();
@@ -575,7 +575,7 @@ export class TempoWSChannel extends BaseChannel {
     generator: () => AsyncGenerator<TRequest, void, undefined>,
     context: ClientContext,
     method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Promise<TResponse> {
     try {
       await this.waitForOpen();
@@ -628,7 +628,7 @@ export class TempoWSChannel extends BaseChannel {
     request: TRequest,
     context: ClientContext,
     method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Promise<AsyncGenerator<TResponse, void, undefined>> {
     try {
       await this.waitForOpen();
@@ -690,7 +690,7 @@ export class TempoWSChannel extends BaseChannel {
     generator: () => AsyncGenerator<TRequest, void, undefined>,
     context: ClientContext,
     method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions  ,
+    options?: CallOptions,
   ): Promise<AsyncGenerator<TResponse, void, undefined>> {
     try {
       await this.waitForOpen();

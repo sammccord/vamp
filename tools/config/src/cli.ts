@@ -5,8 +5,8 @@ import { initCommand } from "./commands/init";
 
 const main = defineCommand({
   meta: {
-    name: "framework-config",
-    description: "ECS code generator for @framework",
+    name: "vamp-config",
+    description: "ECS code generator for @vamp",
   },
   subCommands: {
     generate: generateCommand,

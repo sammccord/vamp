@@ -6,11 +6,11 @@ import {
   type ECSOptions,
   type GenericAction,
   MutationRecord,
-} from "@framework/ecs";
-import { Message } from "@framework/utils/bebop";
-import type { ContextLogger } from "@framework/utils/context-logger";
-import { PinoLogger } from "@framework/utils/pino-logger";
-import { TempoWsRouter } from "@framework/utils/ws-router";
+} from "@vamp/ecs";
+import { Message } from "@vamp/utils/bebop";
+import type { ContextLogger } from "@vamp/utils/context-logger";
+import { PinoLogger } from "@vamp/utils/pino-logger";
+import { TempoWsRouter } from "@vamp/utils/ws-router";
 import { HookRegistry, TempoLogLevel } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
 import { DurableObject } from "cloudflare:workers";
