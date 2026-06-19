@@ -54,11 +54,6 @@ export default class Digger extends Dungeon {
     this._featureAttempts = 20; /* how many times do we try to create a feature on a suitable wall */
     this._walls = {}; /* these are available for digging */
     this._dug = 0;
-
-    this._digCallback = this._digCallback.bind(this);
-    this._canBeDugCallback = this._canBeDugCallback.bind(this);
-    this._isWallCallback = this._isWallCallback.bind(this);
-    this._priorityWallCallback = this._priorityWallCallback.bind(this);
   }
 
   create(callback?: CreateCallback) {
@@ -136,34 +131,33 @@ export default class Digger extends Dungeon {
     return this;
   }
 
-  _digCallback(x: number, y: number, value: number) {
-    if (value == 0 || value == 2) {
-      /* empty */
-      this._map[x]![y] = 0;
+  _digCallback = (x: number, y: number, value: number) => {
+    this._map[x][y] = value;
+    if (value == 0) {
       this._dug++;
-    } else {
-      /* wall */
-      this._walls[x + "," + y] = 1;
     }
-  }
+  };
 
-  _isWallCallback(x: number, y: number) {
+  _isWallCallback = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= this._width || y >= this._height) {
+      return true;
+    }
+    if (this._map[x][y] != 0) {
+      return true;
+    }
+    return false;
+  };
+
+  _canBeDugCallback = (x: number, y: number) => {
     if (x < 0 || y < 0 || x >= this._width || y >= this._height) {
       return false;
     }
-    return this._map[x]![y] == 1;
-  }
+    return this._map[x][y] == 0;
+  };
 
-  _canBeDugCallback(x: number, y: number) {
-    if (x < 1 || y < 1 || x + 1 >= this._width || y + 1 >= this._height) {
-      return false;
-    }
-    return this._map[x]![y] == 1;
-  }
-
-  _priorityWallCallback(x: number, y: number) {
+  _priorityWallCallback = (x: number, y: number) => {
     this._walls[x + "," + y] = 2;
-  }
+  };
 
   _firstRoom() {
     let cx = Math.floor(this._width / 2);

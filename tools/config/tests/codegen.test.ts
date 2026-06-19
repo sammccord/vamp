@@ -11,6 +11,14 @@ const entityDef: SchemaDefinition = {
   fields: [
     { name: "id", typeId: -12, isArray: false, isMap: false, typeName: "guid" },
     { name: "root", typeId: -12, isArray: false, isMap: false, typeName: "guid" },
+    {
+      name: "tags",
+      typeId: 1,
+      isArray: true,
+      isMap: false,
+      typeName: "array",
+      memberTypeName: "Tags",
+    },
     { name: "parent", typeId: -12, isArray: false, isMap: false, typeName: "guid" },
     {
       name: "children",
@@ -27,6 +35,14 @@ const entityDef: SchemaDefinition = {
 const schema: ParsedSchema = {
   definitions: new Map([
     ["Entity", entityDef],
+    [
+      "Tags",
+      {
+        name: "Tags",
+        kind: "enum",
+        fields: [],
+      },
+    ],
     [
       "pool",
       {
@@ -55,14 +71,14 @@ const schema: ParsedSchema = {
 };
 
 describe("emitComponents", () => {
-  it("generates component ID map", () => {
+  it("generates component ID map skipping tags field", () => {
     const result = emitComponents(entityDef);
     expect(result).toContain("id: 0");
     expect(result).toContain("root: 1");
-    expect(result).toContain("parent: 2");
-    expect(result).toContain("children: 3");
-    expect(result).toContain("health: 4");
-    expect(result).toContain("satisfies Record<keyof Entity, number>");
+    expect(result).toContain("parent: 3");
+    expect(result).toContain("children: 4");
+    expect(result).toContain("health: 5");
+    expect(result).toContain('satisfies Record<keyof Omit<Entity, "tags">, number>');
   });
 });
 
@@ -71,6 +87,7 @@ describe("emitDelta", () => {
     const result = emitDelta(entityDef, schema);
     expect(result).toContain("id?: string;");
     expect(result).toContain("root?: string;");
+    expect(result).toContain("tags?: Tags[];");
     expect(result).toContain("parent?: string;");
   });
 
@@ -94,11 +111,17 @@ describe("emitFactory", () => {
 });
 
 describe("emitTypedClasses", () => {
-  it("generates typed DO aliases", () => {
-    const result = emitClasses();
+  it("generates typed DO aliases with given tags type", () => {
+    const result = emitClasses("Tags");
     expect(result).toContain("GameECS");
     expect(result).toContain("GameStorage");
     expect(result).toContain("ECSDurableObject");
     expect(result).toContain("ECSStorage<Entity>");
+    expect(result).toMatch(/,(\s*)Tags,/);
+  });
+
+  it("defaults to number when no tags type given", () => {
+    const result = emitClasses();
+    expect(result).toMatch(/,(\s*)number,/);
   });
 });

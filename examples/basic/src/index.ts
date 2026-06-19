@@ -6,7 +6,7 @@ const app = new Hono<{
   Variables: {};
 }>();
 
-app.get("/v1/game", (c) => {
+app.get("/v1/game", async (c) => {
   // Reject requests that don't require upgrade
   if (c.req.header("upgrade") !== "websocket") {
     return c.text("Expected Upgrade: websocket", 426);
@@ -22,9 +22,11 @@ app.get("/v1/game", (c) => {
 
   if (!stub.initialized()) {
     // TODO load in ecs
-    stub.initialize(ns, {
-      // serviceRegistry:
+    await stub.initialize(ns, {
       ecs: createECSOptions(() => crypto.randomUUID()),
+      serviceRegistry: undefined as any,
+      hooks: undefined as any,
+      context: {},
     });
   }
 

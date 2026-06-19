@@ -45,6 +45,22 @@ export type QueryBuilder = {
    */
   none(...cids: number[]): QueryBuilder;
   /**
+   * Archetypes that has *every* tagId of `tagIds` will be included in the result
+   */
+  everyTag(...tags: number[]): QueryBuilder;
+  /**
+   * Archetypes that has *some* of the `tagIds` will be included in the result
+   */
+  someTag(...tags: number[]): QueryBuilder;
+  /**
+   * Archetypes that has *some* of the `tagIds` will *not* be included in the result
+   */
+  notTag(...tags: number[]): QueryBuilder;
+  /**
+   * Archetypes that has *every* tagId of `tagIds` will *not* be included in the result
+   */
+  noneTag(...tags: number[]): QueryBuilder;
+  /**
    * Build a subquery to match a different set of Archetypes.
    * You may combine as many or subqueries and nested or subqueries as you need
    */
@@ -106,6 +122,32 @@ export function createBuilder(): QueryBuilder {
       }
       const mask = makeMask(components);
       _matchers.push((target, _targetArchetype) => target.intersection_size(mask) === 0);
+      return this;
+    },
+    everyTag(...tags) {
+      if (tags.length === 0) return this;
+      const mask = makeMask(tags);
+      _matchers.push((_target, archetype) => {
+        return archetype.tagMask.intersection_size(mask) === tags.length;
+      });
+      return this;
+    },
+    someTag(...tags) {
+      if (tags.length === 0) return this;
+      const mask = makeMask(tags);
+      _matchers.push((_target, archetype) => archetype.tagMask.intersects(mask));
+      return this;
+    },
+    notTag(...tags) {
+      if (tags.length === 0) return this;
+      const mask = makeMask(tags);
+      _matchers.push((_target, archetype) => !archetype.tagMask.intersects(mask));
+      return this;
+    },
+    noneTag(...tags) {
+      if (tags.length === 0) return this;
+      const mask = makeMask(tags);
+      _matchers.push((_target, archetype) => archetype.tagMask.intersection_size(mask) === 0);
       return this;
     },
     prefabricated(archetype) {

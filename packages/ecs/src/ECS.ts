@@ -3,6 +3,7 @@ import {
   type Archetype,
   createArchetype,
   transformArchetype,
+  transformArchetypeTag,
   traverseArchetypeGraph,
 } from "./Archetype";
 import {
@@ -18,11 +19,11 @@ import { query } from "./Query";
 import type { Behavior, EventSystem, LifecycleSystem, System } from "./System";
 import { type BaseEntity, type EntityMutator, MutationRecord, MutationType } from "./types";
 
-export type EntityCallback = (entity: string, archetype: Archetype) => unknown | Promise<unknown>;
+export type EntityCallback = (entity: string, archetype: Archetype) => Promise<unknown>;
 
 export interface ECSOptions<E extends BaseEntity, D> {
   createId: () => string;
-  components: Record<keyof E, number>;
+  components: Record<Exclude<keyof E, "tags">, number>;
   materializeDelta: (delta: D, base?: Partial<E>) => E;
   mergeDelta: MergeDeltaFn<E, D>;
   accumulateDelta: AccumulateDeltaFn<D>;
@@ -37,23 +38,28 @@ export class ECS<
   State extends Record<string, unknown>,
   UpdateArguments extends Array<unknown>,
   Actions extends GenericAction,
-  E extends BaseEntity = BaseEntity,
+  Tags extends number = number,
+  E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 > {
-  protected readonly rootArchetype: Archetype = createArchetype("root", new TypedFastBitSet());
+  protected readonly rootArchetype: Archetype = createArchetype(
+    "root",
+    new TypedFastBitSet(),
+    new TypedFastBitSet(),
+  );
   readonly entityArchetype: Map<string, Archetype> = new Map();
   readonly deletedEntities = new Set<string>();
-  readonly systems: System<State, UpdateArguments, Actions, E, D>[] = [];
+  readonly systems: System<State, UpdateArguments, Actions, Tags, E, D>[] = [];
   readonly subscriptions: EventSystem[] = [];
-  readonly behaviors = new Map<number, Behavior<State, UpdateArguments, Actions, E, D>[]>();
+  readonly behaviors = new Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>();
   readonly entityBehaviorCache = new Map<
     string,
-    Map<number, Behavior<State, UpdateArguments, Actions, E, D>[]>
+    Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>
   >();
   // Cache behaviors at the archetype level to avoid redundant query evaluation
   private readonly archetypeBehaviorCache = new Map<
     Archetype,
-    Map<number, Behavior<State, UpdateArguments, Actions, E, D>[]>
+    Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>
   >();
   // Defer cache rebuilding until end of update cycle
   private readonly _deferredCacheRebuilds = new Set<string>();
@@ -66,6 +72,27 @@ export class ECS<
     return this._initialized;
   }
 
+  private _scopeOpenCallbacks = new Set<(scope: MutationScope<E, D>) => void>();
+  private _flushHandler: ((mutations: Map<string, MutationRecord<E, D>>) => void) | null = null;
+
+  /**
+   * Register a callback invoked when a mutation scope is opened (before the scope function runs).
+   * Returns an unsubscribe function.
+   */
+  onScopeOpen(cb: (scope: MutationScope<E, D>) => void): () => void {
+    this._scopeOpenCallbacks.add(cb);
+    return () => this._scopeOpenCallbacks.delete(cb);
+  }
+
+  /**
+   * Set a handler that replaces the default per-mutation flush loop.
+   * The handler receives all coalesced mutations from the scope and is responsible for
+   * applying them (to entities, Yjs, etc.). Pass `null` to restore default behavior.
+   */
+  setFlushHandler(handler: ((mutations: Map<string, MutationRecord<E, D>>) => void) | null): void {
+    this._flushHandler = handler;
+  }
+
   // Array pool for entity collections to reduce GC pressure
   readonly _arrayPool: string[][] = [];
 
@@ -75,7 +102,7 @@ export class ECS<
       pooled.length = size; // Reset array to required size
       return pooled;
     }
-    return new Array(size);
+    return Array.from<string>({ length: size });
   }
 
   private _returnPooledArray(array: string[]): void {
@@ -107,22 +134,26 @@ export class ECS<
 
   private _wrapMutator(baseMutate: EntityMutator<E, D>): EntityMutator<E, D> {
     return (id: string, mutation: MutationRecord<E, D>) => {
-      if (this.initialized && this.context.scope) {
-        const scope = this.context.scope;
+      if (this.initialized) {
+        // If there's a flush handler, we should always have a scope to flush.
+        const scope = this.context.scope || this._flushHandler ? this.createScope() : undefined;
 
-        switch (mutation.tag) {
-          case MutationType.Insert:
-            scope.insert(id, mutation.value.entity);
-            break;
-          case MutationType.Update:
-            scope.update(id, mutation.value.delta);
-            break;
-          case MutationType.Delete:
-            scope.delete(id, mutation.value.entity);
-            break;
+        if (scope) {
+          switch (mutation.tag) {
+            case MutationType.Insert:
+              scope.insert(id, mutation.value.entity);
+              break;
+            case MutationType.Update:
+              scope.update(id, mutation.value.delta);
+              break;
+            case MutationType.Delete:
+              scope.delete(id, mutation.value.entity);
+              break;
+          }
+
+          // Defer base mutator call until scope completes
+          return;
         }
-        // Defer base mutator call until scope completes
-        return;
       }
 
       // No scope active - call base mutator immediately
@@ -168,8 +199,14 @@ export class ECS<
     // assign generated id to entity
     if (!entity.id) entity.id = id;
     for (const component in entity) {
+      if (component === "tags") continue;
       if (entity[component as keyof E] === undefined) continue;
-      this.addComponent(id, component as keyof E, false);
+      this.addComponent(id, component as unknown as Exclude<keyof E, "tags">, false);
+    }
+    if (entity.tags) {
+      for (const tag of entity.tags) {
+        this.addTag(id, tag, false);
+      }
     }
     this._mutate(id, MutationRecord.fromInsert<E, D>({ entity }));
     this.executeEventSystems(id);
@@ -187,23 +224,29 @@ export class ECS<
     const base: Record<string, unknown> = {};
 
     for (const component in delta as object) {
+      if (component === "tags") continue;
       const deltaValue = (delta as Record<string, unknown>)[component];
       const entityValue = (entity as Record<string, unknown>)[component];
 
       // are we changing the component structure into another archetype?
       if (mutating && deltaValue === undefined) {
         base[component] = undefined;
-        this.removeComponent(id, component as keyof E, false);
+        this.removeComponent(id, component as Exclude<keyof E, "tags">, false);
         executing = true;
       } else {
         // TODO maybe _.clone() this to prevent accidental mutation of object components
         base[component] = entityValue;
         // If value was previously undefined, add component and execute systems
         if (entityValue === undefined) {
-          this.addComponent(id, component as keyof E, false);
+          this.addComponent(id, component as Exclude<keyof E, "tags">, false);
           executing = true;
         }
       }
+    }
+
+    const rawDelta = delta as Record<string, unknown>;
+    if (rawDelta.tags !== undefined) {
+      this._reconcileTags(id, rawDelta.tags);
     }
 
     this._mutate(id, MutationRecord.fromUpdate<E, D>({ delta }));
@@ -364,7 +407,7 @@ export class ECS<
       ...this.handleCreate,
       ...this.handleDelete,
       ...Array.from(this.behaviors.values()).flat(),
-    ] as System<State, UpdateArguments, Actions, E, D>[];
+    ] as System<State, UpdateArguments, Actions, Tags, E, D>[];
 
     for (let i = 0, l = systems.length; i < l; i++) {
       systems[i].query.tryAdd(archetype);
@@ -404,13 +447,63 @@ export class ECS<
     return current;
   }
 
+  private _transformEntityForTag(current: Archetype, entity: string, tagId: number): Archetype {
+    current.entities.delete(entity);
+
+    const tagAdjacent = current.tagAdjacent.get(tagId);
+    if (tagAdjacent !== undefined) {
+      current = tagAdjacent;
+    } else {
+      current = transformArchetypeTag(current, tagId);
+      if (this.initialized) {
+        this._tryAddArchetypeToQueries(current);
+      }
+    }
+
+    current.entities.add(entity);
+    this.entityArchetype.set(entity, current);
+    return current;
+  }
+
+  private _reconcileTags(id: string, tagsDelta: unknown): void {
+    const archetype = this.entityArchetype.get(id);
+    if (!archetype) return;
+    const currentTags = archetype.tagMask.array();
+    let targetTags: number[];
+
+    if (typeof tagsDelta === "object" && tagsDelta !== null && !Array.isArray(tagsDelta)) {
+      const d = tagsDelta as { set?: number[]; add?: number[]; remove?: number[] };
+      if (d.set !== undefined) {
+        targetTags = d.set;
+      } else {
+        targetTags = [...currentTags];
+        if (d.add)
+          for (const t of d.add) {
+            if (!targetTags.includes(t)) targetTags.push(t);
+          }
+        if (d.remove) targetTags = currentTags.filter((t) => !d.remove!.includes(t));
+      }
+    } else if (Array.isArray(tagsDelta)) {
+      targetTags = tagsDelta;
+    } else {
+      return;
+    }
+
+    for (const tag of currentTags) {
+      if (!targetTags.includes(tag)) this.removeTag(id, tag as Tags, false);
+    }
+    for (const tag of targetTags) {
+      if (!currentTags.includes(tag)) this.addTag(id, tag as Tags, false);
+    }
+  }
+
   /**
    * Provide a known combination of `componentIds` constituting an archetype.
    * The component ids can be of your choosing, but be carefull not to use the same id for different components.
    * You should either create all `componentIds` using `createComponentId` first and use the created component ids in the prefacbricate,
    * Or make all of you prefabricates before creating new component ids using `createComponentId`
    */
-  prefabricate(components: number[]): Archetype {
+  prefabricate(components: number[], tags: number[] = []): Archetype {
     let archetype = this.rootArchetype;
 
     for (let i = 0, l = components.length; i < l; i++) {
@@ -426,6 +519,21 @@ export class ECS<
         }
       }
     }
+
+    for (let i = 0, l = tags.length; i < l; i++) {
+      const tagId = tags[i];
+
+      const tagAdjacent = archetype.tagAdjacent.get(tagId);
+      if (tagAdjacent !== undefined) {
+        archetype = tagAdjacent;
+      } else {
+        archetype = transformArchetypeTag(archetype, tagId);
+        if (this.initialized) {
+          this._tryAddArchetypeToQueries(archetype);
+        }
+      }
+    }
+
     return archetype;
   }
 
@@ -434,7 +542,7 @@ export class ECS<
    * Use the `createEntitySystem` or `createArchetypeSystem` helpers to create the system.
    * A system may not be executed if it's `Query` does not match any `Archetype`s.
    */
-  registerSystem(system: System<State, UpdateArguments, Actions, E, D>) {
+  registerSystem(system: System<State, UpdateArguments, Actions, Tags, E, D>) {
     this.systems.push(system);
 
     if (this.initialized) {
@@ -452,7 +560,7 @@ export class ECS<
   }
 
   // Register a behavior (system) for a specific event type
-  registerBehavior(behavior: Behavior<State, UpdateArguments, Actions, E, D>): void {
+  registerBehavior(behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>): void {
     if (!this.behaviors.has(behavior.tag)) {
       this.behaviors.set(behavior.tag, []);
     }
@@ -490,11 +598,11 @@ export class ECS<
 
     if (!cache) {
       // Compute once per archetype, not once per entity
-      cache = new Map<number, Behavior<State, UpdateArguments, Actions, E, D>[]>();
+      cache = new Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>();
 
       // For each event type
       for (const [eventType, behaviors] of this.behaviors) {
-        const applicable: Behavior<State, UpdateArguments, Actions, E, D>[] = [];
+        const applicable: Behavior<State, UpdateArguments, Actions, Tags, E, D>[] = [];
 
         // Check each behavior
         for (const behavior of behaviors) {
@@ -598,6 +706,10 @@ export class ECS<
     return false;
   }
 
+  public actToSubtree<Ac extends Actions>(entityId: string, payload: Ac): Promise<boolean> {
+    return this.act(entityId, payload);
+  }
+
   // Act on entity and propagate up the hierarchy
   async actWithBubbling<Ac extends Actions>(entityId: string, action: Ac): Promise<void> {
     let currentId: string | undefined = entityId;
@@ -663,14 +775,23 @@ export class ECS<
 
     try {
       this.context.scope = scope;
+      // Invoke scope-open callbacks (e.g., drain remote changes into scope)
+      for (const cb of this._scopeOpenCallbacks) {
+        cb(scope);
+      }
       const result = await fn();
       return { result, mutations: scope.mutations };
     } finally {
       this.context.scope = previousScope!;
 
-      // Flush coalesced mutations using base mutator (bypasses wrapper)
-      for (const [id, mutation] of scope.mutations) {
-        this._baseMutate(id, mutation);
+      if (this._flushHandler) {
+        // Custom flush handler (e.g., batch all mutations in a single transaction)
+        this._flushHandler(scope.mutations);
+      } else {
+        // Default: flush coalesced mutations using base mutator (bypasses wrapper)
+        for (const [id, mutation] of scope.mutations) {
+          this._baseMutate(id, mutation);
+        }
       }
     }
   }
@@ -774,7 +895,7 @@ export class ECS<
   /**
    * Check if the entity has a componentId
    */
-  hasComponent(entity: string, _component: keyof E): boolean {
+  hasComponent(entity: string, _component: Exclude<keyof E, "tags">): boolean {
     const component = this.options.components[_component];
     const entityArchetype = this.entityArchetype.get(entity);
 
@@ -788,7 +909,7 @@ export class ECS<
    * The entity will be moved to a different archetype
    * @throws {EntityUndefinedError | EntityDeletedError | EntityNotExistError}
    */
-  addComponent(entity: string, _component: keyof E, executeSystems = true) {
+  addComponent(entity: string, _component: Exclude<keyof E, "tags">, executeSystems = true) {
     const archetype = this.entityArchetype.get(entity);
     const component = this.options.components[_component];
     // if there's a difference between client entities and server entities
@@ -807,7 +928,7 @@ export class ECS<
    * The entity will be moved to a different archetype
    * @throws {EntityUndefinedError | EntityDeletedError | EntityNotExistError}
    */
-  removeComponent(entity: string, _component: keyof E, executeSystems = true) {
+  removeComponent(entity: string, _component: Exclude<keyof E, "tags">, executeSystems = true) {
     const archetype = this.entityArchetype.get(entity);
     const component = this.options.components[_component];
 
@@ -819,6 +940,52 @@ export class ECS<
       this._deferredCacheRebuilds.add(entity);
       if (executeSystems) this._executeEventSystems(next);
     }
+  }
+
+  /**
+   * Check if the entity has a tag
+   */
+  hasTag(entity: string, tag: Tags): boolean {
+    const entityArchetype = this.entityArchetype.get(entity);
+    if (!entityArchetype) return false;
+    return entityArchetype.tagMask.has(tag as number);
+  }
+
+  /**
+   * All tags currently assigned to the entity
+   */
+  getTags(entity: string): Tags[] {
+    const entityArchetype = this.entityArchetype.get(entity);
+    if (!entityArchetype) return [];
+    return entityArchetype.tagIds() as Tags[];
+  }
+
+  /**
+   * Adds a tag to the entity.
+   * The entity will be moved to a different archetype in the tag graph
+   */
+  addTag(entity: string, tag: Tags, executeSystems = true) {
+    const archetype = this.entityArchetype.get(entity);
+    if (!archetype) return;
+    if (archetype.tagMask.has(tag as number)) return;
+
+    const next = this._transformEntityForTag(archetype, entity, tag as number);
+    this._deferredCacheRebuilds.add(entity);
+    if (executeSystems) this._executeEventSystems(next);
+  }
+
+  /**
+   * Removes a tag from the entity.
+   * The entity will be moved to a different archetype in the tag graph
+   */
+  removeTag(entity: string, tag: Tags, executeSystems = true) {
+    const archetype = this.entityArchetype.get(entity);
+    if (!archetype) return;
+    if (!archetype.tagMask.has(tag as number)) return;
+
+    const next = this._transformEntityForTag(archetype, entity, tag as number);
+    this._deferredCacheRebuilds.add(entity);
+    if (executeSystems) this._executeEventSystems(next);
   }
 
   executeEventSystems(id: string) {

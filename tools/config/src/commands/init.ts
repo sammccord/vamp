@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { entityTemplate } from "../templates/entity.bop";
 import { actionsTemplate } from "../templates/actions.bop";
 import { stateTemplate } from "../templates/state.bop";
+import { tagsTemplate } from "../templates/tags.bop";
 
 export const initCommand = defineCommand({
   meta: {
@@ -30,6 +31,7 @@ export const initCommand = defineCommand({
       { path: "schema/entity.bop", content: entityTemplate },
       { path: "schema/actions.bop", content: actionsTemplate },
       { path: "schema/state.bop", content: stateTemplate },
+      { path: "schema/tags.bop", content: tagsTemplate },
     ];
 
     for (const file of files) {
@@ -65,8 +67,9 @@ export const initCommand = defineCommand({
           entity: "schema/entity.bop",
           actions: "schema/actions.bop",
           state: "schema/state.bop",
+          tags: "schema/tags.bop",
         },
-        outFile: "./src/ecs.generated.ts",
+        outFile: "./src/game.generated.ts",
       };
       writeFileSync(vampConfigPath, JSON.stringify(vampConfig, null, 2) + "\n", "utf-8");
       console.log("Created vamp.json");

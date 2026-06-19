@@ -45,10 +45,6 @@ export default class Uniform extends Dungeon {
 
     this._connected = []; /* list of already connected rooms */
     this._unconnected = []; /* list of remaining unconnected rooms */
-
-    this._digCallback = this._digCallback.bind(this);
-    this._canBeDugCallback = this._canBeDugCallback.bind(this);
-    this._isWallCallback = this._isWallCallback.bind(this);
   }
 
   /**
@@ -57,7 +53,7 @@ export default class Uniform extends Dungeon {
    */
   create(callback?: CreateCallback) {
     let t1 = Date.now();
-    while (1) {
+    while (true) {
       let t2 = Date.now();
       if (t2 - t1 > this._options.timeLimit) {
         return null;
@@ -151,7 +147,7 @@ export default class Uniform extends Dungeon {
         this._connected.push(this._unconnected.pop() as Room);
       } /* first one is always connected */
 
-      while (1) {
+      while (true) {
         /* 1. pick random connected room */
         let connected = RNG.getItem(this._connected);
         if (!connected) {
@@ -397,24 +393,24 @@ export default class Uniform extends Dungeon {
     }
   }
 
-  _digCallback(x: number, y: number, value: number) {
+  _digCallback = (x: number, y: number, value: number) => {
     this._map[x][y] = value;
     if (value == 0) {
       this._dug++;
     }
-  }
+  };
 
-  _isWallCallback(x: number, y: number) {
+  _isWallCallback = (x: number, y: number) => {
     if (x < 0 || y < 0 || x >= this._width || y >= this._height) {
       return false;
     }
     return this._map[x][y] == 1;
-  }
+  };
 
-  _canBeDugCallback(x: number, y: number) {
+  _canBeDugCallback = (x: number, y: number) => {
     if (x < 1 || y < 1 || x + 1 >= this._width || y + 1 >= this._height) {
       return false;
     }
     return this._map[x][y] == 1;
-  }
+  };
 }

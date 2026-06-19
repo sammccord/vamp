@@ -1,0 +1,6 @@
+enum Tags
+{
+    Human = 1;
+    PlayerControlled = 2;
+    Hostile = 3;
+}

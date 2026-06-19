@@ -1,7 +1,7 @@
 //@ts-nocheck
 import { DIRS } from "../constants";
 import RNG from "../rng";
-import Map, { CreateCallback } from "./map";
+import Map, { type CreateCallback } from "./map";
 
 interface Options {
   born: number[];
@@ -102,7 +102,7 @@ export default class Cellular extends Map {
     }
 
     this._map = newMap;
-    callback && this._serviceCallback(callback);
+    if (callback) this._serviceCallback(callback);
   }
 
   _serviceCallback(callback: CreateCallback) {
@@ -194,7 +194,7 @@ export default class Cellular extends Map {
       // connect to a connected cell
       let tunnelFn =
         this._options.topology == 6 ? this._tunnelToConnected6 : this._tunnelToConnected;
-      tunnelFn.call(this, to, from, connected, notConnected, value, connectionCallback);
+      tunnelFn(to, from, connected, notConnected, value, connectionCallback);
 
       // now all of local is connected
       for (let k in local) {
@@ -205,7 +205,7 @@ export default class Cellular extends Map {
       }
     }
 
-    callback && this._serviceCallback(callback);
+    if (callback) this._serviceCallback(callback);
   }
 
   /**
@@ -293,14 +293,14 @@ export default class Cellular extends Map {
     }
   }
 
-  _tunnelToConnected(
+  _tunnelToConnected = (
     to: Point,
     from: Point,
     connected: PointMap,
     notConnected: PointMap,
     value: number,
     connectionCallback?: ConnectionCallback,
-  ) {
+  ) => {
     let a, b;
     if (from[0] < to[0]) {
       a = from;
@@ -340,16 +340,16 @@ export default class Cellular extends Map {
     if (connectionCallback && a[1] < b[1]) {
       connectionCallback([b[0], a[1]], [b[0], b[1]]);
     }
-  }
+  };
 
-  _tunnelToConnected6(
+  _tunnelToConnected6 = (
     to: Point,
     from: Point,
     connected: PointMap,
     notConnected: PointMap,
     value: number,
     connectionCallback?: ConnectionCallback,
-  ) {
+  ) => {
     let a, b;
     if (from[0] < to[0]) {
       a = from;
@@ -392,7 +392,7 @@ export default class Cellular extends Map {
     if (connectionCallback) {
       connectionCallback(from, to);
     }
-  }
+  };
 
   _freeSpace(x: number, y: number, value: number) {
     return x >= 0 && x < this._width && y >= 0 && y < this._height && this._map[x][y] == value;

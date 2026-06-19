@@ -1,6 +1,6 @@
 //@ts-nocheck
 
-import Path, { ComputeCallback, PassableCallback, Options } from "./path";
+import Path, { type ComputeCallback, type PassableCallback, type Options } from "./path";
 
 interface Item {
   x: number;

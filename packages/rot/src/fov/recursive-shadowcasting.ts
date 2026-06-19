@@ -1,6 +1,6 @@
 //@ts-nocheck
 
-import FOV, { VisibilityCallback } from "./fov";
+import FOV, { type VisibilityCallback } from "./fov";
 
 /** Octants used for translating recursive shadowcasting offsets */
 const OCTANTS = [

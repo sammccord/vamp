@@ -23,6 +23,7 @@ declare module "cloudflare:workers" {
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
   }
+  export type Env = Record<string, unknown>;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -36,6 +37,7 @@ interface DurableObjectState {
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   acceptWebSocket(ws: WebSocket, tags?: string[]): void;
   getWebSockets(tag?: string): WebSocket[];
+  setWebSocketAutoResponse(maybeReqResp?: WebSocketRequestResponsePair): void;
   getTags(ws: WebSocket): string[];
   abort(reason?: string): void;
 }
@@ -113,6 +115,42 @@ interface SqlStorageCursor<T extends Record<string, SqlStorageValue>> {
   readonly rowsRead: number;
   readonly rowsWritten: number;
   [Symbol.iterator](): IterableIterator<T>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// WebSocket types (Durable Object hibernation API)
+// ═══════════════════════════════════════════════════════════
+
+interface WebSocket {
+  accept(): void;
+  send(message: string | ArrayBuffer): void;
+  close(code?: number, reason?: string): void;
+  serializeAttachment(attachment: unknown): void;
+  deserializeAttachment(): unknown;
+  readonly readyState: number;
+  readonly url: string | null;
+}
+
+declare class WebSocketRequestResponsePair {
+  constructor(request: string, response: string);
+  readonly request: string;
+  readonly response: string;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Durable Object binding types
+// ═══════════════════════════════════════════════════════════
+
+interface CloudflareBindings {
+  GAME_STORAGE: DurableObjectNamespace;
+}
+
+declare class DurableObjectNamespace<T = unknown> {
+  newUniqueId(): DurableObjectId;
+  idFromName(name: string): DurableObjectId;
+  idFromString(id: string): DurableObjectId;
+  get(id: DurableObjectId, options?: unknown): T;
+  jurisdiction(jurisdiction: string): DurableObjectNamespace<T>;
 }
 
 // ═══════════════════════════════════════════════════════════

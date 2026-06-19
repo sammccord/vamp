@@ -1,5 +1,3 @@
-declare var self: Worker;
-
 import {
   BaseChannel,
   type CallCredential,
@@ -76,6 +74,7 @@ export class TempoWorkerChannel extends BaseChannel {
     });
 
     const worker = (this._worker = new Worker(url) as Bun.Worker);
+    //@ts-expect-error
     worker.addEventListener("message", (ev: MessageEvent<Uint8Array>) => {
       if (!this._open) {
         this._resolveReady?.();
@@ -84,7 +83,7 @@ export class TempoWorkerChannel extends BaseChannel {
       if (!ev.data.length) return;
       let message = Message.decode(ev.data);
       if (!message.methodId) return;
-      const messageId = message.messageId;
+      const messageId = message.messageId!;
       this.logger.trace(`received new message ${messageId}`);
       this.events.emit(messageId, message);
     });
@@ -101,7 +100,7 @@ export class TempoWorkerChannel extends BaseChannel {
     void 0;
   }
   public override async getCredential(): Promise<Credential | undefined> {
-    return await undefined;
+    return undefined;
   }
 
   /**
@@ -215,7 +214,7 @@ export class TempoWorkerChannel extends BaseChannel {
     options?: CallOptions,
   ): Promise<Message> {
     const messageId = init.messageId!;
-    return await new Promise(async (resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       const listener = (message: Message) => {
         resolve(message);
         this.events.off(messageId, listener);
@@ -227,17 +226,20 @@ export class TempoWorkerChannel extends BaseChannel {
         });
       }
       this.events.on(messageId, listener);
-      for await (const value of generator()) {
-        init.data = new Uint8Array(value.encode());
+      runGenerator.call(this).catch(() => {});
+      async function runGenerator(this: TempoWorkerChannel) {
+        for await (const value of generator()) {
+          init.data = new Uint8Array(value.encode());
+          const encoded = Message.encode(init);
+          //@ts-expect-error
+          this.worker.postMessage(encoded, [encoded.buffer]);
+        }
+        init.status = TempoStatusCode.CANCELLED;
+        init.data = new Uint8Array();
         const encoded = Message.encode(init);
         //@ts-expect-error
         this.worker.postMessage(encoded, [encoded.buffer]);
       }
-      init.status = TempoStatusCode.CANCELLED;
-      init.data = new Uint8Array();
-      const encoded = Message.encode(init);
-      //@ts-expect-error
-      this.worker.postMessage(encoded, [encoded.buffer]);
     });
   }
 
@@ -271,6 +273,7 @@ export class TempoWorkerChannel extends BaseChannel {
       }
       this.events.on(messageId, eventHandler);
       const encoded = Message.encode(init);
+      //@ts-expect-error
       this.worker.postMessage(encoded, [encoded.buffer]);
       return () => {
         this.events.off(messageId, eventHandler);
@@ -283,6 +286,7 @@ export class TempoWorkerChannel extends BaseChannel {
           timestamp: new Date(),
         };
         const cancelEncoded = Message.encode(cancelMessage);
+        //@ts-expect-error
         this.worker.postMessage(cancelEncoded, [cancelEncoded.buffer]);
       };
     });
@@ -309,7 +313,7 @@ export class TempoWorkerChannel extends BaseChannel {
             cancel();
             return;
           }
-          await this.processResponseHeaders(message, context, method.type);
+          this.processResponseHeaders(message, context, method.type);
           const requestData = message.data!;
           const record = method.deserialize(requestData);
           if (this.hooks !== undefined) {
@@ -363,7 +367,6 @@ export class TempoWorkerChannel extends BaseChannel {
     const requestInit: Message = {
       messageId: Bun.randomUUIDv7(),
       methodId: method.id,
-      headers: customMetadata.toHttpHeader(),
       data: new Uint8Array(payload),
       timestamp: new Date(),
     };
@@ -386,7 +389,7 @@ export class TempoWorkerChannel extends BaseChannel {
    */
   private processResponseHeaders(
     response: Message,
-    context: ClientContext,
+    _context: ClientContext,
     _methodType: MethodType,
   ) {
     // Validate response headers
@@ -401,12 +404,6 @@ export class TempoWorkerChannel extends BaseChannel {
         tempoMessage = "unknown error";
       }
       throw new TempoError(statusCode, tempoMessage);
-    }
-
-    // Set incoming metadata from response headers
-    const customHeader = response.headers;
-    if (customHeader) {
-      context.incomingMetadata = Metadata.fromHttpHeader(customHeader);
     }
   }
 
@@ -425,16 +422,14 @@ export class TempoWorkerChannel extends BaseChannel {
       if (this.hooks !== undefined) {
         await this.hooks.executeRequestHooks(context);
       }
-      const requestInit = await this.createRequest(requestData, context, method, options);
+      const requestInit = this.createRequest(requestData, context, method, options);
       let response: Message;
       // If the retry policy is set, execute the request with retries
       if (options?.retryPolicy) {
         response = await this.executeWithRetry(
           async (retryAttempt: number) => {
             if (retryAttempt > 0) {
-              const extendedMetadata = Metadata.fromHttpHeader(requestInit.headers || "");
-              extendedMetadata.set("tempo-previous-rpc-attempts", String(retryAttempt));
-              requestInit.headers = extendedMetadata.toHttpHeader();
+              requestInit.previousAttempts = retryAttempt;
             }
             return await this.fetchUnary(requestInit);
           },
@@ -452,7 +447,7 @@ export class TempoWorkerChannel extends BaseChannel {
         response = await this.fetchUnary(requestInit, options);
       }
       // Validate response headers
-      await this.processResponseHeaders(response, context, method.type);
+      this.processResponseHeaders(response, context, method.type);
       if (this.hooks !== undefined) {
         await this.hooks.executeResponseHooks(context);
       }
@@ -466,7 +461,7 @@ export class TempoWorkerChannel extends BaseChannel {
       return record;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        await this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;
@@ -498,7 +493,7 @@ export class TempoWorkerChannel extends BaseChannel {
       if (this.hooks !== undefined) {
         await this.hooks.executeRequestHooks(context);
       }
-      const requestInit = await this.createRequest(new Uint8Array(), context, method, options);
+      const requestInit = this.createRequest(new Uint8Array(), context, method, options);
       let response: Message;
       if (options?.deadline) {
         response = await options.deadline.executeWithinDeadline(async () => {
@@ -509,7 +504,7 @@ export class TempoWorkerChannel extends BaseChannel {
         response = await this.fetchClientStream(requestInit, method, generator, options);
       }
       // Validate response headers
-      await this.processResponseHeaders(response, context, method.type);
+      this.processResponseHeaders(response, context, method.type);
       // Deserialize the response based on the content type
       const responseData = response.data!;
       const record: TResponse = this.deserializeResponse(responseData, method);
@@ -520,7 +515,7 @@ export class TempoWorkerChannel extends BaseChannel {
       return record;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        await this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;
@@ -554,19 +549,17 @@ export class TempoWorkerChannel extends BaseChannel {
       if (this.hooks !== undefined) {
         await this.hooks.executeRequestHooks(context);
       }
-      const requestInit = await this.createRequest(requestData, context, method, options);
+      const requestInit = this.createRequest(requestData, context, method, options);
       let response: AsyncGenerator<BebopRecord, void, undefined>;
       // If the retry policy is set, execute the request with retries
       if (options?.retryPolicy) {
         response = await this.executeWithRetry(
           async (retryAttempt: number) => {
             if (retryAttempt > 0) {
-              const extendedMetadata = Metadata.fromHttpHeader(requestInit.headers || "");
-              extendedMetadata.set("tempo-previous-rpc-attempts", String(retryAttempt));
-              requestInit.headers = extendedMetadata.toHttpHeader();
+              requestInit.previousAttempts = retryAttempt;
             }
             // todo this.fetchStreams returns readablestream
-            return await this.fetchServerStream(requestInit, context, method, options);
+            return this.fetchServerStream(requestInit, context, method, options);
           },
           options.retryPolicy,
           options.deadline,
@@ -575,7 +568,7 @@ export class TempoWorkerChannel extends BaseChannel {
         // If the deadline is set, execute the request within the deadline
       } else if (options?.deadline) {
         response = await options.deadline.executeWithinDeadline(async () => {
-          return await this.fetchServerStream(requestInit, context, method, options);
+          return this.fetchServerStream(requestInit, context, method, options);
         }, options.controller);
       } else {
         // Otherwise, just execute the request indefinitely
@@ -584,7 +577,7 @@ export class TempoWorkerChannel extends BaseChannel {
       return response as AsyncGenerator<TResponse, void, undefined>;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        await this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;
@@ -615,11 +608,11 @@ export class TempoWorkerChannel extends BaseChannel {
       if (this.hooks !== undefined) {
         await this.hooks.executeRequestHooks(context);
       }
-      const requestInit = await this.createRequest(new Uint8Array(), context, method, options);
+      const requestInit = this.createRequest(new Uint8Array(), context, method, options);
       let response: AsyncGenerator<BebopRecord, void, undefined>;
       if (options?.deadline) {
         response = await options.deadline.executeWithinDeadline(async () => {
-          return await this.fetchDuplexStream(requestInit, context, method, generator, options);
+          return this.fetchDuplexStream(requestInit, context, method, generator, options);
         }, options.controller);
       } else {
         // Otherwise, just execute the request indefinitely
@@ -629,7 +622,7 @@ export class TempoWorkerChannel extends BaseChannel {
       return response as AsyncGenerator<TResponse, void, undefined>;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        await this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;

@@ -14,4 +14,4 @@ const main = defineCommand({
   },
 });
 
-runMain(main);
+runMain(main).catch(console.error);

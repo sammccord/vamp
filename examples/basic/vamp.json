@@ -2,7 +2,8 @@
   "schemas": {
     "entity": "schema/entity.bop",
     "actions": "schema/actions.bop",
-    "state": "schema/state.bop"
+    "state": "schema/state.bop",
+    "tags": "schema/tags.bop"
   },
-  "outFile": "./src/ecs.generated.ts"
+  "outFile": "./src/game.generated.ts"
 }

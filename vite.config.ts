@@ -1,6 +1,9 @@
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
+  create: {
+    defaultTemplate: "@vamp",
+  },
   staged: {
     "*": "vp check --fix",
   },

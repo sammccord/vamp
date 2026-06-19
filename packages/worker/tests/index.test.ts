@@ -1,1 +1,5 @@
-import { expect, test } from "vitest";
+import { describe, it } from "vitest";
+
+describe("worker", () => {
+  it("placeholder", () => {});
+});

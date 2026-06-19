@@ -4,11 +4,12 @@
  * Fields are optional to remain compatible with message/schema-generated types
  * where all fields are optional by convention.
  */
-export type BaseEntity = {
+export type BaseEntity<Tags extends number = number> = {
   id?: string;
   root?: string;
   parent?: string;
   children?: Array<string>;
+  tags?: Tags[];
 };
 
 export enum MutationType {

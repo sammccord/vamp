@@ -22,26 +22,29 @@ function needsPoolHelper(entity: SchemaDefinition, schema: ParsedSchema): boolea
 
 function emitPoolHelper(entity: SchemaDefinition, schema: ParsedSchema): string {
   if (!needsPoolHelper(entity, schema)) return "";
-  return `function applyPoolDelta<T extends Record<string, number>>(base: T, delta: Record<string, number>): T {
+  return `function applyPoolDelta<T>(base: T, delta: Record<string, number>): T {
   const result = { ...base } as Record<string, number>;
   for (const key in delta) {
     if (delta[key] !== undefined) {
       result[key] = (result[key] ?? 0) + delta[key];
     }
   }
-  return result as T;
+  return result as unknown as T;
 }`;
 }
 
 function emitMaterializeDelta(entity: SchemaDefinition, schema: ParsedSchema): string {
   const assignments = entity.fields.map((f) => {
+    if (f.name === "tags") {
+      return `    tags: delta.tags ?? base?.tags ?? []`;
+    }
     if (f.isArray) {
       return `    ${f.name}: delta.${f.name}?.set ?? base?.${f.name} ?? []`;
     }
     if (!isScalar(f.typeName) && hasDeltaDef(f, schema)) {
       const baseMsg = schema.definitions.get(f.typeName);
       const defaultFields = baseMsg ? baseMsg.fields.map((bf) => `${bf.name}: 0`).join(", ") : "";
-      return `    ${f.name}: delta.${f.name} ? applyPoolDelta(base?.${f.name} ?? { ${defaultFields} }, delta.${f.name}) : base?.${f.name} ?? { ${defaultFields} }`;
+      return `    ${f.name}: delta.${f.name} ? applyPoolDelta(base?.${f.name} ?? { ${defaultFields} }, delta.${f.name} as Record<string, number>) : base?.${f.name} ?? { ${defaultFields} }`;
     }
     if (isScalar(f.typeName)) {
       const defaultVal = f.typeName === "string" || f.typeName === "guid" ? "''" : "0";
@@ -59,6 +62,9 @@ ${assignments.join(",\n")},
 
 function emitMergeDelta(entity: SchemaDefinition, schema: ParsedSchema): string {
   const cases = entity.fields.map((f) => {
+    if (f.name === "tags") {
+      return `  if (delta.tags !== undefined) entity.tags = delta.tags;`;
+    }
     if (f.isArray) {
       return `  if (delta.${f.name}) {
     if (delta.${f.name}.set) {
@@ -99,6 +105,9 @@ ${cases.join("\n")}
 
 function emitAccumulateDelta(entity: SchemaDefinition, schema: ParsedSchema): string {
   const cases = entity.fields.map((f) => {
+    if (f.name === "tags") {
+      return `  if (from.tags !== undefined) to.tags = from.tags;`;
+    }
     if (f.isArray) {
       return `  if (from.${f.name}) {
     if (from.${f.name}.set) {

@@ -231,9 +231,6 @@ export class TempoExtensionRouter<
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     Promise<any>
   > = new Map();
-  private readonly topicStreams: Map<string, AsyncGenerator<BebopRecord, void, unknown>> =
-    new Map();
-
   constructor(
     logger: TempoLogger,
     registry: ServiceRegistry,
@@ -327,7 +324,7 @@ export class TempoExtensionRouter<
     }
     const requestData = request.data!;
     const record = this.deserializeRequest(requestData, method, "bebop");
-    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke)) {
+    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))) {
       throw new TempoError(
         TempoStatusCode.INTERNAL,
         "service method incorrect: method must be async generator",
@@ -358,7 +355,7 @@ export class TempoExtensionRouter<
       return invocation;
     }
 
-    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke)) {
+    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))) {
       throw new TempoError(
         TempoStatusCode.INTERNAL,
         "service method incorrect: method must be async generator",
@@ -407,7 +404,8 @@ export class TempoExtensionRouter<
           `no service is registered which contains a method of '${methodId}'`,
         );
       }
-      const metadataHeader = request.headers;
+      //@ts-expect-error
+      const metadataHeader = request.customMetadata;
       const metadata = metadataHeader ? Metadata.fromHttpHeader(metadataHeader) : new Metadata();
 
       const previousAttempts = metadata.get("tempo-previous-rpc-attempts");
@@ -516,9 +514,11 @@ export class TempoExtensionRouter<
           // if (response.topic) env.publish(response.topic, encoded, true);
         }
       };
-      deadline !== undefined
-        ? await deadline.executeWithinDeadline(handleRequest)
-        : await handleRequest();
+      if (deadline !== undefined) {
+        await deadline.executeWithinDeadline(handleRequest);
+      } else {
+        await handleRequest();
+      }
     } catch (e) {
       let status = TempoStatusCode.UNKNOWN;
       let message = "unknown error";
@@ -531,9 +531,11 @@ export class TempoExtensionRouter<
         }
         // internal errors indicate transient problems or implementation bugs
         // so we log them as critical errors
-        e.status === TempoStatusCode.INTERNAL
-          ? this.logger.critical(e.message, undefined, e)
-          : this.logger.error(message, undefined, e);
+        if (e.status === TempoStatusCode.INTERNAL) {
+          this.logger.critical(e.message, undefined, e);
+        } else {
+          this.logger.error(message, undefined, e);
+        }
       } else if (e instanceof Error) {
         message = e.message;
         this.logger.error(message, undefined, e);
@@ -546,7 +548,7 @@ export class TempoExtensionRouter<
       response.status = status;
       response.msg = message;
       response.messageId = request.messageId!;
-      response.timestamp = response.timestamp!;
+      response.timestamp = request.timestamp!;
       response.methodId = request.methodId!;
       await this.send(ctx.sender, response);
     }
@@ -568,6 +570,6 @@ export class TempoExtensionRouter<
   }
 
   override async handle(_req: Message, _ctx: Ctx): Promise<Message> {
-    return await Message({});
+    return Message({});
   }
 }

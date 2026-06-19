@@ -2,7 +2,7 @@
 
 import { DIRS } from "../constants";
 import RNG from "../rng";
-import Map, { CreateCallback } from "./map";
+import Map, { type CreateCallback } from "./map";
 
 type Point = [number, number];
 

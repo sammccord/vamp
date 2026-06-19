@@ -1,7 +1,7 @@
 //@ts-nocheck
 
 import RNG from "../rng";
-import Map, { CreateCallback } from "./map";
+import Map, { type CreateCallback } from "./map";
 
 /**
  * Icey's Maze generator

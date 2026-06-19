@@ -4,11 +4,10 @@
  * This test suite covers all public API methods and provides a safety net for refactoring.
  */
 import { beforeEach, describe, expect, test } from "vite-plus/test";
-import { ECS, type ECSOptions } from "../src/ECS.ts";
-import { MutationType, type MutationRecord } from "../src/types.ts";
-import type { BaseEntity } from "../src/types.ts";
-import type { GenericAction } from "../src/Actions.ts";
+import { ECS, type ECSOptions } from "../src/index.ts";
+import { MutationType, type MutationRecord } from "../src/index.ts";
 import { query } from "../src/Query.ts";
+import type { QueryBuilder } from "../src/Query.ts";
 import {
   createArchetypeSystem,
   createBehavior,
@@ -18,7 +17,12 @@ import {
 } from "../src/System.ts";
 
 // Simple test entity type with flat primitive fields
-type Entity = BaseEntity & {
+type Entity = {
+  id?: string;
+  root?: string;
+  parent?: string;
+  children?: string[];
+  tags?: number[];
   health?: number;
   level?: number;
   name?: string;
@@ -46,7 +50,7 @@ const components = {
   replicated: 10,
   deleted: 11,
   userId: 12,
-} as const satisfies Record<keyof Required<Entity>, number>;
+} as const satisfies Record<keyof Omit<Required<Entity>, "tags">, number>;
 
 // Handle bebop-style array delta { set?, add?, remove? }
 function applyArrayDelta(current: string[] | undefined, delta: any): string[] {
@@ -59,10 +63,9 @@ function applyArrayDelta(current: string[] | undefined, delta: any): string[] {
 
 // materializeDelta: copy all defined fields from delta onto base
 function materializeDelta(delta: EntityDelta, base: Partial<Entity> = {}): Entity {
-  const result = { ...base } as Entity;
+  const result = { ...base } as Record<string, unknown>;
   for (const key in delta) {
-    const k = key as keyof EntityDelta;
-    const dv = (delta as Record<string, unknown>)[k];
+    const dv = (delta as Record<string, unknown>)[key];
     if (dv === undefined) continue;
     if (
       dv !== null &&
@@ -70,26 +73,23 @@ function materializeDelta(delta: EntityDelta, base: Partial<Entity> = {}): Entit
       !Array.isArray(dv) &&
       ("set" in (dv as object) || "add" in (dv as object) || "remove" in (dv as object))
     ) {
-      (result as Record<string, unknown>)[k] = applyArrayDelta(
-        (result as Record<string, unknown>)[k] as string[] | undefined,
-        dv,
-      );
+      result[key] = applyArrayDelta(result[key] as string[] | undefined, dv);
     } else {
-      (result as Record<string, unknown>)[k] = dv;
+      result[key] = dv;
     }
   }
-  return result;
+  return result as Entity;
 }
 
 // mergeDelta: add numeric deltas, overwrite strings/booleans, merge arrays
 function mergeDelta(entity: Entity, delta: EntityDelta): void {
+  const e = entity as Record<string, unknown>;
   for (const key in delta) {
-    const k = key as keyof EntityDelta;
-    const dv = (delta as Record<string, unknown>)[k];
+    const dv = (delta as Record<string, unknown>)[key];
     if (dv === undefined) continue;
-    const ev = (entity as Record<string, unknown>)[k];
+    const ev = e[key];
     if (typeof dv === "number" && typeof ev === "number") {
-      (entity as Record<string, unknown>)[k] = (ev as number) + dv;
+      e[key] = (ev as number) + dv;
     } else if (
       dv !== null &&
       typeof dv === "object" &&
@@ -97,9 +97,9 @@ function mergeDelta(entity: Entity, delta: EntityDelta): void {
       ("set" in (dv as object) || "add" in (dv as object) || "remove" in (dv as object))
     ) {
       // bebop array delta
-      (entity as Record<string, unknown>)[k] = applyArrayDelta(ev as string[] | undefined, dv);
+      e[key] = applyArrayDelta(ev as string[] | undefined, dv);
     } else {
-      (entity as Record<string, unknown>)[k] = dv;
+      e[key] = dv;
     }
   }
 }
@@ -190,7 +190,7 @@ type TestContext = {
   deltaTime: number;
 };
 
-type TestAction = GenericAction & { tag: number; value: any };
+type TestAction = { tag: number; value: any };
 
 // Helper function to create a test ECS instance
 function createTestECS() {
@@ -226,7 +226,7 @@ function createTestECS() {
     deltaTime: 16.67,
   };
 
-  return new ECS<TestContext, [number], TestAction, Entity, EntityDelta>(
+  return new ECS<TestContext, [number], TestAction, number, Entity, EntityDelta>(
     entities as unknown as Map<string, Entity>,
     mutate,
     context,
@@ -235,7 +235,7 @@ function createTestECS() {
 }
 
 describe("ECS", () => {
-  let ecs: ECS<TestContext, [number], TestAction, Entity, EntityDelta>;
+  let ecs: ECS<TestContext, [number], TestAction, number, Entity, EntityDelta>;
 
   beforeEach(() => {
     ecs = createTestECS();
@@ -373,7 +373,7 @@ describe("ECS", () => {
     test("should insert if entity doesn't exist in put", () => {
       // put() requires the entity to exist; if not, it inserts with materialized delta
       // But the entity needs an id to be tracked in the ECS
-      const inserted = ecs.put(undefined, { id: "new", health: 60 });
+      ecs.put(undefined, { id: "new", health: 60 });
 
       expect(ecs.entity("new")).toBeDefined();
       expect(ecs.entity("new")!.health).toBe(60);
@@ -384,7 +384,10 @@ describe("ECS", () => {
       ecs.insert({ id: "player1", health: 100, replicated: true });
 
       // Upsert should find and update existing
-      const updated = ecs.upsert({ health: 75, level: 5 }, (entity) => entity?.replicated === true);
+      const updated = ecs.upsert(
+        { health: 75, level: 5 },
+        (entity: Entity | undefined) => entity?.replicated === true,
+      );
 
       expect(updated.health).toBe(75);
       expect(updated.level).toBe(5);
@@ -394,7 +397,7 @@ describe("ECS", () => {
       // Upsert with no matching entity should insert
       const inserted = ecs.upsert(
         { health: 50, name: "New Entity" },
-        (entity) => entity?.replicated === true, // No entity has replicated=true
+        (entity: Entity | undefined) => entity?.replicated === true, // No entity has replicated=true
       );
 
       expect(inserted.health).toBe(50);
@@ -465,7 +468,7 @@ describe("ECS", () => {
 
       ecs.addComponent(entity3, "name");
 
-      const results = ecs.query((q) => q.every(components.health)); // health component
+      const results = ecs.query((q: QueryBuilder) => q.every(components.health)); // health component
       expect(results).toContain(entity1);
       expect(results).toContain(entity2);
       expect(results).not.toContain(entity3);
@@ -480,7 +483,7 @@ describe("ECS", () => {
 
       ecs.addComponent(entity2, "health");
 
-      const results = ecs.query((q) => q.every(components.health, components.level)); // health and level
+      const results = ecs.query((q: QueryBuilder) => q.every(components.health, components.level)); // health and level
       expect(results).toContain(entity1);
       expect(results).not.toContain(entity2);
     });
@@ -494,7 +497,7 @@ describe("ECS", () => {
       ecs.addComponent(entity2, "level");
       ecs.addComponent(entity3, "name");
 
-      const results = ecs.query((q) => q.some(components.health, components.level)); // health or level
+      const results = ecs.query((q: QueryBuilder) => q.some(components.health, components.level)); // health or level
       expect(results).toContain(entity1);
       expect(results).toContain(entity2);
       expect(results).not.toContain(entity3);
@@ -504,7 +507,7 @@ describe("ECS", () => {
       const entity1 = ecs.createEntity();
       ecs.addComponent(entity1, "health");
 
-      const prebuiltQuery = query((q) => q.every(components.health));
+      const prebuiltQuery = query((q: QueryBuilder) => q.every(components.health));
       const results = ecs.query(prebuiltQuery);
 
       expect(results).toContain(entity1);
@@ -517,11 +520,18 @@ describe("ECS", () => {
     });
 
     test("should register and unregister entity system", () => {
-      const system = createEntitySystem<TestContext, [number], TestAction, Entity, EntityDelta>(
-        (entities, world, deltaTime) => {
+      const system = createEntitySystem<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
+        (_entities, _world, _deltaTime) => {
           // Systems no longer return values
         },
-        (q) => q.every(components.health), // health component
+        (q: QueryBuilder) => q.every(components.health), // health component
       );
 
       const unregister = ecs.registerSystem(system);
@@ -533,11 +543,18 @@ describe("ECS", () => {
 
     test("should execute entity systems during update", () => {
       const results: string[] = [];
-      const system = createEntitySystem<TestContext, [number], TestAction, Entity, EntityDelta>(
-        (entities, world, deltaTime) => {
+      const system = createEntitySystem<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
+        (entities, _world, _deltaTime) => {
           results.push(`processed-${entities.length}`);
         },
-        (q) => q.every(components.health), // health component
+        (q: QueryBuilder) => q.every(components.health), // health component
       );
 
       ecs.registerSystem(system);
@@ -561,13 +578,14 @@ describe("ECS", () => {
         [number],
         void,
         TestAction,
+        number,
         Entity,
         EntityDelta
       >(
-        (archetypes, world, deltaTime) => {
+        (archetypes, _world, _deltaTime) => {
           archetypeCount = archetypes.size;
         },
-        (q) => q.every(components.health), // health component
+        (q: QueryBuilder) => q.every(components.health), // health component
       );
 
       ecs.registerSystem(system);
@@ -597,7 +615,7 @@ describe("ECS", () => {
         (entities) => {
           events.push([...entities]);
         },
-        (q) => q.every(components.health), // health component
+        (q: QueryBuilder) => q.every(components.health), // health component
       );
 
       const unsubscribe = ecs.subscribe(eventSystem);
@@ -620,7 +638,7 @@ describe("ECS", () => {
         (entities) => {
           events.push([...entities]);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
       );
 
       ecs.subscribe(eventSystem, true); // emit for existing
@@ -638,7 +656,7 @@ describe("ECS", () => {
         () => {
           executed = true;
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
       );
 
       ecs.subscribe(eventSystem);
@@ -660,7 +678,7 @@ describe("ECS", () => {
         (entity) => {
           createdEntities.push(entity);
         },
-        (q) => q.every(components.health), // health component
+        (q: QueryBuilder) => q.every(components.health), // health component
       );
 
       const unregister = ecs.onCreate(lifecycleSystem);
@@ -679,7 +697,7 @@ describe("ECS", () => {
         (entity) => {
           deletedEntities.push(entity);
         },
-        (q) => q.every(components.health), // health component
+        (q: QueryBuilder) => q.every(components.health), // health component
       );
 
       const unregister = ecs.onDelete(lifecycleSystem);
@@ -818,11 +836,18 @@ describe("ECS", () => {
       ecs.initialize();
 
       let executed = false;
-      const system = createEntitySystem<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const system = createEntitySystem<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         () => {
           executed = true;
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
       );
 
       ecs.registerSystem(system);
@@ -857,12 +882,19 @@ describe("ECS", () => {
 
     test("should register behavior for event type", () => {
       const eventTag = 100;
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, _entity, _event) => {
           // Behavior handler
         },
-        (q) => q.every(components.health), // health component
+        (q: QueryBuilder) => q.every(components.health), // health component
         10, // priority
       );
 
@@ -874,16 +906,30 @@ describe("ECS", () => {
 
     test("should register multiple behaviors for same event type", () => {
       const eventTag = 101;
-      const behavior1 = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior1 = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {},
-        (q) => q.every(components.health),
+        (_world, _entity, _event) => {},
+        (q: QueryBuilder) => q.every(components.health),
         10,
       );
-      const behavior2 = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior2 = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {},
-        (q) => q.every(components.level), // level
+        (_world, _entity, _event) => {},
+        (q: QueryBuilder) => q.every(components.level), // level
         5,
       );
 
@@ -898,22 +944,43 @@ describe("ECS", () => {
 
     test("should sort behaviors by priority (higher first)", () => {
       const eventTag = 102;
-      const lowPriority = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const lowPriority = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {},
-        (q) => q.every(components.health),
+        (_world, _entity, _event) => {},
+        (q: QueryBuilder) => q.every(components.health),
         1,
       );
-      const highPriority = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const highPriority = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {},
-        (q) => q.every(components.health),
+        (_world, _entity, _event) => {},
+        (q: QueryBuilder) => q.every(components.health),
         100,
       );
-      const mediumPriority = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const mediumPriority = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {},
-        (q) => q.every(components.health),
+        (_world, _entity, _event) => {},
+        (q: QueryBuilder) => q.every(components.health),
         50,
       );
 
@@ -929,10 +996,17 @@ describe("ECS", () => {
 
     test("should rebuild behavior cache for entity", () => {
       const eventTag = 103;
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {},
-        (q) => q.every(components.health), // health component
+        (_world, _entity, _event) => {},
+        (q: QueryBuilder) => q.every(components.health), // health component
         10,
       );
 
@@ -950,10 +1024,17 @@ describe("ECS", () => {
 
     test("should rebuild cache only for matching entities", () => {
       const eventTag = 104;
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {},
-        (q) => q.every(components.health, components.level), // health and level
+        (_world, _entity, _event) => {},
+        (q: QueryBuilder) => q.every(components.health, components.level), // health and level
         10,
       );
 
@@ -985,13 +1066,20 @@ describe("ECS", () => {
       let executed = false;
       let receivedEntity: Entity | undefined;
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, entity, _event) => {
           executed = true;
           receivedEntity = entity;
         },
-        (q) => q.every(components.health), // health component
+        (q: QueryBuilder) => q.every(components.health), // health component
         10,
       );
 
@@ -1010,12 +1098,19 @@ describe("ECS", () => {
       const eventTag = 106;
       let executed = false;
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, _entity, _event) => {
           executed = true;
         },
-        (q) => q.every(components.health, components.level), // health and level
+        (q: QueryBuilder) => q.every(components.health, components.level), // health and level
         10,
       );
 
@@ -1033,28 +1128,49 @@ describe("ECS", () => {
       const eventTag = 107;
       const executionOrder: number[] = [];
 
-      const behavior1 = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior1 = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, _entity, _event) => {
           executionOrder.push(1);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         1,
       );
-      const behavior2 = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior2 = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, _entity, _event) => {
           executionOrder.push(2);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         100,
       );
-      const behavior3 = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior3 = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, _entity, _event) => {
           executionOrder.push(3);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         50,
       );
 
@@ -1074,21 +1190,35 @@ describe("ECS", () => {
       const eventTag = 108;
       const executionOrder: number[] = [];
 
-      const behavior1 = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior1 = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
         (world, entity, event) => {
           executionOrder.push(1);
           event.preventDefault();
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         100,
       );
-      const behavior2 = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior2 = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, _entity, _event) => {
           executionOrder.push(2);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         50,
       );
 
@@ -1105,14 +1235,21 @@ describe("ECS", () => {
 
     test("should access event data in behavior handler", async () => {
       const eventTag = 109;
-      let receivedData: any;
+      let _receivedData: any;
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
-          receivedData = event.detail;
+        (_world, _entity, event) => {
+          _receivedData = event.detail;
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         10,
       );
 
@@ -1124,7 +1261,7 @@ describe("ECS", () => {
       const eventData = { tag: eventTag, value: { message: "hello", count: 42 } };
       await ecs.act(inserted.id!, eventData);
 
-      expect(receivedData).toEqual(eventData);
+      expect(_receivedData).toEqual(eventData);
     });
   });
 
@@ -1137,12 +1274,19 @@ describe("ECS", () => {
       const eventTag = 200;
       const executed: string[] = [];
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, entity, _event) => {
           executed.push(entity.id!);
         },
-        (q) => q.every(components.health), // health component
+        (q: QueryBuilder) => q.every(components.health), // health component
         10,
       );
 
@@ -1177,12 +1321,19 @@ describe("ECS", () => {
       const eventTag = 201;
       const executed: string[] = [];
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, entity, _event) => {
           executed.push(entity.id!);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         10,
       );
 
@@ -1200,12 +1351,19 @@ describe("ECS", () => {
       const eventTag = 202;
       const executed: string[] = [];
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, entity, _event) => {
           executed.push(entity.id!);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         10,
       );
 
@@ -1229,15 +1387,22 @@ describe("ECS", () => {
       const eventTag = 203;
       const executed: string[] = [];
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, entity, event) => {
           executed.push(entity.id!);
           if (entity.id === "parent") {
             event.preventDefault();
           }
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         10,
       );
 
@@ -1260,12 +1425,19 @@ describe("ECS", () => {
       const eventTag = 204;
       const executed: string[] = [];
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, entity, _event) => {
           executed.push(entity.id!);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         10,
       );
 
@@ -1283,12 +1455,19 @@ describe("ECS", () => {
       const eventTag = 205;
       const executed: string[] = [];
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, entity, _event) => {
           executed.push(entity.id!);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         10,
       );
 
@@ -1317,21 +1496,35 @@ describe("ECS", () => {
       const eventTag = 206;
       const executionOrder: number[] = [];
 
-      const behavior1 = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior1 = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        async (world, entity, event) => {
+        async (_world, _entity, _event) => {
           await new Promise((resolve) => setTimeout(resolve, 10));
           executionOrder.push(1);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         100,
       );
-      const behavior2 = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior2 = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, _entity, _event) => {
           executionOrder.push(2);
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         50,
       );
 
@@ -1356,10 +1549,17 @@ describe("ECS", () => {
       const eventTag = 300;
       let rebuildCount = 0;
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {},
-        (q) => q.every(components.health, components.level), // health and level
+        (_world, _entity, _event) => {},
+        (q: QueryBuilder) => q.every(components.health, components.level), // health and level
         10,
       );
 
@@ -1391,10 +1591,17 @@ describe("ECS", () => {
 
     test("should reuse archetype-level behavior cache for entities with same components", () => {
       const eventTag = 301;
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {},
-        (q) => q.every(components.health, components.level), // health and level
+        (_world, _entity, _event) => {},
+        (q: QueryBuilder) => q.every(components.health, components.level), // health and level
         10,
       );
 
@@ -1424,15 +1631,22 @@ describe("ECS", () => {
       const eventTag = 302;
       const executed: string[] = [];
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
+        (_world, entity, event) => {
           executed.push(entity.id!);
           if (entity.id === "child1") {
             event.preventDefault(); // Stop at child1
           }
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
         10,
       );
 
@@ -1469,20 +1683,34 @@ describe("ECS", () => {
 
     test("should batch component changes within a single update cycle", () => {
       const eventTag = 303;
-      let executionCount = 0;
+      let _executionCount = 0;
 
-      const behavior = createBehavior<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         eventTag,
-        (world, entity, event) => {
-          executionCount++;
+        (_world, _entity, _event) => {
+          _executionCount++;
         },
-        (q) => q.every(components.health, components.level, components.name), // health, level, name
+        (q: QueryBuilder) => q.every(components.health, components.level, components.name), // health, level, name
         10,
       );
 
       ecs.registerBehavior(behavior);
 
-      const system = createEntitySystem<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const system = createEntitySystem<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         (entities, world) => {
           // System that modifies entities during update
           for (const entityId of entities) {
@@ -1495,7 +1723,7 @@ describe("ECS", () => {
             }
           }
         },
-        (q) => q.every(components.health), // health
+        (q: QueryBuilder) => q.every(components.health), // health
       );
 
       ecs.registerSystem(system);
@@ -1523,7 +1751,7 @@ describe("ECS", () => {
 
     test("should handle empty query results", () => {
       ecs.initialize();
-      const results = ecs.query((q) => q.every(999)); // Non-existent component
+      const results = ecs.query((q: QueryBuilder) => q.every(999)); // Non-existent component
       expect(results).toEqual([]);
     });
 
@@ -1538,11 +1766,18 @@ describe("ECS", () => {
 
     test("should handle system registration before initialization", () => {
       const uninitializedECS = createTestECS();
-      const system = createEntitySystem<TestContext, [number], TestAction, Entity, EntityDelta>(
+      const system = createEntitySystem<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
         () => {
           // System logic
         },
-        (q) => q.every(components.health),
+        (q: QueryBuilder) => q.every(components.health),
       );
 
       // Should not throw
@@ -1558,7 +1793,7 @@ describe("ECS", () => {
       ecs.parent("parent", "child");
 
       const parentEntity = ecs.entity("parent");
-      expect(parentEntity!.children?.filter((c) => c === "child")).toHaveLength(1);
+      expect(parentEntity!.children?.filter((c: string) => c === "child")).toHaveLength(1);
     });
 
     test("should handle unparent non-existent relationship", () => {
@@ -1588,7 +1823,7 @@ describe("ECS", () => {
       const mutation = mutations.get("new-entity");
       expect(mutation).toBeDefined();
       expect(mutation?.tag).toBe(MutationType.Insert);
-      expect((mutation?.value as any).entity.health).toBe(100);
+      expect((mutation!.value as any).entity.health).toBe(100);
     });
 
     test("should track update mutations within scope", async () => {
@@ -1600,9 +1835,9 @@ describe("ECS", () => {
       });
 
       expect(mutations.size).toBe(1);
-      const mutation = mutations.get("existing-entity");
-      expect(mutation?.tag).toBe(MutationType.Update);
-      expect((mutation?.value as any).delta.health).toBe(50);
+      const mutation = mutations.get("existing-entity")!;
+      expect(mutation.tag).toBe(MutationType.Update);
+      expect((mutation.value as any).delta.health).toBe(50);
     });
 
     test("should track delete mutations within scope", async () => {
@@ -1631,9 +1866,9 @@ describe("ECS", () => {
 
       expect(mutations.size).toBe(1);
       const mutation = mutations.get("coalesce-test");
-      expect(mutation?.tag).toBe(MutationType.Insert);
-      expect((mutation?.value as any).entity.health).toBe(75); // 100 + (-25) = 75
-      expect((mutation?.value as any).entity.name).toBe("updated");
+      expect(mutation!.tag).toBe(MutationType.Insert);
+      expect((mutation!.value as any).entity.health).toBe(75); // 100 + (-25) = 75
+      expect((mutation!.value as any).entity.name).toBe("updated");
     });
 
     test("should coalesce insert + delete = net zero (no mutations)", async () => {
@@ -1673,7 +1908,7 @@ describe("ECS", () => {
       });
 
       expect(mutations.size).toBe(3);
-      const entityIds = [...mutations.keys()].sort();
+      const entityIds = [...mutations.keys()].sort((a, b) => a.localeCompare(b));
       expect(entityIds).toEqual(["entity-1", "entity-2", "entity-3"]);
     });
 
@@ -1758,10 +1993,10 @@ describe("ECS", () => {
       const entity1 = mutations.get("async-1");
       const entity2 = mutations.get("async-2");
 
-      expect(entity1?.tag).toBe(MutationType.Insert);
-      expect((entity1?.value as any).entity.health).toBe(50); // 100 + (-50) = 50
-      expect(entity2?.tag).toBe(MutationType.Insert);
-      expect((entity2?.value as any).entity.health).toBe(200);
+      expect(entity1!.tag).toBe(MutationType.Insert);
+      expect((entity1!.value as any).entity.health).toBe(50); // 100 + (-50) = 50
+      expect(entity2!.tag).toBe(MutationType.Insert);
+      expect((entity2!.value as any).entity.health).toBe(200);
     });
 
     test("should capture final entity state at scope completion", async () => {
@@ -1776,9 +2011,262 @@ describe("ECS", () => {
       });
 
       expect(mutations.size).toBe(1);
-      const mutation = mutations.get("final-state");
-      expect((mutation?.value as any).entity.health).toBe(50); // 100 + (-25) + (-25) = 50
-      expect((mutation?.value as any).entity.name).toBe("updated");
+      const mutation = mutations.get("final-state")!;
+      expect((mutation.value as any).entity.health).toBe(50); // 100 + (-25) + (-25) = 50
+      expect((mutation.value as any).entity.name).toBe("updated");
+    });
+  });
+
+  describe("Tags", () => {
+    beforeEach(() => {
+      ecs.initialize();
+    });
+
+    test("should add and check tag on entity", () => {
+      const entity = ecs.createEntity();
+      expect(ecs.hasTag(entity, 1)).toBe(false);
+
+      ecs.addTag(entity, 1);
+      expect(ecs.hasTag(entity, 1)).toBe(true);
+      expect(ecs.getTags(entity)).toContain(1);
+    });
+
+    test("should remove tag from entity", () => {
+      const entity = ecs.createEntity();
+      ecs.addTag(entity, 1);
+      expect(ecs.hasTag(entity, 1)).toBe(true);
+
+      ecs.removeTag(entity, 1);
+      expect(ecs.hasTag(entity, 1)).toBe(false);
+    });
+
+    test("should seed tags from entity.tags on insert", () => {
+      const entity = ecs.insert({ health: 100, tags: [1, 2] });
+      expect(ecs.hasTag(entity.id!, 1)).toBe(true);
+      expect(ecs.hasTag(entity.id!, 2)).toBe(true);
+      expect(ecs.hasTag(entity.id!, 3)).toBe(false);
+    });
+
+    test("should filter entities by tag presence in query", () => {
+      const e1 = ecs.createEntity();
+      const e2 = ecs.createEntity();
+      ecs.addTag(e1, 1);
+      ecs.addTag(e2, 2);
+      ecs.addTag(e2, 3);
+
+      const results = ecs.query((q: QueryBuilder) => q.everyTag(1));
+      expect(results).toContain(e1);
+      expect(results).not.toContain(e2);
+
+      const someResults = ecs.query((q: QueryBuilder) => q.someTag(2, 3));
+      expect(someResults).toContain(e2);
+      expect(someResults).not.toContain(e1);
+    });
+
+    test("should query by notTag and noneTag", () => {
+      const e1 = ecs.createEntity();
+      const e2 = ecs.createEntity();
+      ecs.addTag(e1, 1);
+
+      const no1 = ecs.query((q: QueryBuilder) => q.notTag(1));
+      expect(no1).toContain(e2);
+      expect(no1).not.toContain(e1);
+
+      const noAll = ecs.query((q: QueryBuilder) => q.noneTag(1));
+      expect(noAll).toContain(e2);
+      expect(noAll).not.toContain(e1);
+    });
+
+    test("should query combining components and tags", () => {
+      const e1 = ecs.createEntity();
+      ecs.addComponent(e1, "health");
+      ecs.addTag(e1, 1);
+
+      const e2 = ecs.createEntity();
+      ecs.addComponent(e2, "health");
+      // no tag
+
+      const e3 = ecs.createEntity();
+      ecs.addTag(e3, 1);
+      // no health component
+
+      const results = ecs.query((q: QueryBuilder) => q.every(components.health).everyTag(1));
+      expect(results).toContain(e1);
+      expect(results).not.toContain(e2);
+      expect(results).not.toContain(e3);
+    });
+
+    test("should run entity system filtered by tags", () => {
+      const processed: string[] = [];
+      const system = createEntitySystem<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
+        (entities) => {
+          processed.push(...entities);
+        },
+        (q: QueryBuilder) => q.everyTag(1),
+      );
+
+      ecs.registerSystem(system);
+
+      const e1 = ecs.createEntity();
+      const e2 = ecs.createEntity();
+      ecs.addTag(e1, 1);
+      // e2 has no tag 1
+
+      ecs.update(16.67);
+
+      expect(processed).toContain(e1);
+      expect(processed).not.toContain(e2);
+    });
+
+    test("should reconcile tags via put", () => {
+      const entity = ecs.insert({ health: 100, tags: [1, 2] });
+      expect(ecs.hasTag(entity.id!, 1)).toBe(true);
+
+      // Replace tags with [3]
+      ecs.put(entity.id!, { tags: [3] } as unknown as EntityDelta);
+      expect(ecs.hasTag(entity.id!, 1)).toBe(false);
+      expect(ecs.hasTag(entity.id!, 3)).toBe(true);
+    });
+  });
+
+  describe("Tags - extended coverage", () => {
+    beforeEach(() => {
+      ecs.initialize();
+    });
+
+    test("getTags returns empty array for entity with no tags", () => {
+      const e = ecs.createEntity();
+      expect(ecs.getTags(e)).toEqual([]);
+    });
+
+    test("getTags and hasTag are defensive on non-existent entity", () => {
+      expect(ecs.getTags("non-existent")).toEqual([]);
+      expect(ecs.hasTag("non-existent", 1)).toBe(false);
+    });
+
+    test("getTags returns all assigned tags", () => {
+      const e = ecs.createEntity();
+      ecs.addTag(e, 1);
+      ecs.addTag(e, 2);
+      ecs.addTag(e, 3);
+      const tags = ecs.getTags(e);
+      expect(tags).toHaveLength(3);
+      expect(tags).toContain(1);
+      expect(tags).toContain(2);
+      expect(tags).toContain(3);
+    });
+
+    test("addTag is idempotent", () => {
+      const e = ecs.createEntity();
+      ecs.addTag(e, 1);
+      ecs.addTag(e, 1);
+      expect(ecs.getTags(e)).toEqual([1]);
+    });
+
+    test("removeTag of absent tag is a no-op", () => {
+      const e = ecs.createEntity();
+      ecs.addTag(e, 1);
+      ecs.removeTag(e, 2);
+      expect(ecs.hasTag(e, 1)).toBe(true);
+      expect(ecs.getTags(e)).toEqual([1]);
+    });
+
+    test("everyTag with multiple tags requires all (AND semantics)", () => {
+      const e1 = ecs.createEntity();
+      const e2 = ecs.createEntity();
+      ecs.addTag(e1, 1);
+      ecs.addTag(e1, 2);
+      ecs.addTag(e2, 1);
+
+      const results = ecs.query((q: QueryBuilder) => q.everyTag(1, 2));
+      expect(results).toContain(e1);
+      expect(results).not.toContain(e2);
+    });
+
+    test("preserves tags across component add and remove", () => {
+      const e = ecs.createEntity();
+      ecs.addTag(e, 1);
+      ecs.addComponent(e, "health");
+      ecs.removeComponent(e, "health");
+      expect(ecs.hasTag(e, 1)).toBe(true);
+      expect(ecs.getTags(e)).toEqual([1]);
+    });
+
+    test("preserves components across tag add and remove", () => {
+      const e = ecs.createEntity();
+      ecs.addComponent(e, "health");
+      ecs.addTag(e, 1);
+      ecs.removeTag(e, 1);
+      expect(ecs.hasComponent(e, "health")).toBe(true);
+    });
+
+    test("prefabricate with tags seeds entity via createEntity", () => {
+      const arch = ecs.prefabricate([components.health], [1, 2]);
+      const e = ecs.createEntity(arch);
+      expect(ecs.hasComponent(e, "health")).toBe(true);
+      expect(ecs.hasTag(e, 1)).toBe(true);
+      expect(ecs.hasTag(e, 2)).toBe(true);
+    });
+
+    test("put with object delta { set: [...] } replaces tags", () => {
+      const entity = ecs.insert({ health: 100, tags: [1, 2] });
+      expect(ecs.hasTag(entity.id!, 1)).toBe(true);
+      expect(ecs.hasTag(entity.id!, 2)).toBe(true);
+
+      ecs.put(entity.id!, { tags: { set: [3] } } as unknown as EntityDelta);
+      expect(ecs.hasTag(entity.id!, 1)).toBe(false);
+      expect(ecs.hasTag(entity.id!, 2)).toBe(false);
+      expect(ecs.hasTag(entity.id!, 3)).toBe(true);
+    });
+
+    test("put with object delta { add, remove } reconciles incrementally", () => {
+      const entity = ecs.insert({ health: 100, tags: [1, 2] });
+      expect(ecs.hasTag(entity.id!, 1)).toBe(true);
+      expect(ecs.hasTag(entity.id!, 2)).toBe(true);
+
+      ecs.put(entity.id!, {
+        tags: { add: [3], remove: [1] } as { add: number[]; remove: number[] },
+      } as unknown as EntityDelta);
+      expect(ecs.hasTag(entity.id!, 3)).toBe(true);
+      expect(ecs.hasTag(entity.id!, 1)).toBe(false);
+      expect(ecs.hasTag(entity.id!, 2)).toBe(true);
+    });
+
+    test("put with empty tags array clears all tags", () => {
+      const entity = ecs.insert({ health: 100, tags: [1, 2, 3] });
+      expect(ecs.getTags(entity.id!)).toHaveLength(3);
+
+      ecs.put(entity.id!, { tags: [] } as unknown as EntityDelta);
+      expect(ecs.getTags(entity.id!)).toEqual([]);
+    });
+
+    test("same components and tags share one archetype", () => {
+      const arch1 = ecs.prefabricate([components.health], [1]);
+      const arch2 = ecs.prefabricate([components.health], [1]);
+      expect(arch1).toBe(arch2);
+    });
+
+    test("event system with everyTag query fires when tag is added", () => {
+      const fired: string[] = [];
+      const eventSystem = createEventSystem(
+        (entities) => {
+          fired.push(...entities);
+        },
+        (q: QueryBuilder) => q.everyTag(1),
+      );
+
+      ecs.subscribe(eventSystem);
+
+      const e = ecs.createEntity();
+      ecs.addTag(e, 1);
+      expect(fired).toContain(e);
     });
   });
 });

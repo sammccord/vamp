@@ -3,12 +3,13 @@ import { execSync } from "node:child_process";
 import { resolve } from "node:path";
 import { loadBebopConfig, loadVampConfig } from "../config/loader";
 import { generate } from "../generators/codegen";
+import { generateMutationSchema } from "../generators/generate-mutation-schema";
 
 export const generateCommand = defineCommand({
   meta: {
     name: "generate",
     description:
-      "Run bebopc build, then emit ecs.generated.ts with component map, delta types, helpers, and factory",
+      "Run bebopc build, then emit game.generated.ts with component map, delta types, helpers, and factory",
   },
   args: {
     cwd: {
@@ -33,6 +34,12 @@ export const generateCommand = defineCommand({
     const bebopConfig = loadBebopConfig(cwd, vampConfig.bebopConfig);
 
     const runGenerate = () => {
+      // Generate the bebop mutation schema (EntityDelta, MutationScope) from the
+      // Entity message BEFORE bebopc runs so it gets compiled into bebop.ts.
+      console.log("Generating mutation schema...");
+      const mutationPath = generateMutationSchema(cwd, vampConfig);
+      console.log(`Generated ${mutationPath}`);
+
       if (!args["skip-bebopc"]) {
         console.log("Running bebopc build...");
         try {
@@ -59,6 +66,7 @@ export const generateCommand = defineCommand({
       resolve(cwd, vampConfig.schemas.entity),
       resolve(cwd, vampConfig.schemas.actions),
       resolve(cwd, vampConfig.schemas.state),
+      resolve(cwd, vampConfig.schemas.tags),
     ];
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;

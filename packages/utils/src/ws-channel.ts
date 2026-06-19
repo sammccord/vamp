@@ -13,8 +13,6 @@ import {
   ConsoleLogger,
   type Credential,
   Deadline,
-  ExecutionEnvironment,
-  Metadata,
   type MethodType,
   parseCredential,
   TempoError,
@@ -36,9 +34,9 @@ export type TempoWSChannelOptions = TempoChannelOptions & {
 //@ts-expect-error
 class ExistingWebSocket extends Websocket {
   constructor(ws: WebSocket, protocols?: string | string[], options?: WebsocketOptions) {
+    super(ws.url, protocols, options);
     //@ts-expect-error
     this._underlyingWebsocket = ws;
-    super(ws.url, protocols, options);
   }
   //@ts-ignore called internally by base class
   private tryConnect() {
@@ -298,7 +296,7 @@ export class TempoWSChannel extends BaseChannel {
     options?: CallOptions,
   ): Promise<Message> {
     const messageId = init.messageId;
-    return await new Promise(async (resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       const listener = (message: Message) => {
         resolve(message);
         this.events.off(messageId!, listener);
@@ -310,13 +308,16 @@ export class TempoWSChannel extends BaseChannel {
         });
       }
       this.events.on(messageId!, listener);
-      for await (const value of generator()) {
-        init.data = new Uint8Array(method.serialize(value));
+      runGenerator.call(this).catch(reject);
+      async function runGenerator(this: TempoWSChannel) {
+        for await (const value of generator()) {
+          init.data = new Uint8Array(method.serialize(value));
+          this.send(init);
+        }
+        init.status = TempoStatusCode.CANCELLED;
+        init.data = new Uint8Array();
         this.send(init);
       }
-      init.status = TempoStatusCode.CANCELLED;
-      init.data = new Uint8Array();
-      this.send(init);
     });
   }
 
@@ -449,7 +450,7 @@ export class TempoWSChannel extends BaseChannel {
    */
   private async processResponseHeaders(
     response: Message,
-    context: ClientContext,
+    _context: ClientContext,
     _methodType: MethodType,
   ) {
     // Validate response headers
@@ -549,7 +550,7 @@ export class TempoWSChannel extends BaseChannel {
       return record;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        void this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;
@@ -603,7 +604,7 @@ export class TempoWSChannel extends BaseChannel {
       return record;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        void this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;
@@ -647,7 +648,7 @@ export class TempoWSChannel extends BaseChannel {
               requestInit.previousAttempts = retryAttempt;
             }
             // todo this.fetchStreams returns readablestream
-            return await this.fetchServerStream(requestInit, context, method, options);
+            return this.fetchServerStream(requestInit, context, method, options);
           },
           options.retryPolicy,
           options.deadline,
@@ -656,7 +657,7 @@ export class TempoWSChannel extends BaseChannel {
         // If the deadline is set, execute the request within the deadline
       } else if (options?.deadline) {
         response = await options.deadline.executeWithinDeadline(async () => {
-          return await this.fetchServerStream(requestInit, context, method, options);
+          return this.fetchServerStream(requestInit, context, method, options);
         }, options.controller);
       } else {
         // Otherwise, just execute the request indefinitely
@@ -665,7 +666,7 @@ export class TempoWSChannel extends BaseChannel {
       return response as AsyncGenerator<TResponse, void, undefined>;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        void this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;
@@ -701,7 +702,7 @@ export class TempoWSChannel extends BaseChannel {
       let response: AsyncGenerator<BebopRecord, void, undefined>;
       if (options?.deadline) {
         response = await options.deadline.executeWithinDeadline(async () => {
-          return await this.fetchDuplexStream(requestInit, context, method, generator, options);
+          return this.fetchDuplexStream(requestInit, context, method, generator, options);
         }, options.controller);
       } else {
         // Otherwise, just execute the request indefinitely
@@ -711,7 +712,7 @@ export class TempoWSChannel extends BaseChannel {
       return response as AsyncGenerator<TResponse, void, undefined>;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        await this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;

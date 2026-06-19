@@ -31,8 +31,8 @@ export function loadVampConfig(cwd: string): FrameworkConfig {
     throw new Error(`Failed to parse vamp.json in ${cwd}`);
   }
   const { schemas, outFile } = config;
-  if (!schemas?.entity || !schemas?.actions || !schemas?.state) {
-    throw new Error("vamp.schemas must define entity, actions, and state paths");
+  if (!schemas?.entity || !schemas?.actions || !schemas?.state || !schemas?.tags) {
+    throw new Error("vamp.schemas must define entity, actions, state, and tags paths");
   }
   if (!outFile) {
     throw new Error("vamp.outFile is required");

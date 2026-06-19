@@ -23,8 +23,6 @@ import { EventEmitter } from "tseep";
 import { Message } from "./bebop";
 import { createEventIterator } from "./create-event-iterator";
 
-declare var self: Bun.Worker;
-
 export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
   private readonly events = new EventEmitter<Record<string, (message: Message) => void>>();
   private readonly clientStreams: Map<
@@ -137,7 +135,7 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
     }
     const requestData = request.data!;
     const record = this.deserializeRequest(requestData, method, contentType);
-    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke)) {
+    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))) {
       throw new TempoError(
         TempoStatusCode.INTERNAL,
         "service method incorrect: method must be async generator",
@@ -169,7 +167,7 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
       return invocation;
     }
 
-    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke)) {
+    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))) {
       throw new TempoError(
         TempoStatusCode.INTERNAL,
         "service method incorrect: method must be async generator",
@@ -233,7 +231,8 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
           `no service is registered which contains a method of '${methodId}'`,
         );
       }
-      const metadataHeader = request.headers;
+      //@ts-expect-error
+      const metadataHeader = request.customMetadata;
       const metadata = metadataHeader ? Metadata.fromHttpHeader(metadataHeader) : new Metadata();
 
       const previousAttempts = metadata.get("tempo-previous-rpc-attempts");
@@ -333,7 +332,8 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
                 }
                 const responseData = this.serializeResponse(value, method, "bebop");
                 response.data = new Uint8Array(responseData);
-                const encoded = response.encode();
+                const encoded = Message.encode(response);
+                //@ts-expect-error
                 postMessage(encoded, [encoded.buffer]);
               }
             } finally {
@@ -342,6 +342,7 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
               response.data = new Uint8Array();
               response.status = TempoStatusCode.CANCELLED;
               const encoded = Message.encode(response);
+              //@ts-expect-error
               postMessage(encoded, [encoded.buffer]);
             }
           };
@@ -361,12 +362,15 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
           const responseData = this.serializeResponse(record, method, contentType);
           response.data = new Uint8Array(responseData);
           const encoded = Message.encode(response);
+          //@ts-expect-error
           postMessage(encoded, [encoded.buffer]);
         }
       };
-      deadline !== undefined
-        ? await deadline.executeWithinDeadline(handleRequest)
-        : await handleRequest();
+      if (deadline !== undefined) {
+        await deadline.executeWithinDeadline(handleRequest);
+      } else {
+        await handleRequest();
+      }
     } catch (e) {
       let status = TempoStatusCode.UNKNOWN;
       let message = "unknown error";
@@ -379,9 +383,11 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
         }
         // internal errors indicate transient problems or implementation bugs
         // so we log them as critical errors
-        e.status === TempoStatusCode.INTERNAL
-          ? this.logger.critical(e.message, undefined, e)
-          : this.logger.error(message, undefined, e);
+        if (e.status === TempoStatusCode.INTERNAL) {
+          this.logger.critical(e.message, undefined, e);
+        } else {
+          this.logger.error(message, undefined, e);
+        }
       } else if (e instanceof Error) {
         message = e.message;
         this.logger.error(message, undefined, e);
@@ -394,9 +400,10 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
       response.status = status;
       response.msg = message;
       response.messageId = request.messageId;
-      response.timestamp = response.timestamp;
+      response.timestamp = request.timestamp;
       response.methodId = request.methodId;
       const encoded = Message.encode(response);
+      //@ts-expect-error
       postMessage(encoded, [encoded.buffer]);
     }
   }

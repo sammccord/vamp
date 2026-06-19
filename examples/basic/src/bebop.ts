@@ -15,28 +15,54 @@
 //     the code is regenerated.
 // </auto-generated>
 import { BebopView, BebopRuntimeError, BebopRecord } from "bebop";
+import { Metadata, MethodType } from "@tempojs/common";
+import {  BaseClient, MethodInfo, CallOptions } from "@tempojs/client";
+import { ServiceRegistry, BaseService, ServerContext, BebopMethodAny, BebopMethod } from "@tempojs/server";
 
-export const BEBOP_SCHEMA = new Uint8Array([
-  3, 7, 0, 0, 0, 65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0, 0, 0, 3, 115, 111, 117, 114, 99, 101, 0,
-  244, 255, 255, 255, 0, 1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 100, 97, 109,
-  97, 103, 101, 0, 251, 255, 255, 255, 0, 3, 84, 97, 107, 101, 68, 97, 109, 97, 103, 101, 0, 2, 0,
-  5, 0, 0, 0, 3, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116, 97, 114, 103, 101,
-  116, 0, 244, 255, 255, 255, 0, 2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255, 255, 0, 3, 65, 99,
-  116, 105, 111, 110, 115, 0, 3, 0, 10, 0, 0, 0, 2, 1, 0, 0, 0, 0, 2, 1, 0, 0, 0, 69, 110, 116, 105,
-  116, 121, 0, 2, 0, 5, 0, 0, 0, 5, 105, 100, 0, 244, 255, 255, 255, 0, 1, 114, 111, 111, 116, 0,
-  244, 255, 255, 255, 0, 2, 112, 97, 114, 101, 110, 116, 0, 244, 255, 255, 255, 0, 3, 99, 104, 105,
-  108, 100, 114, 101, 110, 0, 242, 255, 255, 255, 0, 244, 255, 255, 255, 0, 4, 104, 101, 97, 108,
-  116, 104, 0, 5, 0, 0, 0, 0, 5, 83, 116, 97, 116, 101, 0, 2, 0, 5, 0, 0, 0, 1, 110, 115, 0, 245,
-  255, 255, 255, 0, 1, 80, 111, 111, 108, 0, 2, 0, 5, 0, 0, 0, 5, 112, 111, 105, 110, 116, 115, 0,
-  251, 255, 255, 255, 0, 1, 109, 105, 110, 0, 251, 255, 255, 255, 0, 2, 109, 97, 120, 0, 251, 255,
-  255, 255, 0, 3, 114, 97, 116, 101, 0, 250, 255, 255, 255, 0, 4, 105, 110, 116, 101, 114, 118, 97,
-  108, 0, 251, 255, 255, 255, 0, 5, 80, 111, 111, 108, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0,
-  5, 112, 111, 105, 110, 116, 115, 0, 250, 255, 255, 255, 0, 1, 109, 105, 110, 0, 250, 255, 255,
-  255, 0, 2, 109, 97, 120, 0, 250, 255, 255, 255, 0, 3, 114, 97, 116, 101, 0, 250, 255, 255, 255, 0,
-  4, 105, 110, 116, 101, 114, 118, 97, 108, 0, 250, 255, 255, 255, 0, 5, 0, 0, 0, 0,
+export const BEBOP_SCHEMA = new Uint8Array ([
+3, 10, 0, 0, 0, 65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0,
+0, 0, 3, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255,
+255, 0, 1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255,
+255, 0, 2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255,
+255, 0, 3, 84, 97, 107, 101, 68, 97, 109, 97, 103, 101, 0,
+2, 0, 5, 0, 0, 0, 3, 115, 111, 117, 114, 99, 101, 0, 244,
+255, 255, 255, 0, 1, 116, 97, 114, 103, 101, 116, 0, 244,
+255, 255, 255, 0, 2, 100, 97, 109, 97, 103, 101, 0, 251,
+255, 255, 255, 0, 3, 65, 99, 116, 105, 111, 110, 115, 0,
+3, 0, 10, 0, 0, 0, 2, 1, 0, 0, 0, 0, 2, 1, 0, 0, 0, 74,
+111, 105, 110, 82, 101, 113, 117, 101, 115, 116, 0, 1, 0,
+0, 0, 0, 0, 0, 1, 0, 74, 111, 105, 110, 82, 101, 115, 112,
+111, 110, 115, 101, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 69, 110,
+116, 105, 116, 121, 0, 2, 0, 5, 0, 0, 0, 6, 105, 100, 0,
+244, 255, 255, 255, 0, 1, 114, 111, 111, 116, 0, 244, 255,
+255, 255, 0, 2, 116, 97, 103, 115, 0, 242, 255, 255, 255,
+0, 7, 0, 0, 0, 0, 3, 112, 97, 114, 101, 110, 116, 0, 244,
+255, 255, 255, 0, 4, 99, 104, 105, 108, 100, 114, 101,
+110, 0, 242, 255, 255, 255, 0, 244, 255, 255, 255, 0, 5,
+104, 101, 97, 108, 116, 104, 0, 8, 0, 0, 0, 0, 6, 83, 116,
+97, 116, 101, 0, 2, 0, 5, 0, 0, 0, 1, 110, 115, 0, 245,
+255, 255, 255, 0, 1, 84, 97, 103, 115, 0, 4, 0, 251, 255,
+255, 255, 0, 4, 0, 0, 0, 3, 72, 117, 109, 97, 110, 0, 0,
+1, 0, 0, 0, 80, 108, 97, 121, 101, 114, 67, 111, 110, 116,
+114, 111, 108, 108, 101, 100, 0, 0, 2, 0, 0, 0, 72, 111,
+115, 116, 105, 108, 101, 0, 0, 3, 0, 0, 0, 80, 111, 111,
+108, 0, 2, 0, 5, 0, 0, 0, 5, 112, 111, 105, 110, 116, 115,
+0, 251, 255, 255, 255, 0, 1, 109, 105, 110, 0, 251, 255,
+255, 255, 0, 2, 109, 97, 120, 0, 251, 255, 255, 255, 0, 3,
+114, 97, 116, 101, 0, 250, 255, 255, 255, 0, 4, 105, 110,
+116, 101, 114, 118, 97, 108, 0, 251, 255, 255, 255, 0, 5,
+80, 111, 111, 108, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0,
+0, 0, 5, 112, 111, 105, 110, 116, 115, 0, 250, 255, 255,
+255, 0, 1, 109, 105, 110, 0, 250, 255, 255, 255, 0, 2,
+109, 97, 120, 0, 250, 255, 255, 255, 0, 3, 114, 97, 116,
+101, 0, 250, 255, 255, 255, 0, 4, 105, 110, 116, 101, 114,
+118, 97, 108, 0, 250, 255, 255, 255, 0, 5, 1, 0, 0, 0, 82,
+112, 99, 0, 0, 1, 0, 0, 0, 106, 111, 105, 110, 0, 0, 0, 3,
+0, 0, 0, 4, 0, 0, 0, 182, 247, 22, 49
 ]);
 
 export interface Attack {
+
   source?: string;
 
   target?: string;
@@ -44,245 +70,329 @@ export interface Attack {
   damage?: number;
 }
 
-export const Attack = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Attack): Attack & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Attack.encode(this);
-        },
-      };
+export const Attack = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Attack): Attack & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Attack.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Attack): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Attack.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Attack): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Attack.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Attack, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.source !== undefined) {
-          view.writeByte(1);
-          view.writeGuid(record.source);
-        }
-        if (record.target !== undefined) {
-          view.writeByte(2);
-          view.writeGuid(record.target);
-        }
-        if (record.damage !== undefined) {
-          view.writeByte(3);
-          view.writeUint32(record.damage);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): Attack & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Attack.readFrom(view);
-        return Attack(decoded);
-      },
-
-      readFrom(view: BebopView): Attack {
-        const message: Attack = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.source = view.readGuid();
-              break;
-
-            case 2:
-              message.target = view.readGuid();
-              break;
-
-            case 3:
-              message.damage = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: Attack, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.source !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.source);
+      }
+      if (record.target !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.target);
+      }
+      if (record.damage !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.damage);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
 
-export interface TakeDamage {
-  source?: string;
-
-  target?: string;
-
-  damage?: number;
-}
-
-export const TakeDamage = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: TakeDamage): TakeDamage & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return TakeDamage.encode(this);
-        },
-      };
+    decode(buffer: Uint8Array): Attack & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Attack.readFrom(view);
+      return Attack(decoded);
     },
-    // Static methods
-    {
-      encode(record: TakeDamage): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        TakeDamage.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: TakeDamage, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.source !== undefined) {
-          view.writeByte(1);
-          view.writeGuid(record.source);
-        }
-        if (record.target !== undefined) {
-          view.writeByte(2);
-          view.writeGuid(record.target);
-        }
-        if (record.damage !== undefined) {
-          view.writeByte(3);
-          view.writeUint32(record.damage);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
+    readFrom(view: BebopView): Attack {
+      const message: Attack = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
 
-      decode(buffer: Uint8Array): TakeDamage & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = TakeDamage.readFrom(view);
-        return TakeDamage(decoded);
-      },
-
-      readFrom(view: BebopView): TakeDamage {
-        const message: TakeDamage = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.source = view.readGuid();
-              break;
-
-            case 2:
-              message.target = view.readGuid();
-              break;
-
-            case 3:
-              message.damage = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
-    },
-  ),
-);
-
-export type Actions = { tag: 1; value: Attack } | { tag: 2; value: TakeDamage };
-
-export const Actions = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Actions): Actions & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Actions.encode(this);
-        },
-      };
-    },
-    // Static methods
-    {
-      fromAttack(value: Attack): Actions & BebopRecord {
-        return Actions({ tag: 1, value });
-      },
-
-      fromTakeDamage(value: TakeDamage): Actions & BebopRecord {
-        return Actions({ tag: 2, value });
-      },
-
-      encode(record: Actions): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Actions.encodeInto(record, view);
-        return view.toArray();
-      },
-
-      encodeInto(record: Actions, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length + 1;
-        view.writeByte(record.tag);
-        switch (record.tag) {
           case 1:
-            Attack.encodeInto(record.value, view);
+            message.source = view.readGuid();
             break;
+
           case 2:
-            TakeDamage.encodeInto(record.value, view);
+            message.target = view.readGuid();
             break;
-        }
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
 
-      decode(buffer: Uint8Array): Actions & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Actions.readFrom(view);
-        return Actions(decoded);
-      },
+          case 3:
+            message.damage = view.readUint32();
+            break;
 
-      readFrom(view: BebopView): Actions {
-        const length = view.readMessageLength();
-        const end = view.index + 1 + length;
-        const tag = view.readByte();
-        switch (tag) {
-          case 1:
-            return { tag: 1, value: Attack.readFrom(view) };
-          case 2:
-            return { tag: 2, value: TakeDamage.readFrom(view) };
           default:
             view.index = end;
-            throw new BebopRuntimeError(`Unknown union discriminator: ${tag}`);
+            return message;
         }
-      },
+      }
     },
-  ),
-);
+  }
+));
+
+
+export interface TakeDamage {
+
+  source?: string;
+
+  target?: string;
+
+  damage?: number;
+}
+
+export const TakeDamage = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: TakeDamage): TakeDamage & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return TakeDamage.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: TakeDamage): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      TakeDamage.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: TakeDamage, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.source !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.source);
+      }
+      if (record.target !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.target);
+      }
+      if (record.damage !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.damage);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): TakeDamage & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = TakeDamage.readFrom(view);
+      return TakeDamage(decoded);
+    },
+
+    readFrom(view: BebopView): TakeDamage {
+      const message: TakeDamage = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.source = view.readGuid();
+            break;
+
+          case 2:
+            message.target = view.readGuid();
+            break;
+
+          case 3:
+            message.damage = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
+export type Actions = { tag: 1, value: Attack } | { tag: 2, value: TakeDamage };
+
+export const Actions = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Actions): Actions & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Actions.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    fromAttack(value: Attack): Actions & BebopRecord {
+      return Actions({ tag: 1, value });
+    },
+
+    fromTakeDamage(value: TakeDamage): Actions & BebopRecord {
+      return Actions({ tag: 2, value });
+    },
+
+    encode(record: Actions): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Actions.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: Actions, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length + 1;
+      view.writeByte(record.tag);
+      switch (record.tag) {
+        case 1:
+          Attack.encodeInto(record.value, view);
+          break;
+        case 2:
+          TakeDamage.encodeInto(record.value, view);
+          break;
+      }
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): Actions & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Actions.readFrom(view);
+      return Actions(decoded);
+    },
+
+    readFrom(view: BebopView): Actions {
+      const length = view.readMessageLength();
+      const end = view.index + 1 + length;
+      const tag = view.readByte();
+      switch (tag) {
+        case 1:
+          return { tag: 1, value: Attack.readFrom(view) };
+        case 2:
+          return { tag: 2, value: TakeDamage.readFrom(view) };
+        default:
+          view.index = end;
+          throw new BebopRuntimeError(`Unknown union discriminator: ${tag}`);
+      }
+    },
+  }
+));
+
+
+
+export interface JoinRequest {
+}
+
+export const JoinRequest = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: JoinRequest): JoinRequest & BebopRecord => {
+    return Object.freeze({
+      ...data,
+      encode(): Uint8Array {
+        return JoinRequest.encode(this);
+      }
+    });
+  },
+  // Static methods
+  {
+    encode(record: JoinRequest): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      JoinRequest.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: JoinRequest, view: BebopView): void {
+
+    },
+
+    decode(buffer: Uint8Array): JoinRequest & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = JoinRequest.readFrom(view);
+      return JoinRequest(decoded);
+    },
+
+    readFrom(view: BebopView): JoinRequest {
+      return {
+      };
+    },
+  }
+));
+
+
+export interface JoinResponse {
+}
+
+export const JoinResponse = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: JoinResponse): JoinResponse & BebopRecord => {
+    return Object.freeze({
+      ...data,
+      encode(): Uint8Array {
+        return JoinResponse.encode(this);
+      }
+    });
+  },
+  // Static methods
+  {
+    encode(record: JoinResponse): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      JoinResponse.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: JoinResponse, view: BebopView): void {
+
+    },
+
+    decode(buffer: Uint8Array): JoinResponse & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = JoinResponse.readFrom(view);
+      return JoinResponse(decoded);
+    },
+
+    readFrom(view: BebopView): JoinResponse {
+      return {
+      };
+    },
+  }
+));
+
 
 export interface Entity {
+
   id?: string;
 
   root?: string;
+
+  tags?: Tags[];
 
   parent?: string;
 
@@ -291,181 +401,213 @@ export interface Entity {
   health?: Pool;
 }
 
-export const Entity = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Entity): Entity & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Entity.encode(this);
-        },
-      };
+export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Entity): Entity & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Entity.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Entity): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Entity.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Entity): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Entity.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Entity, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.id !== undefined) {
-          view.writeByte(1);
-          view.writeGuid(record.id);
+    encodeInto(record: Entity, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.id !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.id);
+      }
+      if (record.root !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.root);
+      }
+      if (record.tags !== undefined) {
+        view.writeByte(3);
+        {
+        const length0 = record.tags.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeUint32(record.tags[i0]);
         }
-        if (record.root !== undefined) {
-          view.writeByte(2);
-          view.writeGuid(record.root);
+      }
+      }
+      if (record.parent !== undefined) {
+        view.writeByte(4);
+        view.writeGuid(record.parent);
+      }
+      if (record.children !== undefined) {
+        view.writeByte(5);
+        {
+        const length0 = record.children.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeGuid(record.children[i0]);
         }
-        if (record.parent !== undefined) {
-          view.writeByte(3);
-          view.writeGuid(record.parent);
-        }
-        if (record.children !== undefined) {
-          view.writeByte(4);
-          {
-            const length0 = record.children.length;
-            view.writeUint32(length0);
-            for (let i0 = 0; i0 < length0; i0++) {
-              view.writeGuid(record.children[i0]);
-            }
+      }
+      }
+      if (record.health !== undefined) {
+        view.writeByte(6);
+        Pool.encodeInto(record.health, view);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): Entity & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Entity.readFrom(view);
+      return Entity(decoded);
+    },
+
+    readFrom(view: BebopView): Entity {
+      const message: Entity = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.id = view.readGuid();
+            break;
+
+          case 2:
+            message.root = view.readGuid();
+            break;
+
+          case 3:
+            {
+          const length0 = view.readUint32();
+          message.tags = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: Tags;
+            x0 = view.readUint32();
+            message.tags[i0] = x0;
           }
         }
-        if (record.health !== undefined) {
-          view.writeByte(5);
-          Pool.encodeInto(record.health, view);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
+            break;
 
-      decode(buffer: Uint8Array): Entity & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Entity.readFrom(view);
-        return Entity(decoded);
-      },
+          case 4:
+            message.parent = view.readGuid();
+            break;
 
-      readFrom(view: BebopView): Entity {
-        const message: Entity = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.id = view.readGuid();
-              break;
-
-            case 2:
-              message.root = view.readGuid();
-              break;
-
-            case 3:
-              message.parent = view.readGuid();
-              break;
-
-            case 4:
-              {
-                const length0 = view.readUint32();
-                message.children = [];
-                for (let i0 = 0; i0 < length0; i0++) {
-                  let x0: string;
-                  x0 = view.readGuid();
-                  message.children[i0] = x0;
-                }
-              }
-              break;
-
-            case 5:
-              message.health = Pool.readFrom(view);
-              break;
-
-            default:
-              view.index = end;
-              return message;
+          case 5:
+            {
+          const length0 = view.readUint32();
+          message.children = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: string;
+            x0 = view.readGuid();
+            message.children[i0] = x0;
           }
         }
-      },
+            break;
+
+          case 6:
+            message.health = Pool.readFrom(view);
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
     },
-  ),
-);
+  }
+));
+
 
 export interface State {
+
   ns?: string;
 }
 
-export const State = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: State): State & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return State.encode(this);
-        },
-      };
+export const State = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: State): State & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return State.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: State): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      State.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: State): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        State.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: State, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.ns !== undefined) {
-          view.writeByte(1);
-          view.writeString(record.ns);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): State & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = State.readFrom(view);
-        return State(decoded);
-      },
-
-      readFrom(view: BebopView): State {
-        const message: State = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.ns = view.readString();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: State, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.ns !== undefined) {
+        view.writeByte(1);
+        view.writeString(record.ns);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): State & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = State.readFrom(view);
+      return State(decoded);
+    },
+
+    readFrom(view: BebopView): State {
+      const message: State = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.ns = view.readString();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
+export enum Tags {
+
+  Human = 1,
+
+  PlayerControlled = 2,
+
+  Hostile = 3,
+}
+
 
 export interface Pool {
+
   points?: number;
 
   min?: number;
@@ -477,101 +619,101 @@ export interface Pool {
   interval?: number;
 }
 
-export const Pool = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Pool): Pool & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Pool.encode(this);
-        },
-      };
+export const Pool = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Pool): Pool & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Pool.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Pool): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Pool.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Pool): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Pool.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Pool, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.points !== undefined) {
-          view.writeByte(1);
-          view.writeUint32(record.points);
-        }
-        if (record.min !== undefined) {
-          view.writeByte(2);
-          view.writeUint32(record.min);
-        }
-        if (record.max !== undefined) {
-          view.writeByte(3);
-          view.writeUint32(record.max);
-        }
-        if (record.rate !== undefined) {
-          view.writeByte(4);
-          view.writeInt32(record.rate);
-        }
-        if (record.interval !== undefined) {
-          view.writeByte(5);
-          view.writeUint32(record.interval);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): Pool & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Pool.readFrom(view);
-        return Pool(decoded);
-      },
-
-      readFrom(view: BebopView): Pool {
-        const message: Pool = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.points = view.readUint32();
-              break;
-
-            case 2:
-              message.min = view.readUint32();
-              break;
-
-            case 3:
-              message.max = view.readUint32();
-              break;
-
-            case 4:
-              message.rate = view.readInt32();
-              break;
-
-            case 5:
-              message.interval = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: Pool, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.points !== undefined) {
+        view.writeByte(1);
+        view.writeUint32(record.points);
+      }
+      if (record.min !== undefined) {
+        view.writeByte(2);
+        view.writeUint32(record.min);
+      }
+      if (record.max !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.max);
+      }
+      if (record.rate !== undefined) {
+        view.writeByte(4);
+        view.writeInt32(record.rate);
+      }
+      if (record.interval !== undefined) {
+        view.writeByte(5);
+        view.writeUint32(record.interval);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): Pool & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Pool.readFrom(view);
+      return Pool(decoded);
+    },
+
+    readFrom(view: BebopView): Pool {
+      const message: Pool = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.points = view.readUint32();
+            break;
+
+          case 2:
+            message.min = view.readUint32();
+            break;
+
+          case 3:
+            message.max = view.readUint32();
+            break;
+
+          case 4:
+            message.rate = view.readInt32();
+            break;
+
+          case 5:
+            message.interval = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface PoolDelta {
+
   points?: number;
 
   min?: number;
@@ -583,96 +725,172 @@ export interface PoolDelta {
   interval?: number;
 }
 
-export const PoolDelta = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: PoolDelta): PoolDelta & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return PoolDelta.encode(this);
-        },
-      };
+export const PoolDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: PoolDelta): PoolDelta & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return PoolDelta.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: PoolDelta): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      PoolDelta.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: PoolDelta): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        PoolDelta.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: PoolDelta, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.points !== undefined) {
-          view.writeByte(1);
-          view.writeInt32(record.points);
-        }
-        if (record.min !== undefined) {
-          view.writeByte(2);
-          view.writeInt32(record.min);
-        }
-        if (record.max !== undefined) {
-          view.writeByte(3);
-          view.writeInt32(record.max);
-        }
-        if (record.rate !== undefined) {
-          view.writeByte(4);
-          view.writeInt32(record.rate);
-        }
-        if (record.interval !== undefined) {
-          view.writeByte(5);
-          view.writeInt32(record.interval);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): PoolDelta & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = PoolDelta.readFrom(view);
-        return PoolDelta(decoded);
-      },
-
-      readFrom(view: BebopView): PoolDelta {
-        const message: PoolDelta = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.points = view.readInt32();
-              break;
-
-            case 2:
-              message.min = view.readInt32();
-              break;
-
-            case 3:
-              message.max = view.readInt32();
-              break;
-
-            case 4:
-              message.rate = view.readInt32();
-              break;
-
-            case 5:
-              message.interval = view.readInt32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: PoolDelta, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.points !== undefined) {
+        view.writeByte(1);
+        view.writeInt32(record.points);
+      }
+      if (record.min !== undefined) {
+        view.writeByte(2);
+        view.writeInt32(record.min);
+      }
+      if (record.max !== undefined) {
+        view.writeByte(3);
+        view.writeInt32(record.max);
+      }
+      if (record.rate !== undefined) {
+        view.writeByte(4);
+        view.writeInt32(record.rate);
+      }
+      if (record.interval !== undefined) {
+        view.writeByte(5);
+        view.writeInt32(record.interval);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): PoolDelta & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = PoolDelta.readFrom(view);
+      return PoolDelta(decoded);
+    },
+
+    readFrom(view: BebopView): PoolDelta {
+      const message: PoolDelta = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.points = view.readInt32();
+            break;
+
+          case 2:
+            message.min = view.readInt32();
+            break;
+
+          case 3:
+            message.max = view.readInt32();
+            break;
+
+          case 4:
+            message.rate = view.readInt32();
+            break;
+
+          case 5:
+            message.interval = view.readInt32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+export abstract class BaseRpcService extends BaseService {
+  public static readonly serviceName = 'RpcService';
+  public abstract join(record: JoinRequest, context: ServerContext): Promise<JoinResponse>;
+}
+
+export class TempoServiceRegistry extends ServiceRegistry {
+  private static readonly staticServiceInstances: Map<string, BaseService> = new Map<string, BaseService>();
+  public static register(serviceName: string) {
+    return (constructor: Function) => {
+      const service = Reflect.construct(constructor, [undefined]);
+      if (TempoServiceRegistry.staticServiceInstances.has(serviceName)) {
+        throw new BebopRuntimeError(`Duplicate service registered: ${serviceName}`);
+      }
+      TempoServiceRegistry.staticServiceInstances.set(serviceName, service);
+    }
+  }
+  public static tryGetService(serviceName: string): BaseService {
+    const service = TempoServiceRegistry.staticServiceInstances.get(serviceName);
+    if (service === undefined) {
+      throw new BebopRuntimeError(`Unable to retreive service '${serviceName}' - it is not registered.`);
+    }
+    return service;
+  }
+
+  public init(): void {
+    let service: BaseService;
+    let serviceName: string;
+    serviceName = 'RpcService';
+    service = TempoServiceRegistry.tryGetService(serviceName);
+    if (!(service instanceof BaseRpcService)) {
+      throw new BebopRuntimeError(`No service named '${serviceName}'was registered with the TempoServiceRegistry`);
+    }
+    service.setLogger(this.logger.clone(serviceName));
+    TempoServiceRegistry.staticServiceInstances.delete(serviceName);
+    this.serviceInstances.push(service);
+    if (this.methods.has(823588790)) {
+      const conflictService = this.methods.get(823588790)!;
+      throw new BebopRuntimeError(`RpcService.join collides with ${conflictService.service}.${conflictService.name}`)
+    }
+    this.methods.set(823588790, {
+      name: 'join',
+      service: serviceName,
+      invoke: service.join,
+      serialize: JoinResponse.encode,
+      deserialize: JoinRequest.decode,
+      type: MethodType.Unary,
+    } as BebopMethod<JoinRequest, JoinResponse>);
+  }
+
+  getMethod(id: number): BebopMethodAny | undefined {
+    return this.methods.get(id);
+  }
+}
+
+export interface IRpcClient {
+
+  join(request: JoinRequest): Promise<JoinResponse>;
+  join(request: JoinRequest, metadata: Metadata): Promise<JoinResponse>;
+}
+
+
+export class RpcClient extends BaseClient implements IRpcClient {
+  private static readonly joinMethodInfo: MethodInfo<JoinRequest, JoinResponse> = {
+    name: 'join',
+    service: 'RpcService',
+    id: 823588790,
+    serialize: JoinRequest.encode,
+    deserialize: JoinResponse.decode,
+    type: MethodType.Unary,
+  }
+
+  async join(request: JoinRequest): Promise<JoinResponse>;
+  async join(request: JoinRequest, options: CallOptions): Promise<JoinResponse>;
+  async join(request: JoinRequest, options?: CallOptions): Promise<JoinResponse> {
+    return await this.channel.startUnary(request, this.getContext(), RpcClient.joinMethodInfo, options);
+  }
+}

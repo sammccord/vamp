@@ -28,10 +28,10 @@ export function scalarToTs(type: string): string {
     case "int32":
     case "uint32":
     case "float32":
-    case "float64":
       return "number";
     case "int64":
     case "uint64":
+    case "float64":
       return "bigint";
     case "string":
     case "guid":
@@ -68,7 +68,10 @@ export function deltaTypeForField(field: SchemaField, schema: ParsedSchema): str
 
 export function emitDelta(entity: SchemaDefinition, schema: ParsedSchema): string {
   const fields = entity.fields
-    .map((f) => `  ${f.name}?: ${deltaTypeForField(f, schema)};`)
+    .map((f) => {
+      if (f.name === "tags") return "  tags?: Tags[];";
+      return `  ${f.name}?: ${deltaTypeForField(f, schema)};`;
+    })
     .join("\n");
   return `export type EntityDelta = {\n${fields}\n};`;
 }

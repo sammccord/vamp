@@ -1,9 +1,7 @@
 import {
   BaseChannel,
-  type CallCredential,
   type CallOptions,
   type ClientContext,
-  InsecureChannelCredential,
   type MethodInfo,
   type RetryPolicy,
   type TempoChannelOptions,
@@ -72,7 +70,7 @@ export class TempoExtensionChannel extends BaseChannel {
     void 0;
   }
   public override async getCredential(): Promise<Credential | undefined> {
-    return await undefined;
+    return undefined;
   }
 
   /**
@@ -184,7 +182,7 @@ export class TempoExtensionChannel extends BaseChannel {
     options?: CallOptions,
   ): Promise<Message> {
     const messageId = init.messageId!;
-    return await new Promise(async (resolve, reject) => {
+    return await new Promise((resolve, reject) => {
       const listener = (message: Message) => {
         resolve(message);
         this.events.off(messageId, listener);
@@ -196,13 +194,16 @@ export class TempoExtensionChannel extends BaseChannel {
         });
       }
       this.events.on(messageId, listener);
-      for await (const value of generator()) {
-        init.data = method.serialize(value);
+      runGenerator.call(this).catch(reject);
+      async function runGenerator(this: TempoExtensionChannel) {
+        for await (const value of generator()) {
+          init.data = method.serialize(value);
+          this.sendMessage(init).catch(reject);
+        }
+        init.status = TempoStatusCode.CANCELLED;
+        init.data = new Uint8Array();
         this.sendMessage(init).catch(reject);
       }
-      init.status = TempoStatusCode.CANCELLED;
-      init.data = new Uint8Array();
-      this.sendMessage(init).catch(reject);
     });
   }
 
@@ -236,7 +237,7 @@ export class TempoExtensionChannel extends BaseChannel {
         });
       }
       this.events.on(messageId, eventHandler);
-      this.sendMessage(init);
+      void this.sendMessage(init);
       return () => {
         this.events.off(messageId, eventHandler);
       };
@@ -256,7 +257,7 @@ export class TempoExtensionChannel extends BaseChannel {
       generator(),
       (value) => {
         init.data = method.serialize(value);
-        this.sendMessage(init);
+        void this.sendMessage(init);
       },
       ({ emit, cancel }) => {
         const eventHandler = async (message: Message) => {
@@ -318,7 +319,6 @@ export class TempoExtensionChannel extends BaseChannel {
     const requestInit: Message = {
       messageId: crypto.randomUUID(),
       methodId: method.id,
-      headers: customMetadata.toHttpHeader(),
       data: new Uint8Array(payload),
       timestamp: new Date(),
     };
@@ -340,7 +340,7 @@ export class TempoExtensionChannel extends BaseChannel {
    */
   private processResponseHeaders(
     response: Message,
-    context: ClientContext,
+    _context: ClientContext,
     _methodType: MethodType,
   ) {
     // Validate response headers
@@ -355,12 +355,6 @@ export class TempoExtensionChannel extends BaseChannel {
         tempoMessage = "unknown error";
       }
       throw new TempoError(statusCode, tempoMessage);
-    }
-
-    // Set incoming metadata from response headers
-    const customHeader = response.headers;
-    if (customHeader) {
-      context.incomingMetadata = Metadata.fromHttpHeader(customHeader);
     }
   }
 
@@ -386,9 +380,7 @@ export class TempoExtensionChannel extends BaseChannel {
         response = await this.executeWithRetry(
           async (retryAttempt: number) => {
             if (retryAttempt > 0) {
-              const extendedMetadata = Metadata.fromHttpHeader(requestInit.headers || "");
-              extendedMetadata.set("tempo-previous-rpc-attempts", String(retryAttempt));
-              requestInit.headers = extendedMetadata.toHttpHeader();
+              requestInit.previousAttempts = retryAttempt;
             }
             return await this.fetchUnary(requestInit);
           },
@@ -420,7 +412,7 @@ export class TempoExtensionChannel extends BaseChannel {
       return record;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        void this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;
@@ -468,13 +460,13 @@ export class TempoExtensionChannel extends BaseChannel {
       const responseData = response.data!;
       const record: TResponse = this.deserializeResponse(responseData, method);
       if (this.hooks !== undefined) {
-        this.hooks.executeDecodeHooks(context, record);
+        void this.hooks.executeDecodeHooks(context, record);
       }
       // Return the deserialized response object
       return record;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        void this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;
@@ -514,12 +506,10 @@ export class TempoExtensionChannel extends BaseChannel {
         response = await this.executeWithRetry(
           async (retryAttempt: number) => {
             if (retryAttempt > 0) {
-              const extendedMetadata = Metadata.fromHttpHeader(requestInit.headers || "");
-              extendedMetadata.set("tempo-previous-rpc-attempts", String(retryAttempt));
-              requestInit.headers = extendedMetadata.toHttpHeader();
+              requestInit.previousAttempts = retryAttempt;
             }
             // todo this.fetchStreams returns readablestream
-            return await this.fetchServerStream(requestInit, context, method, options);
+            return this.fetchServerStream(requestInit, context, method, options);
           },
           options.retryPolicy,
           options.deadline,
@@ -528,7 +518,7 @@ export class TempoExtensionChannel extends BaseChannel {
         // If the deadline is set, execute the request within the deadline
       } else if (options?.deadline) {
         response = await options.deadline.executeWithinDeadline(async () => {
-          return await this.fetchServerStream(requestInit, context, method, options);
+          return this.fetchServerStream(requestInit, context, method, options);
         }, options.controller);
       } else {
         // Otherwise, just execute the request indefinitely
@@ -537,7 +527,7 @@ export class TempoExtensionChannel extends BaseChannel {
       return response as AsyncGenerator<TResponse, void, undefined>;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        void this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;
@@ -568,11 +558,11 @@ export class TempoExtensionChannel extends BaseChannel {
       if (this.hooks !== undefined) {
         await this.hooks.executeRequestHooks(context);
       }
-      const requestInit = await this.createRequest(new Uint8Array(), context, method, options);
+      const requestInit = this.createRequest(new Uint8Array(), context, method, options);
       let response: AsyncGenerator<BebopRecord, void, undefined>;
       if (options?.deadline) {
         response = await options.deadline.executeWithinDeadline(async () => {
-          return await this.fetchDuplexStream(requestInit, context, method, generator, options);
+          return this.fetchDuplexStream(requestInit, context, method, generator, options);
         }, options.controller);
       } else {
         // Otherwise, just execute the request indefinitely
@@ -582,7 +572,7 @@ export class TempoExtensionChannel extends BaseChannel {
       return response as AsyncGenerator<TResponse, void, undefined>;
     } catch (e) {
       if (this.hooks !== undefined && e instanceof Error) {
-        this.hooks.executeErrorHooks(context, e);
+        void this.hooks.executeErrorHooks(context, e);
       }
       if (e instanceof TempoError) {
         throw e;

@@ -1,4 +1,4 @@
-import tsdownConfig from "./tsdown.config.js";
+import tsdownConfig from "./tsdown.config.ts";
 
 import { defineConfig } from "vite-plus";
 

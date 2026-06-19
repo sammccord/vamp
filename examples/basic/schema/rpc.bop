@@ -1,0 +1,9 @@
+import "./entity.bop"
+import "./actions"
+
+service RPC {
+    spawn(Entity): Entity;
+    act(Action): Action;
+    // TODO figure out entity mutation bebop integration
+    // subscribe(): stream Actions;
+}

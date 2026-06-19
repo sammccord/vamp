@@ -133,7 +133,7 @@ function breakLines(tokens: any[], maxWidth: number) {
 
       /* is it possible to break within this token? */
       let index = -1;
-      while (1) {
+      while (true) {
         let nextIndex = token.value.indexOf(" ", index + 1);
         if (nextIndex == -1) {
           break;

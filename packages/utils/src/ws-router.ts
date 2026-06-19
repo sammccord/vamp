@@ -24,7 +24,7 @@ import { Message } from "./bebop";
 import { createEventIterator } from "./create-event-iterator";
 
 interface GenericWs {
-  send(message: (ArrayBuffer | ArrayBufferView) | string): void;
+  send(message: string | Blob | BufferSource): void;
 }
 
 export class TempoWsRouter<
@@ -135,7 +135,7 @@ export class TempoWsRouter<
     }
     const requestData = request.data!;
     const record = this.deserializeRequest(requestData, method, contentType);
-    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke)) {
+    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))) {
       throw new TempoError(
         TempoStatusCode.INTERNAL,
         "service method incorrect: method must be async generator",
@@ -166,7 +166,7 @@ export class TempoWsRouter<
       return stream;
     }
 
-    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke)) {
+    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))) {
       throw new TempoError(
         TempoStatusCode.INTERNAL,
         "service method incorrect: method must be async generator",
@@ -216,13 +216,10 @@ export class TempoWsRouter<
           `no service is registered which contains a method of '${methodId}'`,
         );
       }
-      const metadataHeader = request.headers;
-      const metadata = metadataHeader ? Metadata.fromHttpHeader(metadataHeader) : new Metadata();
 
-      const previousAttempts = metadata.get("tempo-previous-rpc-attempts");
+      const previousAttempts = request.previousAttempts;
       if (previousAttempts !== undefined) {
-        const numberOfAttempts = previousAttempts.at(0);
-        if (numberOfAttempts && Number(numberOfAttempts) > this.maxRetryAttempts) {
+        if (previousAttempts > this.maxRetryAttempts) {
           throw new TempoError(TempoStatusCode.RESOURCE_EXHAUSTED, "max retry attempts exceeded");
         }
       }
@@ -241,7 +238,7 @@ export class TempoWsRouter<
       const outgoingMetadata = new Metadata();
       const incomingContext: IncomingContext = {
         headers: new Headers(),
-        metadata: metadata,
+        metadata: new Metadata(),
       };
       if (deadline !== undefined) {
         incomingContext.deadline = deadline;
@@ -308,12 +305,12 @@ export class TempoWsRouter<
               const responseData = this.serializeResponse(value, method, "bebop");
               response.data = new Uint8Array(responseData);
               const encoded = Message.encode(response);
-              ws.send(encoded);
+              ws.send(encoded as BufferSource);
             }
             // cancel the stream
             response.data = new Uint8Array();
             response.status = TempoStatusCode.CANCELLED;
-            ws.send(Message.encode(response));
+            ws.send(Message.encode(response) as BufferSource);
           };
 
           if (deadline) {
@@ -330,12 +327,14 @@ export class TempoWsRouter<
           }
           const responseData = this.serializeResponse(record, method, "bebop");
           response.data = new Uint8Array(responseData);
-          ws.send(Message.encode(response));
+          ws.send(Message.encode(response) as BufferSource);
         }
       };
-      deadline !== undefined
-        ? await deadline.executeWithinDeadline(handleRequest)
-        : await handleRequest();
+      if (deadline !== undefined) {
+        await deadline.executeWithinDeadline(handleRequest);
+      } else {
+        await handleRequest();
+      }
     } catch (e) {
       let status = TempoStatusCode.UNKNOWN;
       let message = "unknown error";
@@ -348,9 +347,11 @@ export class TempoWsRouter<
         }
         // internal errors indicate transient problems or implementation bugs
         // so we log them as critical errors
-        e.status === TempoStatusCode.INTERNAL
-          ? this.logger.critical(e.message, undefined, e)
-          : this.logger.error(message, undefined, e);
+        if (e.status === TempoStatusCode.INTERNAL) {
+          this.logger.critical(e.message, undefined, e);
+        } else {
+          this.logger.error(message, undefined, e);
+        }
       } else if (e instanceof Error) {
         message = e.message;
         this.logger.error(message, undefined, e);
@@ -362,7 +363,7 @@ export class TempoWsRouter<
       this.clientStreams.delete(request.messageId!);
       response.status = status;
       response.msg = message;
-      ws.send(Message.encode(response));
+      ws.send(Message.encode(response) as BufferSource);
     }
   }
 

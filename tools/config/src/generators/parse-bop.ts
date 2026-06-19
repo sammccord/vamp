@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { BinarySchema } from "bebop";
 
 // Re-export for codegen consumers

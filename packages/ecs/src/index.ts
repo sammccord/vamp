@@ -1,4 +1,11 @@
 export type { Archetype } from "./Archetype";
+export {
+  archetypeId,
+  createArchetype,
+  transformArchetype,
+  transformArchetypeTag,
+  traverseArchetypeGraph,
+} from "./Archetype";
 export { ECS, type ECSOptions } from "./ECS";
 export { type AccumulateDeltaFn, type MergeDeltaFn, type MutationScope } from "./MutationScope";
 export type { Query, QueryBuilder } from "./Query";

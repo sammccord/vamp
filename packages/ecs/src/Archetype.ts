@@ -1,11 +1,13 @@
-import type { TypedFastBitSet } from "typedfastbitset";
+import { TypedFastBitSet } from "typedfastbitset";
 
 export type Archetype = {
   readonly mask: TypedFastBitSet;
+  readonly tagMask: TypedFastBitSet;
   readonly entities: Set<string>;
   readonly adjacent: Map<number, Archetype>;
+  readonly tagAdjacent: Map<number, Archetype>;
   /**
-   * The id of the archetype is a hexadecimal representation of a set of unique bits for all of the `componentIds`
+   * The id of the archetype is a hexadecimal representation of a set of unique bits for all of the `componentIds` and `tagIds`
    */
   readonly id: string;
   /**
@@ -18,26 +20,51 @@ export type Archetype = {
    */
   hasComponent(component: number): boolean;
   /**
+   * Check if this archetype has a `tagId`
+   */
+  hasTag(tag: number): boolean;
+  /**
    * All the `componentIds` constituting this archetype
    */
   componentIds(): number[];
+  /**
+   * All the `tagIds` constituting this archetype
+   */
+  tagIds(): number[];
 };
 
-export function createArchetype(id: string, mask: TypedFastBitSet): Archetype {
+export function archetypeId(mask: TypedFastBitSet, tagMask: TypedFastBitSet): string {
+  return `${mask.toString()}|${tagMask.toString()}`;
+}
+
+export function createArchetype(
+  id: string,
+  mask: TypedFastBitSet,
+  tagMask: TypedFastBitSet = new TypedFastBitSet(),
+): Archetype {
   const entities = new Set<string>();
   const adjacent = new Map<number, Archetype>();
+  const tagAdjacent = new Map<number, Archetype>();
 
   return Object.freeze<Archetype>({
     id,
     mask,
+    tagMask,
     entities,
     adjacent,
-    hasEntity: entities.has,
+    tagAdjacent,
+    hasEntity: (id) => entities.has(id),
     hasComponent(component: number) {
       return mask.has(component);
     },
+    hasTag(tag: number) {
+      return tagMask.has(tag);
+    },
     componentIds() {
       return mask.array();
+    },
+    tagIds() {
+      return tagMask.array();
     },
   });
 }
@@ -51,7 +78,7 @@ export function transformArchetype(archetype: Archetype, componentId: number): A
   // Mutate the current mask in order to avoid creating garbage (in case the archetype already exists)
   const mask = archetype.mask;
   mask.flip(componentId);
-  const nextId = mask.toString();
+  const nextId = archetypeId(mask, archetype.tagMask);
 
   let existingArchetype: Archetype | null = null;
   traverseArchetypeGraph(archetype, (node) => {
@@ -63,11 +90,40 @@ export function transformArchetype(archetype: Archetype, componentId: number): A
     return existingArchetype === null;
   });
 
-  const transformed = existingArchetype || createArchetype(nextId, mask.clone());
+  const transformed =
+    existingArchetype || createArchetype(nextId, mask.clone(), archetype.tagMask.clone());
   // reset current mask of input archetype, see comment above
   mask.flip(componentId);
   transformed.adjacent.set(componentId, archetype);
   archetype.adjacent.set(componentId, transformed);
+  return transformed;
+}
+
+export function transformArchetypeTag(archetype: Archetype, tagId: number): Archetype {
+  const existing = archetype.tagAdjacent.get(tagId);
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const tagMask = archetype.tagMask;
+  tagMask.flip(tagId);
+  const nextId = archetypeId(archetype.mask, tagMask);
+
+  let existingArchetype: Archetype | null = null;
+  traverseArchetypeGraph(archetype, (node) => {
+    if (node === archetype) return;
+    if (node.id === nextId) {
+      existingArchetype = node;
+      return false;
+    }
+    return existingArchetype === null;
+  });
+
+  const transformed =
+    existingArchetype || createArchetype(nextId, archetype.mask.clone(), tagMask.clone());
+  tagMask.flip(tagId);
+  transformed.tagAdjacent.set(tagId, archetype);
+  archetype.tagAdjacent.set(tagId, transformed);
   return transformed;
 }
 
@@ -78,9 +134,11 @@ export function traverseArchetypeGraph(
 ): boolean {
   traversed.add(archetype);
   if (callback(archetype) === false) return false;
-  const adjacent = archetype.adjacent;
-  for (const arch of adjacent.values()) {
-    // graph is doubly linked, so need to prevent infinite recursion
+  for (const arch of archetype.adjacent.values()) {
+    if (traversed.has(arch)) continue;
+    if (traverseArchetypeGraph(arch, callback, traversed) === false) return false;
+  }
+  for (const arch of archetype.tagAdjacent.values()) {
     if (traversed.has(arch)) continue;
     if (traverseArchetypeGraph(arch, callback, traversed) === false) return false;
   }

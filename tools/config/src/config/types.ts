@@ -5,6 +5,12 @@ export interface FrameworkConfig {
     entity: string;
     actions: string;
     state: string;
+    tags: string;
+    /**
+     * Path for the generated bebop mutation schema (EntityDelta, MutationScope).
+     * Defaults to a `mutation.bop` sibling of the entity schema.
+     */
+    mutation?: string;
   };
   outFile: string;
 }

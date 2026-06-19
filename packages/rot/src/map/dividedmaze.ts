@@ -1,7 +1,7 @@
 //@ts-nocheck
 
 import RNG from "../rng";
-import Map, { CreateCallback } from "./map";
+import Map, { type CreateCallback } from "./map";
 
 type Room = [number, number, number, number];
 type Point = [number, number];

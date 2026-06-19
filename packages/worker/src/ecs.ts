@@ -14,14 +14,13 @@ import { TempoWsRouter } from "@vamp/utils/ws-router";
 import { HookRegistry, TempoLogLevel } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
 import { DurableObject } from "cloudflare:workers";
-import { EventEmitter } from "tseep";
 import { YStreamClient, type YStreamProviderStub } from "y-durablestream";
 import { Doc } from "yjs";
+import type { YArrayEvent, YMapEvent } from "yjs";
 
 export type RuntimeContext<UserSession extends {}, Context extends {}> = Context & {
   // internal properties extended by ecs runtime, available to ecs systems for low-level usage
   _: {
-    events: EventEmitter;
     sessions: Map<WebSocket, UserSession>;
     saveSession(ws: WebSocket, session: UserSession): void;
   };
@@ -31,19 +30,25 @@ export type RPCContext<
   UserSession extends {},
   Context extends Record<string, unknown>,
   UpdateArguments extends Array<unknown>,
-  Events extends GenericAction,
-  E extends BaseEntity = BaseEntity,
-  D = unknown,
-> = [ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Events, E, D>, WebSocket];
+  Actions extends GenericAction,
+  Tags extends number = number,
+  Entity extends BaseEntity<Tags> = BaseEntity<Tags>,
+  EntityDelta = unknown,
+> = [
+  ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Actions, Tags, Entity, EntityDelta>,
+  WebSocket,
+];
 
 export class ECSDurableObject<
   UserSession extends {},
   Context extends Record<string, unknown>,
   UpdateArguments extends Array<unknown>,
-  Events extends GenericAction,
-  E extends BaseEntity = BaseEntity,
-  D = unknown,
-> extends DurableObject {
+  Actions extends GenericAction,
+  Tags extends number = number,
+  Entity extends BaseEntity<Tags> = BaseEntity<Tags>,
+  EntityDelta = unknown,
+  Env = CloudflareBindings,
+> extends DurableObject<Env> {
   static log = new PinoLogger("ecs", TempoLogLevel.Info);
   _log: ContextLogger | undefined;
 
@@ -51,9 +56,16 @@ export class ECSDurableObject<
   sessions = new Map<WebSocket, UserSession>();
 
   // Tempo RPC properties
-  router:
+  private router:
     | TempoWsRouter<
-        ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Events, E, D>,
+        ECS<
+          RuntimeContext<UserSession, Context>,
+          UpdateArguments,
+          Actions,
+          Tags,
+          Entity,
+          EntityDelta
+        >,
         WebSocket
       >
     | undefined;
@@ -61,11 +73,34 @@ export class ECSDurableObject<
   // Sync properties
   private doc = new Doc();
   private client: YStreamClient | null = null;
+  private static LOCAL_ORIGIN = Symbol("ecs-local");
+
+  // Per-instance state synced from the Yjs doc (working copy)
+  private _entityStore = new Map<string, Entity>();
+  // Mirror of entity ids in the namespace array for diff on observe
+  private _entityIdMirror = new Set<string>();
+  // Remote changes pending reconciliation into the next scope
+  private _pendingReconcile = new Map<
+    string,
+    { type: "insert" | "update" | "delete"; entity?: Entity }
+  >();
+  // Entity ids that were reconciled in the currently-flushing scope
+  private _reconcilingIds = new Set<string>();
+  // Cleanup functions for per-entity Y.Map observers
+  private _entityObserverCleanups = new Map<string, () => void>();
+  // Cleanup for the namespace array observer
+  private _arrayObserverCleanup: (() => void) | null = null;
+  // Whether we have seeded the local ECS from the Yjs doc
+  private _seeded = false;
+  // The namespace (Y.Array key) for this instance's entity list
+  private _namespace = "";
 
   // ECS properties
-  ecs: ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Events, E, D> | undefined;
+  ecs:
+    | ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Actions, Tags, Entity, EntityDelta>
+    | undefined;
 
-  constructor(ctx: DurableObjectState, env: CloudflareBindings) {
+  constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     // As part of constructing the Durable Object,
     // we wake up any hibernating WebSockets and
@@ -73,11 +108,11 @@ export class ECSDurableObject<
 
     // Get all WebSocket connections from the DO
     this.ctx.getWebSockets().forEach((ws) => {
-      let attachment = ws.deserializeAttachment();
+      let attachment = ws.deserializeAttachment() as UserSession | null;
       if (attachment) {
         // If we previously attached state to our WebSocket,
         // let's add it to `sessions` map to restore the state of the connection.
-        this.sessions.set(ws, { ...attachment });
+        this.sessions.set(ws, attachment);
       }
     });
 
@@ -105,34 +140,51 @@ export class ECSDurableObject<
       // Optional hooks for tempo rpc middleware
       hooks: HookRegistry<
         ServerContext,
-        RPCContext<UserSession, Context, UpdateArguments, Events, E, D>
+        RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>
       >;
       // ECS options to configure the ecs runtime
-      ecs: ECSOptions<E, D>;
+      ecs: ECSOptions<Entity, EntityDelta>;
       // General context to make available within ecs systems
       context: Context;
     },
   ) {
     if (this.initialized()) return;
 
-    // Ensure we are connected the the global entities yjs backend, make this "global" configurable
-    this.connectToDoc(configuration.document ?? "global");
+    this._namespace = namespace;
 
-    // TODO
-    // this.log.info("registering services", {
-    //   // log the service to trigger the service's decorator
-    // });
-
-    this.ecs = new ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Events, E, D>(
-      new Map<string, E>(),
-      (id: string, mutation: MutationRecord<E, D>) => {
-        this.log.debug("mutate", { id, mutation });
+    // Create ECS with shared entity store
+    const entities = this._entityStore;
+    this.ecs = new ECS<
+      RuntimeContext<UserSession, Context>,
+      UpdateArguments,
+      Actions,
+      Tags,
+      Entity,
+      EntityDelta
+    >(
+      entities,
+      // Base mutator: pure read-copy update of the working entity store
+      (id: string, mutation: MutationRecord<Entity, EntityDelta>) => {
+        switch (mutation.tag) {
+          case 1:
+            entities.set(id, mutation.value.entity);
+            break;
+          case 2: {
+            const entity = entities.get(id);
+            if (entity) {
+              configuration.ecs.mergeDelta(entity, mutation.value.delta);
+            }
+            break;
+          }
+          case 3:
+            entities.delete(id);
+            break;
+        }
       },
       {
         ...configuration.context,
         _: {
           sessions: this.sessions,
-          events: new EventEmitter(),
           saveSession(ws: WebSocket, session: UserSession) {
             ws.serializeAttachment(session);
             this.sessions.set(ws, session);
@@ -142,46 +194,304 @@ export class ECSDurableObject<
       configuration.ecs,
     );
 
+    // Flush handler: batch all coalesced mutations in a single doc.transact
+    this.ecs.setFlushHandler((mutations) => {
+      this.doc.transact(() => {
+        for (const [id, mutation] of mutations) {
+          if (this._reconcilingIds.has(id)) {
+            // Reconciled from remote: copy shadow entity (avoids additive mergeDelta)
+            const scope = this.ecs!.context.scope;
+            if (scope) {
+              const shadow = scope.shadowEntities.get(id);
+              if (shadow) {
+                entities.set(id, shadow);
+              } else if (scope.deletedIds.has(id)) {
+                entities.delete(id);
+              }
+            }
+          }
+          // Always mirror to Yjs (idempotent; includes local changes for mixed-case)
+          this._writeMutationToDoc(id, mutation);
+        }
+      }, ECSDurableObject.LOCAL_ORIGIN);
+      this._reconcilingIds.clear();
+    });
+
+    // Scope-open handler: drain pending remote changes into the scope
+    this.ecs.onScopeOpen((scope) => {
+      for (const [id, { type }] of this._pendingReconcile) {
+        const entity = entities.get(id);
+        switch (type) {
+          case "insert":
+            if (entity) {
+              scope.mutations.set(
+                id,
+                MutationRecord.fromInsert<Entity, EntityDelta>({ entity: structuredClone(entity) }),
+              );
+              scope.shadowEntities.set(id, structuredClone(entity));
+              scope.deletedIds.delete(id);
+            }
+            break;
+          case "update":
+            if (entity) {
+              scope.mutations.set(
+                id,
+                MutationRecord.fromUpdate<Entity, EntityDelta>({
+                  delta: entity as unknown as EntityDelta,
+                }),
+              );
+              scope.shadowEntities.set(id, structuredClone(entity));
+              scope.deletedIds.delete(id);
+            }
+            break;
+          case "delete": {
+            const stale = entity ?? entities.get(id);
+            if (stale) {
+              scope.mutations.set(
+                id,
+                MutationRecord.fromDelete<Entity, EntityDelta>({ entity: stale }),
+              );
+              scope.shadowEntities.delete(id);
+              scope.deletedIds.add(id);
+            }
+            break;
+          }
+        }
+        this._reconcilingIds.add(id);
+      }
+      this._pendingReconcile.clear();
+    });
+
     // TODO make this generic parameter ECS
     this.router = new TempoWsRouter<
-      ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Events, E, D>,
+      ECS<
+        RuntimeContext<UserSession, Context>,
+        UpdateArguments,
+        Actions,
+        Tags,
+        Entity,
+        EntityDelta
+      >,
       WebSocket
     >(this.log, configuration.serviceRegistry, new TempoRouterConfiguration());
     if (configuration.hooks) {
       this.router.useHooks(configuration.hooks);
     }
 
-    // TODO register systems
-    // TODO pull entities in yjs uri set
-    const entitiesList = this.doc.getArray<string>(namespace);
-    // Whenever an entity is added/removed from this uri, reflect that change locally.
-    entitiesList.observe((t) => {});
-    for (const id in entitiesList) {
-      // subscribe to entity
-      const entity = this.doc.getMap(id); // key is component name, val is component value
-      // Insert raw entity
-      this.ecs.insert(entity.toJSON());
-      // TODO subscribe to entity doc, transparently modify entity in doc without firing off additional scope mutations
-    }
-
-    this.ecs.initialize();
+    // Connect to the Yjs document and seed ECS once synced
+    this.connectToDoc(configuration.document ?? "global");
+    this._ensureSyncedAndSeed();
   }
 
   connectToDoc(docName: string) {
-    const stub = this.env.GAME_STORAGE!.get(
-      this.env.GAME_STORAGE!.idFromName(docName),
+    const bindings = this.env as CloudflareBindings;
+    const stub = bindings.GAME_STORAGE.get(
+      bindings.GAME_STORAGE.idFromName(docName),
     )! as unknown as YStreamProviderStub;
     this.client = new YStreamClient(this.doc, { stub });
     this.ctx.waitUntil(this.client.connect());
   }
 
   disconnect() {
+    this._teardownObservers();
     this.client?.disconnect();
     this.client = null;
   }
 
-  async fetch(_req: Request) {
+  /**
+   * Wait for the YStreamClient to finish initial sync, then seed the local
+   * ECS from the Yjs doc (namespace array + per-entity maps), attach observers,
+   * and finalize ECS initialization.
+   */
+  private _ensureSyncedAndSeed() {
+    if (this._seeded) return;
+    if (this.client?.synced) {
+      this._seedFromDoc();
+    } else {
+      this.client?.onStatusChange((status) => {
+        if (status === "synced" && !this._seeded) {
+          this._seedFromDoc();
+        }
+      });
+    }
+  }
+
+  /// ── Doc seeding ──────────────────────────────────────────────
+
+  private _seedFromDoc() {
+    if (this._seeded || !this.ecs || !this.client?.synced) return;
+    this._seeded = true;
+
+    const entitiesList = this.doc.getArray<string>(this._namespace);
+
+    // Attach namespace array observer (before seeding to catch future changes)
+    this._setupArrayObserver();
+
+    // Seed existing entities
+    const ids = entitiesList.toArray();
+    for (let i = 0; i < ids.length; i++) {
+      this._addEntityFromDoc(ids[i]);
+    }
+
+    this.ecs.initialize();
+  }
+
+  private _setupArrayObserver() {
+    const entitiesList = this.doc.getArray<string>(this._namespace);
+    const handler = (event: YArrayEvent<string>) => {
+      if (event.transaction.origin === ECSDurableObject.LOCAL_ORIGIN) return;
+
+      const current = new Set(entitiesList.toArray());
+
+      // Removed ids
+      for (const id of this._entityIdMirror) {
+        if (!current.has(id)) {
+          this._removeEntityFromDoc(id);
+        }
+      }
+      // Added ids
+      for (const id of current) {
+        if (!this._entityIdMirror.has(id)) {
+          this._addEntityFromDoc(id);
+          this._pendingReconcile.set(id, { type: "insert" });
+        }
+      }
+
+      this._entityIdMirror = current;
+    };
+    entitiesList.observe(handler);
+    this._arrayObserverCleanup = () => entitiesList.unobserve(handler);
+  }
+
+  private _addEntityFromDoc(id: string) {
+    if (!this.ecs) return;
+    const map = this.doc.getMap<unknown>(id);
+    const raw = map.toJSON() as Entity;
+    // If entity doesn't exist locally, register it in the ECS archetype graph
+    if (!this.ecs.hasEntity(id)) {
+      // ensure id is set
+      if (!raw.id) (raw as Record<string, unknown>).id = id;
+      this.ecs.insert(raw);
+    }
+    this._entityIdMirror.add(id);
+    this._observeEntity(id);
+  }
+
+  private _removeEntityFromDoc(id: string) {
+    if (!this.ecs) return;
+    const entity = this._entityStore.get(id);
+    if (entity) {
+      this.ecs.delete(entity);
+      this._pendingReconcile.set(id, { type: "delete", entity });
+    }
+    this._unobserveEntity(id);
+    this._entityIdMirror.delete(id);
+  }
+
+  /// ── Per-entity Y.Map observers ───────────────────────────────
+
+  private _observeEntity(id: string) {
+    if (this._entityObserverCleanups.has(id)) return;
+    const map = this.doc.getMap<unknown>(id);
+    const handler = (event: YMapEvent<unknown>) => {
+      if (event.transaction.origin === ECSDurableObject.LOCAL_ORIGIN) return;
+      if (event.keysChanged.size === 0) return;
+
+      const entity = this._entityStore.get(id);
+      if (!entity) return;
+
+      for (const key of event.keysChanged) {
+        const change = event.changes.keys.get(key);
+        if (change && change.action === "delete") {
+          delete (entity as Record<string, unknown>)[key];
+        } else {
+          (entity as Record<string, unknown>)[key] = map.get(key);
+        }
+      }
+
+      this._pendingReconcile.set(id, { type: "update" });
+    };
+    map.observe(handler);
+    this._entityObserverCleanups.set(id, () => map.unobserve(handler));
+  }
+
+  private _unobserveEntity(id: string) {
+    const cleanup = this._entityObserverCleanups.get(id);
+    if (cleanup) {
+      cleanup();
+      this._entityObserverCleanups.delete(id);
+    }
+  }
+
+  private _teardownObservers() {
+    for (const cleanup of this._entityObserverCleanups.values()) {
+      cleanup();
+    }
+    this._entityObserverCleanups.clear();
+    if (this._arrayObserverCleanup) {
+      this._arrayObserverCleanup();
+      this._arrayObserverCleanup = null;
+    }
+  }
+
+  /// ── Writing local mutations back to the Yjs doc ──────────────
+
+  private _writeMutationToDoc(id: string, mutation: MutationRecord<Entity, EntityDelta>) {
+    const map = this.doc.getMap<unknown>(id);
+    switch (mutation.tag) {
+      case 1: {
+        // Insert: populate entity map
+        const entity = mutation.value.entity as Record<string, unknown>;
+        for (const key in entity) {
+          if (Object.prototype.hasOwnProperty.call(entity, key)) {
+            const val = entity[key];
+            if (val !== undefined) {
+              map.set(key, val);
+            }
+          }
+        }
+        // Ensure entity is in the namespace array
+        if (!this._entityIdMirror.has(id)) {
+          this.doc.getArray<string>(this._namespace).push([id]);
+          this._entityIdMirror.add(id);
+        }
+        break;
+      }
+      case 2: {
+        // Update: set changed component keys
+        const delta = mutation.value.delta as Record<string, unknown>;
+        for (const key in delta) {
+          if (Object.prototype.hasOwnProperty.call(delta, key)) {
+            const val = delta[key];
+            if (val === undefined) {
+              map.delete(key);
+            } else {
+              map.set(key, val);
+            }
+          }
+        }
+        break;
+      }
+      case 3: {
+        // Delete: remove from namespace array and clear entity map
+        const arr = this.doc.getArray<string>(this._namespace);
+        const idx = arr.toArray().indexOf(id);
+        if (idx !== -1) {
+          arr.delete(idx, 1);
+        }
+        for (const key of map.keys()) {
+          map.delete(key);
+        }
+        this._entityIdMirror.delete(id);
+        this._unobserveEntity(id);
+        break;
+      }
+    }
+  }
+
+  async fetch(_req: Request): Promise<Response> {
     // Creates two ends of a WebSocket connection.
+    // @ts-expect-error
     const webSocketPair = new WebSocketPair();
     const [client, server] = Object.values(webSocketPair);
 
@@ -194,16 +504,19 @@ export class ECSDurableObject<
     // from memory, but the WebSocket connection will remain open. If at some later point the
     // WebSocket receives a message, the runtime will recreate the Durable Object
     // (run the `constructor`) and deliver the message to the appropriate handler.
-    await this.ctx.acceptWebSocket(server);
+    // @ts-expect-error
+    this.ctx.acceptWebSocket(server);
 
     return new Response(null, {
       status: 101,
+      //@ts-expect-error
       webSocket: client,
     });
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     if (!this.ecs || !this.router) throw new Error("uninitialized");
+    // Whenever we receive a message, provide the ecs instance and underlying websocket as context to the service.
     await this.router.process(message as ArrayBuffer, Message({}), [this.ecs!, ws]);
   }
 
@@ -215,10 +528,10 @@ export class ECSDurableObject<
     });
     // If the client closes the connection, the runtime will invoke the webSocketClose() handler.
     this.sessions.delete(ws);
-    await ws.close(code, "Durable Object is closing WebSocket");
+    ws.close(code, "Durable Object is closing WebSocket");
   }
 
   async webSocketError?(ws: WebSocket, error: unknown) {
-    await this.log.error("Durable object closing WebSocket", {}, error as Error);
+    this.log.error("Durable object closing WebSocket", {}, error as Error);
   }
 }

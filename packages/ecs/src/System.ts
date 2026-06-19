@@ -12,7 +12,8 @@ export type EntitySystem<
   State extends Record<string, unknown>,
   UpdateArguments extends unknown[],
   Actions extends GenericAction,
-  E extends BaseEntity = BaseEntity,
+  Tags extends number = number,
+  E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 > = BaseSystem & {
   /**
@@ -22,7 +23,7 @@ export type EntitySystem<
   readonly type: 0;
   execute(
     entities: Array<string>,
-    world: ECS<State, UpdateArguments, Actions, E, D>,
+    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
     ...args: UpdateArguments
   ): void;
 };
@@ -31,7 +32,8 @@ export type ArchetypeSystem<
   State extends Record<string, unknown>,
   UpdateArguments extends unknown[],
   Actions extends GenericAction,
-  E extends BaseEntity = BaseEntity,
+  Tags extends number = number,
+  E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 > = BaseSystem & {
   /**
@@ -41,7 +43,7 @@ export type ArchetypeSystem<
   readonly type: 1;
   execute(
     archetypes: Set<Archetype>,
-    world: ECS<State, UpdateArguments, Actions, E, D>,
+    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
     ...args: UpdateArguments
   ): void;
 };
@@ -68,13 +70,14 @@ export type Behavior<
   State extends Record<string, unknown>,
   UpdateArguments extends unknown[],
   Actions extends GenericAction,
-  E extends BaseEntity = BaseEntity,
+  Tags extends number = number,
+  E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 > = BaseSystem & {
   readonly type: 4;
   tag: number;
   handler: (
-    world: ECS<State, UpdateArguments, Actions, E, D>,
+    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
     entity: E,
     event: CustomAction<Actions>,
   ) => void | Promise<void>;
@@ -85,14 +88,15 @@ export type System<
   State extends Record<string, unknown>,
   UpdateArguments extends unknown[],
   Actions extends GenericAction,
-  E extends BaseEntity = BaseEntity,
+  Tags extends number = number,
+  E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 > =
-  | EntitySystem<State, UpdateArguments, Actions, E, D>
-  | ArchetypeSystem<State, UpdateArguments, Actions, E, D>
+  | EntitySystem<State, UpdateArguments, Actions, Tags, E, D>
+  | ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>
   | EventSystem
   | LifecycleSystem
-  | Behavior<State, UpdateArguments, Actions, E, D>;
+  | Behavior<State, UpdateArguments, Actions, Tags, E, D>;
 
 /**
  * An entity system is a system that will be executed for each archetype matching the query.
@@ -106,16 +110,17 @@ export function createEntitySystem<
   State extends Record<string, unknown>,
   UpdateArguments extends unknown[],
   Actions extends GenericAction,
-  E extends BaseEntity = BaseEntity,
+  Tags extends number = number,
+  E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 >(
   execute: (
     entities: Array<string>,
-    world: ECS<State, UpdateArguments, Actions, E, D>,
+    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
     ...args: UpdateArguments
   ) => void,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
-): EntitySystem<State, UpdateArguments, Actions, E, D> {
+): EntitySystem<State, UpdateArguments, Actions, Tags, E, D> {
   query = typeof query === "function" ? buildQuery(query) : query;
   return Object.freeze({
     execute,
@@ -137,16 +142,17 @@ export function createArchetypeSystem<
   UpdateArguments extends unknown[],
   ReturnArguments,
   Actions extends GenericAction,
-  E extends BaseEntity = BaseEntity,
+  Tags extends number = number,
+  E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 >(
   execute: (
     archetypes: Set<Archetype>,
-    world: ECS<State, UpdateArguments, Actions, E, D>,
+    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
     ...args: UpdateArguments
   ) => ReturnArguments,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
-): ArchetypeSystem<State, UpdateArguments, Actions, E, D> {
+): ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D> {
   query = typeof query === "function" ? buildQuery(query) : query;
   return Object.freeze({
     execute,
@@ -191,18 +197,19 @@ export function createBehavior<
   State extends Record<string, unknown>,
   UpdateArguments extends unknown[],
   Actions extends GenericAction,
-  E extends BaseEntity = BaseEntity,
+  Tags extends number = number,
+  E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 >(
   tag: number,
   handler: (
-    world: ECS<State, UpdateArguments, Actions, E, D>,
+    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
     entity: E,
     event: CustomAction<Actions>,
   ) => void | Promise<void>,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
   priority?: number,
-): Behavior<State, UpdateArguments, Actions, E, D> {
+): Behavior<State, UpdateArguments, Actions, Tags, E, D> {
   query = typeof query === "function" ? buildQuery(query) : query;
   return Object.freeze({
     tag,

@@ -1,5 +1,5 @@
 import RNG from "../rng";
-import Map, { CreateCallback } from "./map";
+import Map, { type CreateCallback } from "./map";
 
 type List = number[];
 
