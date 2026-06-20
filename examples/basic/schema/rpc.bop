@@ -1,9 +1,11 @@
 import "./entity.bop"
-import "./actions"
+import "./actions.bop"
+import "./mutation.bop"
 
 service RPC {
     spawn(Entity): Entity;
-    act(Action): Action;
-    // TODO figure out entity mutation bebop integration
+    act(Actions): Actions;
+    // Low-level entity changes are communicated as a serializable MutationScope.
+    observe(MutationScope): stream MutationScope;
     // subscribe(): stream Actions;
 }

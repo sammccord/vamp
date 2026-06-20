@@ -3,6 +3,7 @@ import { emitComponents } from "../src/generators/emit-components.js";
 import { emitDelta } from "../src/generators/emit-delta.js";
 import { emitFactory } from "../src/generators/emit-factory.js";
 import { emitClasses } from "../src/generators/emit-classes.ts";
+import { emitGameContext } from "../src/generators/emit-game-context.ts";
 import type { SchemaDefinition, ParsedSchema } from "../src/generators/parse-bop.js";
 
 const entityDef: SchemaDefinition = {
@@ -123,5 +124,15 @@ describe("emitTypedClasses", () => {
   it("defaults to number when no tags type given", () => {
     const result = emitClasses();
     expect(result).toMatch(/,(\s*)number,/);
+  });
+});
+
+describe("emitGameContext", () => {
+  it("exports a GameContext alias over RPCContext for service environments", () => {
+    const result = emitGameContext();
+    expect(result).toContain("export type GameContext");
+    expect(result).toContain(
+      "RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>",
+    );
   });
 });

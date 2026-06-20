@@ -37,6 +37,8 @@ catalogMode: prefer
 overrides:
   vite: "catalog:"
   vitest: "catalog:"
+patchedDependencies:
+  bebop@3.2.3: patches/bebop@3.2.3.patch
 peerDependencyRules:
   allowAny:
     - vite

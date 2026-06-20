@@ -20,46 +20,639 @@ import {  BaseClient, MethodInfo, CallOptions } from "@tempojs/client";
 import { ServiceRegistry, BaseService, ServerContext, BebopMethodAny, BebopMethod } from "@tempojs/server";
 
 export const BEBOP_SCHEMA = new Uint8Array ([
-3, 10, 0, 0, 0, 65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0,
-0, 0, 3, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255,
-255, 0, 1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255,
-255, 0, 2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255,
-255, 0, 3, 84, 97, 107, 101, 68, 97, 109, 97, 103, 101, 0,
-2, 0, 5, 0, 0, 0, 3, 115, 111, 117, 114, 99, 101, 0, 244,
-255, 255, 255, 0, 1, 116, 97, 114, 103, 101, 116, 0, 244,
-255, 255, 255, 0, 2, 100, 97, 109, 97, 103, 101, 0, 251,
-255, 255, 255, 0, 3, 65, 99, 116, 105, 111, 110, 115, 0,
-3, 0, 10, 0, 0, 0, 2, 1, 0, 0, 0, 0, 2, 1, 0, 0, 0, 74,
-111, 105, 110, 82, 101, 113, 117, 101, 115, 116, 0, 1, 0,
-0, 0, 0, 0, 0, 1, 0, 74, 111, 105, 110, 82, 101, 115, 112,
-111, 110, 115, 101, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 69, 110,
-116, 105, 116, 121, 0, 2, 0, 5, 0, 0, 0, 6, 105, 100, 0,
-244, 255, 255, 255, 0, 1, 114, 111, 111, 116, 0, 244, 255,
-255, 255, 0, 2, 116, 97, 103, 115, 0, 242, 255, 255, 255,
-0, 7, 0, 0, 0, 0, 3, 112, 97, 114, 101, 110, 116, 0, 244,
-255, 255, 255, 0, 4, 99, 104, 105, 108, 100, 114, 101,
-110, 0, 242, 255, 255, 255, 0, 244, 255, 255, 255, 0, 5,
-104, 101, 97, 108, 116, 104, 0, 8, 0, 0, 0, 0, 6, 83, 116,
-97, 116, 101, 0, 2, 0, 5, 0, 0, 0, 1, 110, 115, 0, 245,
-255, 255, 255, 0, 1, 84, 97, 103, 115, 0, 4, 0, 251, 255,
-255, 255, 0, 4, 0, 0, 0, 3, 72, 117, 109, 97, 110, 0, 0,
-1, 0, 0, 0, 80, 108, 97, 121, 101, 114, 67, 111, 110, 116,
-114, 111, 108, 108, 101, 100, 0, 0, 2, 0, 0, 0, 72, 111,
-115, 116, 105, 108, 101, 0, 0, 3, 0, 0, 0, 80, 111, 111,
-108, 0, 2, 0, 5, 0, 0, 0, 5, 112, 111, 105, 110, 116, 115,
-0, 251, 255, 255, 255, 0, 1, 109, 105, 110, 0, 251, 255,
-255, 255, 0, 2, 109, 97, 120, 0, 251, 255, 255, 255, 0, 3,
-114, 97, 116, 101, 0, 250, 255, 255, 255, 0, 4, 105, 110,
-116, 101, 114, 118, 97, 108, 0, 251, 255, 255, 255, 0, 5,
-80, 111, 111, 108, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0,
-0, 0, 5, 112, 111, 105, 110, 116, 115, 0, 250, 255, 255,
-255, 0, 1, 109, 105, 110, 0, 250, 255, 255, 255, 0, 2,
-109, 97, 120, 0, 250, 255, 255, 255, 0, 3, 114, 97, 116,
-101, 0, 250, 255, 255, 255, 0, 4, 105, 110, 116, 101, 114,
-118, 97, 108, 0, 250, 255, 255, 255, 0, 5, 1, 0, 0, 0, 82,
-112, 99, 0, 0, 1, 0, 0, 0, 106, 111, 105, 110, 0, 0, 0, 3,
-0, 0, 0, 4, 0, 0, 0, 182, 247, 22, 49
+3, 16, 0, 0, 0, 71, 117, 105, 100, 65, 114, 114, 97, 121,
+68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 3, 115, 101,
+116, 0, 242, 255, 255, 255, 0, 244, 255, 255, 255, 0, 1,
+97, 100, 100, 0, 242, 255, 255, 255, 0, 244, 255, 255,
+255, 0, 2, 114, 101, 109, 111, 118, 101, 0, 242, 255, 255,
+255, 0, 244, 255, 255, 255, 0, 3, 69, 110, 116, 105, 116,
+121, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 6, 105,
+100, 0, 244, 255, 255, 255, 0, 1, 114, 111, 111, 116, 0,
+244, 255, 255, 255, 0, 2, 116, 97, 103, 115, 0, 242, 255,
+255, 255, 0, 13, 0, 0, 0, 0, 3, 112, 97, 114, 101, 110,
+116, 0, 244, 255, 255, 255, 0, 4, 99, 104, 105, 108, 100,
+114, 101, 110, 0, 0, 0, 0, 0, 0, 5, 104, 101, 97, 108,
+116, 104, 0, 15, 0, 0, 0, 0, 6, 77, 117, 116, 97, 116,
+105, 111, 110, 84, 121, 112, 101, 0, 4, 0, 251, 255, 255,
+255, 0, 4, 0, 0, 0, 3, 73, 110, 115, 101, 114, 116, 0, 0,
+1, 0, 0, 0, 85, 112, 100, 97, 116, 101, 0, 0, 2, 0, 0, 0,
+68, 101, 108, 101, 116, 101, 0, 0, 3, 0, 0, 0, 73, 110,
+115, 101, 114, 116, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 101,
+110, 116, 105, 116, 121, 0, 11, 0, 0, 0, 0, 85, 112, 100,
+97, 116, 101, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 100, 101, 108,
+116, 97, 0, 1, 0, 0, 0, 0, 68, 101, 108, 101, 116, 101, 0,
+1, 0, 0, 5, 0, 0, 0, 0, 1, 101, 110, 116, 105, 116, 121,
+0, 11, 0, 0, 0, 0, 77, 117, 116, 97, 116, 105, 111, 110,
+82, 101, 99, 111, 114, 100, 0, 3, 0, 10, 0, 0, 0, 3, 1, 3,
+0, 0, 0, 2, 4, 0, 0, 0, 3, 5, 0, 0, 0, 77, 117, 116, 97,
+116, 105, 111, 110, 83, 99, 111, 112, 101, 0, 2, 0, 5, 0,
+0, 0, 1, 109, 117, 116, 97, 116, 105, 111, 110, 115, 0,
+241, 255, 255, 255, 244, 255, 255, 255, 6, 0, 0, 0, 0, 1,
+65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0, 0, 0, 3, 115,
+111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116,
+97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 100,
+97, 109, 97, 103, 101, 0, 251, 255, 255, 255, 0, 3, 84,
+97, 107, 101, 68, 97, 109, 97, 103, 101, 0, 2, 0, 5, 0, 0,
+0, 3, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255,
+0, 1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255,
+0, 2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255, 255,
+0, 3, 65, 99, 116, 105, 111, 110, 115, 0, 3, 0, 10, 0, 0,
+0, 2, 1, 8, 0, 0, 0, 2, 9, 0, 0, 0, 69, 110, 116, 105,
+116, 121, 0, 2, 0, 5, 0, 0, 0, 6, 105, 100, 0, 244, 255,
+255, 255, 0, 1, 114, 111, 111, 116, 0, 244, 255, 255, 255,
+0, 2, 116, 97, 103, 115, 0, 242, 255, 255, 255, 0, 13, 0,
+0, 0, 0, 3, 112, 97, 114, 101, 110, 116, 0, 244, 255, 255,
+255, 0, 4, 99, 104, 105, 108, 100, 114, 101, 110, 0, 242,
+255, 255, 255, 0, 244, 255, 255, 255, 0, 5, 104, 101, 97,
+108, 116, 104, 0, 14, 0, 0, 0, 0, 6, 83, 116, 97, 116,
+101, 0, 2, 0, 5, 0, 0, 0, 1, 110, 115, 0, 245, 255, 255,
+255, 0, 1, 84, 97, 103, 115, 0, 4, 0, 251, 255, 255, 255,
+0, 4, 0, 0, 0, 3, 72, 117, 109, 97, 110, 0, 0, 1, 0, 0, 0,
+80, 108, 97, 121, 101, 114, 67, 111, 110, 116, 114, 111,
+108, 108, 101, 100, 0, 0, 2, 0, 0, 0, 72, 111, 115, 116,
+105, 108, 101, 0, 0, 3, 0, 0, 0, 80, 111, 111, 108, 0, 2,
+0, 5, 0, 0, 0, 5, 112, 111, 105, 110, 116, 115, 0, 251,
+255, 255, 255, 0, 1, 109, 105, 110, 0, 251, 255, 255, 255,
+0, 2, 109, 97, 120, 0, 251, 255, 255, 255, 0, 3, 114, 97,
+116, 101, 0, 250, 255, 255, 255, 0, 4, 105, 110, 116, 101,
+114, 118, 97, 108, 0, 251, 255, 255, 255, 0, 5, 80, 111,
+111, 108, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 5,
+112, 111, 105, 110, 116, 115, 0, 250, 255, 255, 255, 0, 1,
+109, 105, 110, 0, 250, 255, 255, 255, 0, 2, 109, 97, 120,
+0, 250, 255, 255, 255, 0, 3, 114, 97, 116, 101, 0, 250,
+255, 255, 255, 0, 4, 105, 110, 116, 101, 114, 118, 97,
+108, 0, 250, 255, 255, 255, 0, 5, 1, 0, 0, 0, 82, 112, 99,
+0, 0, 3, 0, 0, 0, 115, 112, 97, 119, 110, 0, 0, 0, 11, 0,
+0, 0, 11, 0, 0, 0, 62, 226, 118, 138, 97, 99, 116, 0, 0,
+0, 10, 0, 0, 0, 10, 0, 0, 0, 48, 15, 87, 211, 111, 98,
+115, 101, 114, 118, 101, 0, 0, 1, 7, 0, 0, 0, 7, 0, 0, 0,
+214, 29, 17, 28
 ]);
+
+export interface GuidArrayDelta {
+
+  set?: string[];
+
+  add?: string[];
+
+  remove?: string[];
+}
+
+export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: GuidArrayDelta): GuidArrayDelta & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return GuidArrayDelta.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: GuidArrayDelta): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      GuidArrayDelta.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: GuidArrayDelta, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.set !== undefined) {
+        view.writeByte(1);
+        {
+        const length0 = record.set.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeGuid(record.set[i0]);
+        }
+      }
+      }
+      if (record.add !== undefined) {
+        view.writeByte(2);
+        {
+        const length0 = record.add.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeGuid(record.add[i0]);
+        }
+      }
+      }
+      if (record.remove !== undefined) {
+        view.writeByte(3);
+        {
+        const length0 = record.remove.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeGuid(record.remove[i0]);
+        }
+      }
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): GuidArrayDelta & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = GuidArrayDelta.readFrom(view);
+      return GuidArrayDelta(decoded);
+    },
+
+    readFrom(view: BebopView): GuidArrayDelta {
+      const message: GuidArrayDelta = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            {
+          const length0 = view.readUint32();
+          message.set = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: string;
+            x0 = view.readGuid();
+            message.set[i0] = x0;
+          }
+        }
+            break;
+
+          case 2:
+            {
+          const length0 = view.readUint32();
+          message.add = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: string;
+            x0 = view.readGuid();
+            message.add[i0] = x0;
+          }
+        }
+            break;
+
+          case 3:
+            {
+          const length0 = view.readUint32();
+          message.remove = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: string;
+            x0 = view.readGuid();
+            message.remove[i0] = x0;
+          }
+        }
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
+export interface EntityDelta {
+
+  id?: string;
+
+  root?: string;
+
+  tags?: Tags[];
+
+  parent?: string;
+
+  children?: GuidArrayDelta;
+
+  health?: PoolDelta;
+}
+
+export const EntityDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: EntityDelta): EntityDelta & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return EntityDelta.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: EntityDelta): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      EntityDelta.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: EntityDelta, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.id !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.id);
+      }
+      if (record.root !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.root);
+      }
+      if (record.tags !== undefined) {
+        view.writeByte(3);
+        {
+        const length0 = record.tags.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeUint32(record.tags[i0]);
+        }
+      }
+      }
+      if (record.parent !== undefined) {
+        view.writeByte(4);
+        view.writeGuid(record.parent);
+      }
+      if (record.children !== undefined) {
+        view.writeByte(5);
+        GuidArrayDelta.encodeInto(record.children, view);
+      }
+      if (record.health !== undefined) {
+        view.writeByte(6);
+        PoolDelta.encodeInto(record.health, view);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): EntityDelta & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = EntityDelta.readFrom(view);
+      return EntityDelta(decoded);
+    },
+
+    readFrom(view: BebopView): EntityDelta {
+      const message: EntityDelta = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.id = view.readGuid();
+            break;
+
+          case 2:
+            message.root = view.readGuid();
+            break;
+
+          case 3:
+            {
+          const length0 = view.readUint32();
+          message.tags = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: Tags;
+            x0 = view.readUint32();
+            message.tags[i0] = x0;
+          }
+        }
+            break;
+
+          case 4:
+            message.parent = view.readGuid();
+            break;
+
+          case 5:
+            message.children = GuidArrayDelta.readFrom(view);
+            break;
+
+          case 6:
+            message.health = PoolDelta.readFrom(view);
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
+export enum MutationType {
+
+  Insert = 1,
+
+  Update = 2,
+
+  Delete = 3,
+}
+
+
+export interface Insert {
+
+  readonly entity: Entity;
+}
+
+export const Insert = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Insert): Insert & BebopRecord => {
+    return Object.freeze({
+      ...data,
+      encode(): Uint8Array {
+        return Insert.encode(this);
+      }
+    });
+  },
+  // Static methods
+  {
+    encode(record: Insert): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Insert.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: Insert, view: BebopView): void {
+      Entity.encodeInto(record.entity, view);
+    },
+
+    decode(buffer: Uint8Array): Insert & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Insert.readFrom(view);
+      return Insert(decoded);
+    },
+
+    readFrom(view: BebopView): Insert {
+      let field0: Entity;
+      field0 = Entity.readFrom(view);
+      return {
+        entity: field0,
+      };
+    },
+  }
+));
+
+
+export interface Update {
+
+  readonly delta: EntityDelta;
+}
+
+export const Update = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Update): Update & BebopRecord => {
+    return Object.freeze({
+      ...data,
+      encode(): Uint8Array {
+        return Update.encode(this);
+      }
+    });
+  },
+  // Static methods
+  {
+    encode(record: Update): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Update.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: Update, view: BebopView): void {
+      EntityDelta.encodeInto(record.delta, view);
+    },
+
+    decode(buffer: Uint8Array): Update & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Update.readFrom(view);
+      return Update(decoded);
+    },
+
+    readFrom(view: BebopView): Update {
+      let field0: EntityDelta;
+      field0 = EntityDelta.readFrom(view);
+      return {
+        delta: field0,
+      };
+    },
+  }
+));
+
+
+export interface Delete {
+
+  readonly entity: Entity;
+}
+
+export const Delete = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Delete): Delete & BebopRecord => {
+    return Object.freeze({
+      ...data,
+      encode(): Uint8Array {
+        return Delete.encode(this);
+      }
+    });
+  },
+  // Static methods
+  {
+    encode(record: Delete): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Delete.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: Delete, view: BebopView): void {
+      Entity.encodeInto(record.entity, view);
+    },
+
+    decode(buffer: Uint8Array): Delete & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Delete.readFrom(view);
+      return Delete(decoded);
+    },
+
+    readFrom(view: BebopView): Delete {
+      let field0: Entity;
+      field0 = Entity.readFrom(view);
+      return {
+        entity: field0,
+      };
+    },
+  }
+));
+
+
+export type MutationRecord = { tag: 1, value: Insert } | { tag: 2, value: Update } | { tag: 3, value: Delete };
+
+export const MutationRecord = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: MutationRecord): MutationRecord & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return MutationRecord.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    fromInsert(value: Insert): MutationRecord & BebopRecord {
+      return MutationRecord({ tag: 1, value });
+    },
+
+    fromUpdate(value: Update): MutationRecord & BebopRecord {
+      return MutationRecord({ tag: 2, value });
+    },
+
+    fromDelete(value: Delete): MutationRecord & BebopRecord {
+      return MutationRecord({ tag: 3, value });
+    },
+
+    encode(record: MutationRecord): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      MutationRecord.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: MutationRecord, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length + 1;
+      view.writeByte(record.tag);
+      switch (record.tag) {
+        case 1:
+          Insert.encodeInto(record.value, view);
+          break;
+        case 2:
+          Update.encodeInto(record.value, view);
+          break;
+        case 3:
+          Delete.encodeInto(record.value, view);
+          break;
+      }
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): MutationRecord & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = MutationRecord.readFrom(view);
+      return MutationRecord(decoded);
+    },
+
+    readFrom(view: BebopView): MutationRecord {
+      const length = view.readMessageLength();
+      const end = view.index + 1 + length;
+      const tag = view.readByte();
+      switch (tag) {
+        case 1:
+          return { tag: 1, value: Insert.readFrom(view) };
+        case 2:
+          return { tag: 2, value: Update.readFrom(view) };
+        case 3:
+          return { tag: 3, value: Delete.readFrom(view) };
+        default:
+          view.index = end;
+          throw new BebopRuntimeError(`Unknown union discriminator: ${tag}`);
+      }
+    },
+  }
+));
+
+
+export interface MutationScope {
+
+  mutations?: Map<string, MutationRecord>;
+}
+
+export const MutationScope = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: MutationScope): MutationScope & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return MutationScope.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: MutationScope): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      MutationScope.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: MutationScope, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.mutations !== undefined) {
+        view.writeByte(1);
+        view.writeUint32(record.mutations.size);
+      for (const [k0, v0] of record.mutations) {
+        view.writeGuid(k0);
+        MutationRecord.encodeInto(v0, view);
+      }
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): MutationScope & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = MutationScope.readFrom(view);
+      return MutationScope(decoded);
+    },
+
+    readFrom(view: BebopView): MutationScope {
+      const message: MutationScope = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            {
+          const length0 = view.readUint32();
+          message.mutations = new Map();
+          for (let i0 = 0; i0 < length0; i0++) {
+            let k0: string;
+            let v0: MutationRecord;
+            k0 = view.readGuid();
+            v0 = MutationRecord.readFrom(view);
+            message.mutations.set(k0, v0);
+          }
+        }
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface Attack {
 
@@ -302,88 +895,6 @@ export const Actions = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
   }
 ));
 
-
-
-export interface JoinRequest {
-}
-
-export const JoinRequest = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
-  // Factory function
-  (data: JoinRequest): JoinRequest & BebopRecord => {
-    return Object.freeze({
-      ...data,
-      encode(): Uint8Array {
-        return JoinRequest.encode(this);
-      }
-    });
-  },
-  // Static methods
-  {
-    encode(record: JoinRequest): Uint8Array {
-      const view = BebopView.getInstance();
-      view.startWriting();
-      JoinRequest.encodeInto(record, view);
-      return view.toArray();
-    },
-
-    encodeInto(record: JoinRequest, view: BebopView): void {
-
-    },
-
-    decode(buffer: Uint8Array): JoinRequest & BebopRecord {
-      const view = BebopView.getInstance();
-      view.startReading(buffer);
-      const decoded = JoinRequest.readFrom(view);
-      return JoinRequest(decoded);
-    },
-
-    readFrom(view: BebopView): JoinRequest {
-      return {
-      };
-    },
-  }
-));
-
-
-export interface JoinResponse {
-}
-
-export const JoinResponse = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
-  // Factory function
-  (data: JoinResponse): JoinResponse & BebopRecord => {
-    return Object.freeze({
-      ...data,
-      encode(): Uint8Array {
-        return JoinResponse.encode(this);
-      }
-    });
-  },
-  // Static methods
-  {
-    encode(record: JoinResponse): Uint8Array {
-      const view = BebopView.getInstance();
-      view.startWriting();
-      JoinResponse.encodeInto(record, view);
-      return view.toArray();
-    },
-
-    encodeInto(record: JoinResponse, view: BebopView): void {
-
-    },
-
-    decode(buffer: Uint8Array): JoinResponse & BebopRecord {
-      const view = BebopView.getInstance();
-      view.startReading(buffer);
-      const decoded = JoinResponse.readFrom(view);
-      return JoinResponse(decoded);
-    },
-
-    readFrom(view: BebopView): JoinResponse {
-      return {
-      };
-    },
-  }
-));
 
 
 export interface Entity {
@@ -819,7 +1330,9 @@ export const PoolDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign
 
 export abstract class BaseRpcService extends BaseService {
   public static readonly serviceName = 'RpcService';
-  public abstract join(record: JoinRequest, context: ServerContext): Promise<JoinResponse>;
+  public abstract spawn(record: Entity, context: ServerContext): Promise<Entity>;
+  public abstract act(record: Actions, context: ServerContext): Promise<Actions>;
+  public abstract observe(record: MutationScope, context: ServerContext): AsyncGenerator<MutationScope, void, undefined>;
 }
 
 export class TempoServiceRegistry extends ServiceRegistry {
@@ -852,18 +1365,42 @@ export class TempoServiceRegistry extends ServiceRegistry {
     service.setLogger(this.logger.clone(serviceName));
     TempoServiceRegistry.staticServiceInstances.delete(serviceName);
     this.serviceInstances.push(service);
-    if (this.methods.has(823588790)) {
-      const conflictService = this.methods.get(823588790)!;
-      throw new BebopRuntimeError(`RpcService.join collides with ${conflictService.service}.${conflictService.name}`)
+    if (this.methods.has(2323046974)) {
+      const conflictService = this.methods.get(2323046974)!;
+      throw new BebopRuntimeError(`RpcService.spawn collides with ${conflictService.service}.${conflictService.name}`)
     }
-    this.methods.set(823588790, {
-      name: 'join',
+    this.methods.set(2323046974, {
+      name: 'spawn',
       service: serviceName,
-      invoke: service.join,
-      serialize: JoinResponse.encode,
-      deserialize: JoinRequest.decode,
+      invoke: service.spawn,
+      serialize: Entity.encode,
+      deserialize: Entity.decode,
       type: MethodType.Unary,
-    } as BebopMethod<JoinRequest, JoinResponse>);
+    } as BebopMethod<Entity, Entity>);
+    if (this.methods.has(3545698096)) {
+      const conflictService = this.methods.get(3545698096)!;
+      throw new BebopRuntimeError(`RpcService.act collides with ${conflictService.service}.${conflictService.name}`)
+    }
+    this.methods.set(3545698096, {
+      name: 'act',
+      service: serviceName,
+      invoke: service.act,
+      serialize: Actions.encode,
+      deserialize: Actions.decode,
+      type: MethodType.Unary,
+    } as BebopMethod<Actions, Actions>);
+    if (this.methods.has(470883798)) {
+      const conflictService = this.methods.get(470883798)!;
+      throw new BebopRuntimeError(`RpcService.observe collides with ${conflictService.service}.${conflictService.name}`)
+    }
+    this.methods.set(470883798, {
+      name: 'observe',
+      service: serviceName,
+      invoke: service.observe,
+      serialize: MutationScope.encode,
+      deserialize: MutationScope.decode,
+      type: MethodType.ServerStream,
+    } as BebopMethod<MutationScope, MutationScope>);
   }
 
   getMethod(id: number): BebopMethodAny | undefined {
@@ -873,24 +1410,58 @@ export class TempoServiceRegistry extends ServiceRegistry {
 
 export interface IRpcClient {
 
-  join(request: JoinRequest): Promise<JoinResponse>;
-  join(request: JoinRequest, metadata: Metadata): Promise<JoinResponse>;
+  spawn(request: Entity): Promise<Entity>;
+  spawn(request: Entity, metadata: Metadata): Promise<Entity>;
+
+  act(request: Actions): Promise<Actions>;
+  act(request: Actions, metadata: Metadata): Promise<Actions>;
+
+  observe(request: MutationScope): Promise<AsyncGenerator<MutationScope, void, undefined>>;
+  observe(request: MutationScope, metadata: Metadata): Promise<AsyncGenerator<MutationScope, void, undefined>>;
 }
 
 
 export class RpcClient extends BaseClient implements IRpcClient {
-  private static readonly joinMethodInfo: MethodInfo<JoinRequest, JoinResponse> = {
-    name: 'join',
+  private static readonly spawnMethodInfo: MethodInfo<Entity, Entity> = {
+    name: 'spawn',
     service: 'RpcService',
-    id: 823588790,
-    serialize: JoinRequest.encode,
-    deserialize: JoinResponse.decode,
+    id: 2323046974,
+    serialize: Entity.encode,
+    deserialize: Entity.decode,
     type: MethodType.Unary,
   }
 
-  async join(request: JoinRequest): Promise<JoinResponse>;
-  async join(request: JoinRequest, options: CallOptions): Promise<JoinResponse>;
-  async join(request: JoinRequest, options?: CallOptions): Promise<JoinResponse> {
-    return await this.channel.startUnary(request, this.getContext(), RpcClient.joinMethodInfo, options);
+  async spawn(request: Entity): Promise<Entity>;
+  async spawn(request: Entity, options: CallOptions): Promise<Entity>;
+  async spawn(request: Entity, options?: CallOptions): Promise<Entity> {
+    return await this.channel.startUnary(request, this.getContext(), RpcClient.spawnMethodInfo, options);
+  }
+  private static readonly actMethodInfo: MethodInfo<Actions, Actions> = {
+    name: 'act',
+    service: 'RpcService',
+    id: 3545698096,
+    serialize: Actions.encode,
+    deserialize: Actions.decode,
+    type: MethodType.Unary,
+  }
+
+  async act(request: Actions): Promise<Actions>;
+  async act(request: Actions, options: CallOptions): Promise<Actions>;
+  async act(request: Actions, options?: CallOptions): Promise<Actions> {
+    return await this.channel.startUnary(request, this.getContext(), RpcClient.actMethodInfo, options);
+  }
+  private static readonly observeMethodInfo: MethodInfo<MutationScope, MutationScope> = {
+    name: 'observe',
+    service: 'RpcService',
+    id: 470883798,
+    serialize: MutationScope.encode,
+    deserialize: MutationScope.decode,
+    type: MethodType.ServerStream,
+  }
+
+  async observe(request: MutationScope): Promise<AsyncGenerator<MutationScope, void, undefined>>;
+  async observe(request: MutationScope, options: CallOptions): Promise<AsyncGenerator<MutationScope, void, undefined>>;
+  async observe(request: MutationScope, options?: CallOptions): Promise<AsyncGenerator<MutationScope, void, undefined>> {
+    return await this.channel.startServerStream(request, this.getContext(), RpcClient.observeMethodInfo, options);
   }
 }

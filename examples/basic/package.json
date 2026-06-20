@@ -7,9 +7,13 @@
     "dev": "wrangler dev",
     "start": "wrangler dev",
     "cf-typegen": "wrangler types",
-    "generate": "vamp-config generate"
+    "generate": "config generate",
+    "test": "vp test"
   },
   "dependencies": {
+    "@tempojs/client": "catalog:",
+    "@tempojs/common": "catalog:",
+    "@tempojs/server": "catalog:",
     "@vamp/ecs": "workspace:*",
     "@vamp/utils": "workspace:*",
     "@vamp/worker": "workspace:*",
@@ -18,9 +22,14 @@
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
+    "@types/ws": "^8.5.12",
     "@vamp/config": "workspace:*",
     "bebop-tools": "catalog:",
     "typescript": "^5.5.2",
-    "wrangler": "^4.75.0"
+    "vite-plus": "catalog:",
+    "vitest": "catalog:",
+    "websocket-ts": "catalog:",
+    "wrangler": "^4.75.0",
+    "ws": "^8.18.0"
   }
 }

@@ -425,7 +425,12 @@ export class TempoWSChannel extends BaseChannel {
     const requestInit: Message = {
       messageId,
       methodId: method.id,
-      data: payload,
+      // `method.serialize` returns a view into bebop's shared static write
+      // buffer; the subsequent `Message.encode` (in `send`) reuses that same
+      // buffer and would clobber these bytes before they reach the wire. Copy
+      // the payload so the framed envelope is stable. The streaming send sites
+      // and the server router (`ws-router.ts`) copy for the same reason.
+      data: new Uint8Array(payload),
       timestamp: new Date(),
     };
     if (options?.deadline) {

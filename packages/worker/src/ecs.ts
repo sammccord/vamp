@@ -39,6 +39,47 @@ export type RPCContext<
   WebSocket,
 ];
 
+/**
+ * The non-serializable runtime configuration required to bootstrap an
+ * {@link ECSDurableObject}. It contains functions (ECS options) and a class
+ * instance (the tempo service registry) that cannot cross the Durable Object
+ * RPC boundary, so it must be constructed inside the DO isolate.
+ */
+export interface ECSRuntimeConfiguration {
+  // Custom logger to use with tempo rpc.
+  logger?: ContextLogger;
+  // The yjs document to connect to, defaults to 'global'.
+  document?: string;
+  // The tempo rpc service registry the generated game services are registered with.
+  serviceRegistry: ServiceRegistry;
+  // Optional hooks for tempo rpc middleware.
+  // biome-ignore lint/suspicious/noExplicitAny: provider is app-defined and erased at the boundary
+  hooks?: HookRegistry<ServerContext, any>;
+  // ECS options to configure the ecs runtime.
+  // biome-ignore lint/suspicious/noExplicitAny: entity/delta types are app-specific
+  ecs: ECSOptions<any, any>;
+  // General context to make available within ecs systems.
+  context?: Record<string, unknown>;
+}
+
+export type ECSRuntimeProvider = () => ECSRuntimeConfiguration;
+
+/**
+ * Module-level runtime provider. The application's worker entry registers it via
+ * {@link defineECSRuntime}. Because the worker entry module is evaluated inside
+ * the Durable Object isolate, the provider (and the non-serializable values it
+ * returns) are available to the DO without crossing the RPC boundary.
+ */
+let _runtimeProvider: ECSRuntimeProvider | undefined;
+
+/**
+ * Register the runtime configuration provider used by {@link ECSDurableObject.setup}.
+ * Call this at module scope in your worker entry so it runs inside the DO isolate.
+ */
+export function defineECSRuntime(provider: ECSRuntimeProvider): void {
+  _runtimeProvider = provider;
+}
+
 export class ECSDurableObject<
   UserSession extends {},
   Context extends Record<string, unknown>,
@@ -95,6 +136,9 @@ export class ECSDurableObject<
   // The namespace (Y.Array key) for this instance's entity list
   private _namespace = "";
 
+  // Readiness: resolves once the ECS has been seeded + initialized.
+  private _readyResolvers: Array<() => void> = [];
+
   // ECS properties
   ecs:
     | ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Actions, Tags, Entity, EntityDelta>
@@ -138,7 +182,7 @@ export class ECSDurableObject<
       // The tempo rpc service registry registered with the generated game services
       serviceRegistry: ServiceRegistry;
       // Optional hooks for tempo rpc middleware
-      hooks: HookRegistry<
+      hooks?: HookRegistry<
         ServerContext,
         RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>
       >;
@@ -148,7 +192,10 @@ export class ECSDurableObject<
       context: Context;
     },
   ) {
-    if (this.initialized()) return;
+    // Guard against double bootstrap. `this.ecs` is assigned synchronously below,
+    // before any await, so concurrent setup() calls are safe. Note: `initialized()`
+    // only reflects post-seed state, so it must not be used as the guard here.
+    if (this.ecs) return;
 
     this._namespace = namespace;
 
@@ -208,6 +255,23 @@ export class ECSDurableObject<
               } else if (scope.deletedIds.has(id)) {
                 entities.delete(id);
               }
+            }
+          } else {
+            // Locally-authored mutation: apply it to the working entity store so
+            // reads (`ecs.entities` / `ecs.entity`) reflect local changes. Remote
+            // changes instead arrive through the Yjs observers above.
+            switch (mutation.tag) {
+              case 1:
+                entities.set(id, mutation.value.entity);
+                break;
+              case 2: {
+                const entity = entities.get(id);
+                if (entity) configuration.ecs.mergeDelta(entity, mutation.value.delta);
+                break;
+              }
+              case 3:
+                entities.delete(id);
+                break;
             }
           }
           // Always mirror to Yjs (idempotent; includes local changes for mixed-case)
@@ -283,6 +347,66 @@ export class ECSDurableObject<
     this._ensureSyncedAndSeed();
   }
 
+  /**
+   * Bootstrap the durable object using the runtime configuration registered via
+   * {@link defineECSRuntime}. Unlike {@link initialize}, all arguments are
+   * structured-clone serializable, so this is safe to invoke across the Durable
+   * Object RPC boundary (e.g. `stub.setup(namespace)`). The non-serializable
+   * pieces (service registry, ecs options, hooks) are constructed inside the DO
+   * isolate by the provider. Resolves once the ECS has been seeded + initialized.
+   */
+  async setup(namespace: string, context?: Context, document?: string): Promise<void> {
+    if (!this.ecs) {
+      if (!_runtimeProvider) {
+        throw new Error(
+          "ECS runtime is not configured. Call defineECSRuntime(...) at module scope in your worker entry.",
+        );
+      }
+      const config = _runtimeProvider();
+      this.initialize(namespace, {
+        logger: config.logger,
+        document: document ?? config.document,
+        serviceRegistry: config.serviceRegistry,
+        hooks: config.hooks,
+        ecs: config.ecs as ECSOptions<Entity, EntityDelta>,
+        context: (context ?? config.context ?? {}) as Context,
+      });
+    }
+    await this.ready();
+  }
+
+  /**
+   * Resolves once the ECS has been seeded from the Yjs document and initialized.
+   * If seeding does not complete within `timeoutMs`, the ECS is force-initialized
+   * so callers (and incoming RPC) are never blocked indefinitely.
+   */
+  ready(timeoutMs = 10_000): Promise<void> {
+    if (this.ecs?.initialized) return Promise.resolve();
+
+    const pending = new Promise<void>((resolve) => {
+      this._readyResolvers.push(resolve);
+    });
+
+    const fallback = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        if (this.ecs && !this.ecs.initialized) {
+          this.log.warn("ECS seeding timed out; force-initializing");
+          this.ecs.initialize();
+        }
+        this._resolveReady();
+        resolve();
+      }, timeoutMs);
+    });
+
+    return Promise.race([pending, fallback]);
+  }
+
+  private _resolveReady() {
+    const resolvers = this._readyResolvers;
+    this._readyResolvers = [];
+    for (const resolve of resolvers) resolve();
+  }
+
   connectToDoc(docName: string) {
     const bindings = this.env as CloudflareBindings;
     const stub = bindings.GAME_STORAGE.get(
@@ -334,6 +458,7 @@ export class ECSDurableObject<
     }
 
     this.ecs.initialize();
+    this._resolveReady();
   }
 
   private _setupArrayObserver() {

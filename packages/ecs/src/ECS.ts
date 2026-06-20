@@ -135,8 +135,10 @@ export class ECS<
   private _wrapMutator(baseMutate: EntityMutator<E, D>): EntityMutator<E, D> {
     return (id: string, mutation: MutationRecord<E, D>) => {
       if (this.initialized) {
-        // If there's a flush handler, we should always have a scope to flush.
-        const scope = this.context.scope || this._flushHandler ? this.createScope() : undefined;
+        // Use the active scope (e.g. from `withScope`) so its mutations are
+        // captured there. Only fall back to a fresh scope when a flush handler
+        // is installed but no scope is currently open.
+        const scope = this.context.scope ?? (this._flushHandler ? this.createScope() : undefined);
 
         if (scope) {
           switch (mutation.tag) {

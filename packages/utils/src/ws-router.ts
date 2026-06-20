@@ -304,13 +304,15 @@ export class TempoWsRouter<
             for await (const value of recordGenerator) {
               const responseData = this.serializeResponse(value, method, "bebop");
               response.data = new Uint8Array(responseData);
-              const encoded = Message.encode(response);
-              ws.send(encoded as BufferSource);
+              // `Message.encode` returns a view into bebop's shared write buffer;
+              // copy it so concurrent encodes (e.g. an overlapping unary response)
+              // cannot clobber this frame before the socket flushes it.
+              ws.send(new Uint8Array(Message.encode(response)) as BufferSource);
             }
             // cancel the stream
             response.data = new Uint8Array();
             response.status = TempoStatusCode.CANCELLED;
-            ws.send(Message.encode(response) as BufferSource);
+            ws.send(new Uint8Array(Message.encode(response)) as BufferSource);
           };
 
           if (deadline) {
@@ -327,7 +329,7 @@ export class TempoWsRouter<
           }
           const responseData = this.serializeResponse(record, method, "bebop");
           response.data = new Uint8Array(responseData);
-          ws.send(Message.encode(response) as BufferSource);
+          ws.send(new Uint8Array(Message.encode(response)) as BufferSource);
         }
       };
       if (deadline !== undefined) {
@@ -363,7 +365,7 @@ export class TempoWsRouter<
       this.clientStreams.delete(request.messageId!);
       response.status = status;
       response.msg = message;
-      ws.send(Message.encode(response) as BufferSource);
+      ws.send(new Uint8Array(Message.encode(response)) as BufferSource);
     }
   }
 

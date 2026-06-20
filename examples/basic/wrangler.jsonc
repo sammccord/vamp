@@ -7,7 +7,7 @@
   "name": "basic",
   "main": "src/index.ts",
   "compatibility_date": "2026-03-17",
-  "migrations": [{ "new_sqlite_classes": ["GameECS"], "tag": "v2" }],
+  "migrations": [{ "new_sqlite_classes": ["GameStorage"], "tag": "v2" }],
   "durable_objects": {
     "bindings": [
       {

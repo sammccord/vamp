@@ -1,0 +1,89 @@
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index d6ce0f6cc551becceb60bca665a6b4f2ea75f7ab..cec0ea69c8b410e7928898266323caeeeab77725 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -273,4 +273,9 @@ declare class BebopView {
+     readMessageLength(): number;
+ }
+ 
+-export { BebopRecord, BebopRuntimeError, BebopSerializer, BebopView, BinarySchema, readGuid };
++declare const BebopJson: {
++    replacer(key: string, value: unknown): unknown;
++    reviver(key: string, value: unknown): unknown;
++};
++
++export { BebopJson, BebopRecord, BebopRuntimeError, BebopSerializer, BebopView, BinarySchema, readGuid };
+diff --git a/dist/index.js b/dist/index.js
+index 546002e85b3c8f0d1ea78bd19d540eb5a93e8497..8f963655bee639f71eea3e38c9c275f13c4448c8 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -20,6 +20,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
+ // index.ts
+ var TypeScript_exports = {};
+ __export(TypeScript_exports, {
++  BebopJson: () => BebopJson,
+   BebopRuntimeError: () => BebopRuntimeError,
+   BebopSerializer: () => BebopSerializer,
+   BebopView: () => BebopView,
+@@ -28,6 +29,27 @@ __export(TypeScript_exports, {
+ });
+ module.exports = __toCommonJS(TypeScript_exports);
+ 
++// BebopJson compatibility shim. The `BebopJson` JSON replacer/reviver helpers
++// were present in bebop <=3.0.x (depended upon by @tempojs/common@0.0.12) but
++// removed in 3.2.x. Restored here so @tempojs's credential (de)serialization
++// links and works for BigInt/Map/Uint8Array payloads.
++var BebopJson = {
++  replacer(_key, value) {
++    if (typeof value === "bigint") return { __bebop_bigint__: value.toString() };
++    if (value instanceof Map) return { __bebop_map__: Array.from(value.entries()) };
++    if (value instanceof Uint8Array) return { __bebop_bytes__: Array.from(value) };
++    return value;
++  },
++  reviver(_key, value) {
++    if (value && typeof value === "object") {
++      if ("__bebop_bigint__" in value) return BigInt(value.__bebop_bigint__);
++      if ("__bebop_map__" in value) return new Map(value.__bebop_map__);
++      if ("__bebop_bytes__" in value) return new Uint8Array(value.__bebop_bytes__);
++    }
++    return value;
++  }
++};
++
+ // binary.ts
+ var decoder = new TextDecoder();
+ var RecordReader = class {
+diff --git a/dist/index.mjs b/dist/index.mjs
+index fd3cdaf0263666a968c8db95cd995f39769be4fb..d2e13b42027c3809bb3e52351735230cdd737608 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1474,7 +1474,29 @@ var BebopView = class _BebopView {
+     return result;
+   }
+ };
++// BebopJson compatibility shim. The `BebopJson` JSON replacer/reviver helpers
++// were present in bebop <=3.0.x (depended upon by @tempojs/common@0.0.12) but
++// removed in 3.2.x. Restored here so @tempojs's credential (de)serialization
++// links and works for BigInt/Map/Uint8Array payloads.
++const BebopJson = {
++  replacer(_key, value) {
++    if (typeof value === "bigint") return { __bebop_bigint__: value.toString() };
++    if (value instanceof Map) return { __bebop_map__: Array.from(value.entries()) };
++    if (value instanceof Uint8Array) return { __bebop_bytes__: Array.from(value) };
++    return value;
++  },
++  reviver(_key, value) {
++    if (value && typeof value === "object") {
++      if ("__bebop_bigint__" in value) return BigInt(value.__bebop_bigint__);
++      if ("__bebop_map__" in value) return new Map(value.__bebop_map__);
++      if ("__bebop_bytes__" in value) return new Uint8Array(value.__bebop_bytes__);
++    }
++    return value;
++  }
++};
++
+ export {
++  BebopJson,
+   BebopRuntimeError,
+   BebopSerializer,
+   BebopView,
