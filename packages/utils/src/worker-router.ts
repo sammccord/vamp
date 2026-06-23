@@ -66,7 +66,9 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
     if (this.hooks !== undefined) {
       await this.hooks.executeRequestHooks(context);
     }
-    const requestData = new Uint8Array(request.data!);
+    // `request.data` is already an isolated Uint8Array from decode; pass it
+    // straight to the synchronous deserializer instead of re-copying it.
+    const requestData = request.data!;
     const record = this.deserializeRequest(requestData, method, contentType);
     if (this.hooks !== undefined) {
       await this.hooks.executeDecodeHooks(context, record);
@@ -120,7 +122,9 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
     const invocation = method.invoke(generator, context);
     this.clientStreams.set(messageId, invocation);
     this.events.emit(messageId, request);
-    return await invocation;
+    return await (invocation as Promise<BebopRecord>).finally(() => {
+      this.clientStreams.delete(messageId);
+    });
   }
 
   private async invokeServerStreamMethod(
@@ -180,7 +184,8 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
           if (this.hooks !== undefined) {
             await this.hooks.executeRequestHooks(context);
           }
-          if (request.status === TempoStatusCode.CANCELLED) {
+          // Check the CURRENT frame's status, not the original captured request.
+          if (message.status === TempoStatusCode.CANCELLED) {
             cancel();
             return;
           }
@@ -202,6 +207,27 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
     const invocation = method.invoke(generator, context);
     this.clientStreams.set(messageId, invocation);
     return invocation;
+  }
+
+  /**
+   * Tear down all open streams for this connection (driven by the host
+   * close/error lifecycle). Returns each server-stream generator and emits a
+   * synthetic CANCELLED to each client/duplex stream, then clears listeners.
+   */
+  public async closeConnection(): Promise<void> {
+    for (const [id, info] of [...this.serverStreams]) {
+      info.cancelled = true;
+      await info.generator.return(undefined).catch(() => {});
+      this.serverStreams.delete(id);
+    }
+    for (const id of [...this.clientStreams.keys()]) {
+      this.events.emit(
+        id,
+        Message({ messageId: id, status: TempoStatusCode.CANCELLED, data: new Uint8Array() }),
+      );
+      this.clientStreams.delete(id);
+    }
+    this.events.removeAllListeners();
   }
 
   public override async process(req: Uint8Array, response: Message, env: TEnv) {
@@ -235,12 +261,12 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
       const metadataHeader = request.customMetadata;
       const metadata = metadataHeader ? Metadata.fromHttpHeader(metadataHeader) : new Metadata();
 
-      const previousAttempts = metadata.get("tempo-previous-rpc-attempts");
-      if (previousAttempts !== undefined) {
-        const numberOfAttempts = previousAttempts.at(0);
-        if (numberOfAttempts && Number(numberOfAttempts) > this.maxRetryAttempts) {
-          throw new TempoError(TempoStatusCode.RESOURCE_EXHAUSTED, "max retry attempts exceeded");
-        }
+      // Read the retry counter from the top-level Message field that the channel
+      // actually writes (worker-channel sets `requestInit.previousAttempts`),
+      // not from metadata — otherwise the guard never fires. Matches ws-router.
+      const previousAttempts = request.previousAttempts;
+      if (previousAttempts !== undefined && previousAttempts > this.maxRetryAttempts) {
+        throw new TempoError(TempoStatusCode.RESOURCE_EXHAUSTED, "max retry attempts exceeded");
       }
 
       let deadline: Deadline | undefined;
@@ -332,8 +358,7 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
                 }
                 const responseData = this.serializeResponse(value, method, "bebop");
                 response.data = new Uint8Array(responseData);
-                const encoded = Message.encode(response);
-                //@ts-expect-error
+                const encoded = Message.encode(response).slice();
                 postMessage(encoded, [encoded.buffer]);
               }
             } finally {
@@ -341,8 +366,7 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
               this.serverStreams.delete(messageId);
               response.data = new Uint8Array();
               response.status = TempoStatusCode.CANCELLED;
-              const encoded = Message.encode(response);
-              //@ts-expect-error
+              const encoded = Message.encode(response).slice();
               postMessage(encoded, [encoded.buffer]);
             }
           };
@@ -361,8 +385,7 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
           }
           const responseData = this.serializeResponse(record, method, contentType);
           response.data = new Uint8Array(responseData);
-          const encoded = Message.encode(response);
-          //@ts-expect-error
+          const encoded = Message.encode(response).slice();
           postMessage(encoded, [encoded.buffer]);
         }
       };
@@ -402,8 +425,7 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
       response.messageId = request.messageId;
       response.timestamp = request.timestamp;
       response.methodId = request.methodId;
-      const encoded = Message.encode(response);
-      //@ts-expect-error
+      const encoded = Message.encode(response).slice();
       postMessage(encoded, [encoded.buffer]);
     }
   }

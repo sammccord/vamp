@@ -16,8 +16,11 @@ export class PinoLogger extends ContextLogger implements ConsoleLogger {
   ) {
     super(sourceName, logLevel, undefined, bindings);
     this.sourceName = sourceName;
-    this.logLevel = TempoLogLevel.Info;
+    // Honor the constructor's logLevel argument instead of hardcoding Info, and
+    // propagate it to the underlying pino child so filtering matches.
+    this.logLevel = logLevel;
     this.logger = parent.child({ source: sourceName, ...bindings });
+    this.logger.level = PinoLogger.getPinoLevel(String(logLevel));
   }
 
   static getPinoLevel(level: string): string {

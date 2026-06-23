@@ -38,6 +38,13 @@ export class TempoWsRouter<
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     Promise<any>
   > = new Map();
+  // Encode-once broadcast cache. When one record object is fanned out to many
+  // server-stream consumers (e.g. an ECS mutation scope broadcast to every
+  // observer of a room), its payload is serialized a single time and the bytes
+  // are reused for every observer's frame — turning O(observers) bebop encodes
+  // per broadcast into O(1). Keyed weakly by the record, so the entry is GC'd
+  // once the broadcast value is no longer referenced (no unbounded growth).
+  private readonly _streamEncodeCache = new WeakMap<BebopRecord, Uint8Array>();
 
   constructor(
     logger: TempoLogger,
@@ -66,7 +73,9 @@ export class TempoWsRouter<
     if (this.hooks !== undefined) {
       await this.hooks.executeRequestHooks(context);
     }
-    const requestData = new Uint8Array(request.data!);
+    // `request.data` is already an isolated Uint8Array from decode; pass it
+    // straight to the synchronous deserializer instead of re-copying it.
+    const requestData = request.data!;
     const record = this.deserializeRequest(requestData, method, contentType);
     if (this.hooks !== undefined) {
       await this.hooks.executeDecodeHooks(context, record);
@@ -119,7 +128,11 @@ export class TempoWsRouter<
     const invocation = method.invoke(generator, context);
     this.clientStreams.set(messageId, invocation);
     this.events.emit(messageId, request);
-    return await invocation;
+    // Reap the map entry on every completion path (incl. early resolution where
+    // the iterator cleanup closure never runs).
+    return await (invocation as Promise<BebopRecord>).finally(() => {
+      this.clientStreams.delete(messageId);
+    });
   }
 
   private async invokeServerStreamMethod(
@@ -179,7 +192,8 @@ export class TempoWsRouter<
           if (this.hooks !== undefined) {
             await this.hooks.executeRequestHooks(context);
           }
-          if (request.status === TempoStatusCode.CANCELLED) {
+          // Check the CURRENT frame's status, not the original captured request.
+          if (message.status === TempoStatusCode.CANCELLED) {
             cancel();
             return;
           }
@@ -200,10 +214,37 @@ export class TempoWsRouter<
     };
     const invocation = method.invoke(generator, context);
     this.clientStreams.set(messageId, invocation);
+    // Duplex invocation is an AsyncGenerator (not a Promise); its map entry is
+    // reaped by the iterator cleanup closure above and by closeConnection().
     return invocation;
   }
 
+  /**
+   * Tear down all open streams for this connection (driven by the DO socket
+   * close/error lifecycle). Emits a synthetic CANCELLED to each in-flight
+   * client/duplex stream so its generator ends, then clears all listeners.
+   */
+  public async closeConnection(): Promise<void> {
+    for (const id of [...this.clientStreams.keys()]) {
+      this.events.emit(
+        id,
+        Message({ messageId: id, status: TempoStatusCode.CANCELLED, data: new Uint8Array() }),
+      );
+      this.clientStreams.delete(id);
+    }
+    this.events.removeAllListeners();
+  }
+
   public override async process(req: ArrayBuffer, response: Message, env: Env) {
+    // Bound the untrusted inbound frame BEFORE decoding it into a Message, so a
+    // hostile/oversized client frame cannot force a large allocation. The client
+    // call surfaces the failure via its deadline.
+    if (req.byteLength > this.maxReceiveMessageSize) {
+      this.logger.error(
+        `inbound frame ${req.byteLength}B exceeds maxReceiveMessageSize ${this.maxReceiveMessageSize}B; dropping`,
+      );
+      return;
+    }
     let request = Message.decode(new Uint8Array(req as ArrayBuffer));
     const [, ws] = env;
 
@@ -302,8 +343,18 @@ export class TempoWsRouter<
         if (recordGenerator !== undefined) {
           const writeFrames = async () => {
             for await (const value of recordGenerator) {
-              const responseData = this.serializeResponse(value, method, "bebop");
-              response.data = new Uint8Array(responseData);
+              // Encode the payload once per distinct record. A fan-out broadcast
+              // yields the SAME object to every observer's stream, so all but the
+              // first reuse these bytes instead of re-encoding the whole scope.
+              let payload = this._streamEncodeCache.get(value);
+              if (payload === undefined) {
+                // `serializeResponse` returns a view into bebop's shared write
+                // buffer; copy it into an owned array before caching so a later
+                // encode cannot clobber it.
+                payload = new Uint8Array(this.serializeResponse(value, method, "bebop"));
+                this._streamEncodeCache.set(value, payload);
+              }
+              response.data = payload;
               // `Message.encode` returns a view into bebop's shared write buffer;
               // copy it so concurrent encodes (e.g. an overlapping unary response)
               // cannot clobber this frame before the socket flushes it.

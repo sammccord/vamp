@@ -1308,7 +1308,7 @@ describe("ECS", () => {
       ecs.rebuildBehaviorCache("child2");
       ecs.rebuildBehaviorCache("grandchild");
 
-      await ecs.actToSubtree("parent", { tag: eventTag, value: "cascade" });
+      await ecs.act("parent", { tag: eventTag, value: "cascade" });
 
       expect(executed).toContain("parent");
       expect(executed).toContain("child1");
@@ -1342,7 +1342,7 @@ describe("ECS", () => {
       const inserted = ecs.insert({ id: "test-entity", health: 100 });
       ecs.rebuildBehaviorCache(inserted.id!);
 
-      await ecs.actToSubtree(inserted.id!, { tag: eventTag, value: "test" });
+      await ecs.act(inserted.id!, { tag: eventTag, value: "test" });
 
       expect(executed).toEqual([inserted.id!]);
     });
@@ -1671,7 +1671,7 @@ describe("ECS", () => {
       ecs.rebuildBehaviorCache("grandchild1");
       ecs.rebuildBehaviorCache("grandchild2");
 
-      const stopped = await ecs.actToSubtree("parent", { tag: eventTag, value: "test" });
+      const stopped = await ecs.act("parent", { tag: eventTag, value: "test" });
 
       // Should have stopped at child1
       expect(stopped).toBe(true);
@@ -1924,7 +1924,7 @@ describe("ECS", () => {
       expect(mutations.size).toBe(1);
     });
 
-    test("should support nested scopes", async () => {
+    test("should support nested scopes (inner merges up into parent)", async () => {
       ecs.initialize();
 
       const { result: outerResult, mutations: outerMutations } = await ecs.withScope(async () => {
@@ -1937,13 +1937,24 @@ describe("ECS", () => {
         expect(innerMutations.size).toBe(1);
         expect(innerMutations.get("inner-entity")).toBeDefined();
 
+        // After the inner scope exits, its mutation is merged up into the parent
+        // (it does NOT flush to base) — see proposal 19 §4e. The parent's shadow
+        // must see the inner entity during the outer scope.
+        expect(ecs.entity("inner-entity")?.health).toBe(200);
+
         return { nested: true };
       });
 
-      // Outer scope should only track outer entity (inner was in separate scope)
-      expect(outerMutations.size).toBe(1);
+      // Outer scope now coalesces BOTH the outer entity and the merged-up inner
+      // entity; only this outermost scope flushes to base.
+      expect(outerMutations.size).toBe(2);
       expect(outerMutations.get("outer-entity")).toBeDefined();
+      expect(outerMutations.get("inner-entity")).toBeDefined();
       expect(outerResult).toEqual({ nested: true });
+
+      // Both committed to base after the outermost scope flushed.
+      expect(ecs.entity("outer-entity")?.health).toBe(100);
+      expect(ecs.entity("inner-entity")?.health).toBe(200);
     });
 
     test("should not track mutations outside of scope", async () => {
@@ -2239,6 +2250,29 @@ describe("ECS", () => {
       expect(ecs.hasTag(entity.id!, 2)).toBe(true);
     });
 
+    test("put with object delta { add, remove } applies add before remove for overlapping tag", () => {
+      const entity = ecs.insert({ health: 100, tags: [1, 2] });
+      // tag 2 is both added and removed -> removals win (applied last)
+      ecs.put(entity.id!, {
+        tags: { add: [2, 3], remove: [2] } as { add: number[]; remove: number[] },
+      } as unknown as EntityDelta);
+      expect(ecs.hasTag(entity.id!, 1)).toBe(true);
+      expect(ecs.hasTag(entity.id!, 2)).toBe(false); // removed (remove applied after add)
+      expect(ecs.hasTag(entity.id!, 3)).toBe(true); // added
+    });
+
+    test("put with object delta add-only preserves existing tags", () => {
+      const entity = ecs.insert({ health: 100, tags: [1] });
+      ecs.put(entity.id!, { tags: { add: [2] } } as unknown as EntityDelta);
+      expect(ecs.getTags(entity.id!).sort()).toEqual([1, 2]);
+    });
+
+    test("put with object delta remove-only against current tags", () => {
+      const entity = ecs.insert({ health: 100, tags: [1, 2, 3] });
+      ecs.put(entity.id!, { tags: { remove: [2] } } as unknown as EntityDelta);
+      expect(ecs.getTags(entity.id!).sort()).toEqual([1, 3]);
+    });
+
     test("put with empty tags array clears all tags", () => {
       const entity = ecs.insert({ health: 100, tags: [1, 2, 3] });
       expect(ecs.getTags(entity.id!)).toHaveLength(3);
@@ -2267,6 +2301,399 @@ describe("ECS", () => {
       const e = ecs.createEntity();
       ecs.addTag(e, 1);
       expect(fired).toContain(e);
+    });
+  });
+
+  describe("Memory & lifecycle (proposal 07)", () => {
+    beforeEach(() => {
+      ecs.initialize();
+    });
+
+    test("spawn/despawn loop keeps internal maps bounded", () => {
+      for (let i = 0; i < 10_000; i++) {
+        const e = ecs.insert({ health: 100 });
+        ecs.rebuildBehaviorCache(e.id!); // populate entityBehaviorCache so eviction is exercised
+        ecs.deleteEntity(e.id!);
+      }
+      // entityBehaviorCache must not retain deleted entities.
+      expect(ecs.entityBehaviorCache.size).toBe(0);
+      // No live entities remain in the archetype graph.
+      expect(ecs.entityArchetype.size).toBe(0);
+      // archetypeBehaviorCache is bounded by distinct archetypes, not iterations.
+      expect(
+        (ecs as unknown as { archetypeBehaviorCache: Map<unknown, unknown> }).archetypeBehaviorCache
+          .size,
+      ).toBeLessThan(10);
+      // deletedEntities is bounded by the documented ring cap rather than 10k.
+      expect(ecs.deletedEntities.size).toBeLessThanOrEqual(1024);
+    });
+
+    test("behavior registered after init is picked up by act() without manual rebuild", async () => {
+      const inserted = ecs.insert({ health: 100 });
+
+      const fired: string[] = [];
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
+        555,
+        (_world, entity) => {
+          fired.push(entity.id!);
+        },
+        (q: QueryBuilder) => q.every(components.health),
+        10,
+      );
+      ecs.registerBehavior(behavior); // registered AFTER init, no manual rebuild
+
+      await ecs.act(inserted.id!, { tag: 555, value: "x" });
+      expect(fired).toContain(inserted.id!); // would be empty before Fix 1c
+    });
+
+    test("deleteEntity evicts entity behavior cache and deferred rebuild (id-reuse safe)", () => {
+      const id = "reused_1";
+      const a = ecs.insert({ id, health: 100 });
+      ecs.rebuildBehaviorCache(a.id!);
+      expect(ecs.entityBehaviorCache.has(id)).toBe(true); // sanity: cache populated
+
+      ecs.deleteEntity(id);
+      expect(ecs.entityBehaviorCache.has(id)).toBe(false); // evicted by Fix 1b/1d
+      expect(
+        (ecs as unknown as { _deferredCacheRebuilds: Set<string> })._deferredCacheRebuilds.has(id),
+      ).toBe(false);
+    });
+
+    test("query() result is not aliased by event-system execution", () => {
+      const e1 = ecs.insert({ health: 100 });
+      ecs.rebuildBehaviorCache(e1.id!);
+      const retained = ecs.query((q: QueryBuilder) => q.every(components.health));
+      const snapshot = [...retained];
+
+      // Trigger the event-system path that previously borrowed from the shared pool.
+      const e2 = ecs.insert({ health: 100 });
+      ecs.rebuildBehaviorCache(e2.id!);
+
+      // The previously returned array must be unchanged (no pooled-buffer aliasing).
+      expect(retained).toEqual(snapshot);
+    });
+  });
+
+  describe("Hot-path performance (proposal 15)", () => {
+    beforeEach(() => {
+      ecs.initialize();
+    });
+
+    // 15 §7 — correctness parity: archetype-index lookup returns the SAME
+    // archetype object identity for the same id, reached via different edges.
+    test("archetype index: same id reached via different edges is the same object", () => {
+      // health then level
+      const a = ecs.createEntity();
+      ecs.addComponent(a, "health");
+      ecs.addComponent(a, "level");
+      const archA = ecs.entityArchetype.get(a)!;
+
+      // level then health (different edge order, same resulting archetype)
+      const b = ecs.createEntity();
+      ecs.addComponent(b, "level");
+      ecs.addComponent(b, "health");
+      const archB = ecs.entityArchetype.get(b)!;
+
+      expect(archA).toBe(archB); // identical object, not just equal id
+      expect(archA.id).toBe(archB.id);
+    });
+
+    // 15 §7 — archetype discovery must not rescan the graph (no traverse during
+    // a novel transform). We assert sub-quadratic discovery by exercising many
+    // distinct combinations and checking the per-ECS id index holds exactly the
+    // distinct archetypes (linear in combinations, not quadratic work).
+    test("archetype discovery scales with distinct combinations (index populated)", () => {
+      const comps: Array<keyof Omit<Entity, "tags">> = ["health", "level", "mana", "xp", "name"];
+      // 2^5 - 1 = 31 distinct non-empty combinations, exercised from cold.
+      let created = 0;
+      for (let bits = 1; bits < 1 << comps.length; bits++) {
+        const e = ecs.createEntity();
+        for (let c = 0; c < comps.length; c++) {
+          if (bits & (1 << c)) ecs.addComponent(e, comps[c]);
+        }
+        created++;
+      }
+      const index = (ecs as unknown as { _archetypeIndex: Map<string, unknown> })._archetypeIndex;
+      // Root + every distinct combination archetype reached. Bounded by distinct
+      // combinations (<= 32), NOT by created entities * combinations (quadratic).
+      expect(index.size).toBeGreaterThan(comps.length); // graph actually grew
+      expect(index.size).toBeLessThanOrEqual((1 << comps.length) + 1);
+      expect(created).toBe((1 << comps.length) - 1);
+    });
+
+    // 15 §7 — per-entity system query parity: the entities a system sees must be
+    // exactly the entities `query()` returns for the same shape.
+    test("entity-system buffer sees same entities as query()", () => {
+      const ids = new Set<string>();
+      for (let i = 0; i < 50; i++) ids.add(ecs.insert({ health: i }).id!);
+
+      const seen: string[] = [];
+      ecs.registerSystem(
+        createEntitySystem<TestContext, [number], TestAction, number, Entity, EntityDelta>(
+          (entities) => {
+            for (const e of entities) seen.push(e);
+          },
+          (q: QueryBuilder) => q.every(components.health),
+        ),
+      );
+      ecs.update(0);
+
+      const viaQuery = ecs.query((q: QueryBuilder) => q.every(components.health));
+      expect(new Set(seen)).toEqual(new Set(viaQuery));
+      expect(seen.length).toBe(viaQuery.length);
+    });
+
+    // 15 §7 — scratch-buffer isolation: the buffer handed to a system MUST NOT
+    // escape to query() callers, and reusing it across archetypes/frames must
+    // not corrupt a previously returned query() array.
+    test("scratch buffer does not alias query() results across frames", () => {
+      for (let i = 0; i < 10; i++) ecs.insert({ health: i });
+
+      let bufRef: string[] | null = null;
+      ecs.registerSystem(
+        createEntitySystem<TestContext, [number], TestAction, number, Entity, EntityDelta>(
+          (entities) => {
+            bufRef = entities; // capture the (transient) buffer reference
+          },
+          (q: QueryBuilder) => q.every(components.health),
+        ),
+      );
+
+      const retained = ecs.query((q: QueryBuilder) => q.every(components.health));
+      const snapshot = [...retained];
+
+      ecs.update(0);
+      // The system's buffer is a DIFFERENT array than the query() result.
+      expect(bufRef).not.toBe(retained);
+      // Mutating across a second frame must not disturb the retained query array.
+      ecs.insert({ health: 999 });
+      ecs.update(0);
+      expect(retained).toEqual(snapshot);
+    });
+
+    // 15 §7 — upsert query-cache staleness guard: an archetype created AFTER the
+    // first upsert of a shape must be visible to a later upsert of that shape.
+    test("upsert cached query sees entities in archetypes created later", () => {
+      // First upsert of shape {health}: no match -> inserts a new entity. This
+      // populates the {health} query cache entry.
+      const first = ecs.upsert(
+        { health: 10 } as EntityDelta,
+        (e: Entity | undefined) => e?.name === "target",
+      );
+      expect(first.name).toBeUndefined();
+
+      // Create a brand-new archetype {health, name} AFTER the cache entry exists,
+      // with an entity that the {health} query must now match.
+      const target = ecs.insert({ id: "target-entity", health: 5, name: "target" });
+      expect(target.id).toBe("target-entity");
+
+      // Second upsert of the same {health} shape must FIND (update, not insert)
+      // the new entity — proving the cached query received the newly-created
+      // archetype. We assert by entity count: a stale cache would insert a 3rd
+      // entity instead of updating `target`.
+      const before = ecs.entities.size;
+      ecs.upsert({ health: 1 } as EntityDelta, (e: Entity | undefined) => e?.name === "target");
+      expect(ecs.entities.size).toBe(before); // update path taken, not insert
+      // target's health was updated (mergeDelta adds: 5 + 1 = 6).
+      expect(ecs.entities.get("target-entity")?.health).toBe(6);
+    });
+
+    // 15 §7 — upsert parity with the non-cached query path.
+    test("upsert finds the same entity a manual query+find would", () => {
+      ecs.insert({ id: "p1", health: 100, replicated: true });
+      ecs.insert({ id: "p2", health: 50 });
+
+      const updated = ecs.upsert(
+        { health: 75, level: 5 } as EntityDelta,
+        (e: Entity | undefined) => e?.replicated === true,
+      );
+      expect(updated.health).toBe(75);
+      // The match must be the replicated entity.
+      const manual = ecs
+        .query((q: QueryBuilder) => q.every(components.health))
+        .find((id: string) => ecs.entity(id)?.replicated === true);
+      expect(manual).toBe("p1");
+    });
+
+    // 15 §7 (1e) — act on an entity with no matching behavior allocates nothing
+    // and is a no-op (uses the shared frozen EMPTY array). Asserted behaviorally.
+    test("act miss path is a safe no-op (frozen empty behaviors)", async () => {
+      const e = ecs.insert({ health: 100 });
+      ecs.rebuildBehaviorCache(e.id!);
+      // No behavior registered for tag 12345 -> miss path.
+      const stopped = await ecs.act(e.id!, { tag: 12345, value: "x" });
+      expect(stopped).toBe(false);
+    });
+
+    // Query matcher flattening parity: or / not / tag combinators still hold.
+    test("flattened matchers preserve or/not/tag boolean algebra", () => {
+      const withHealth = ecs.insert({ health: 1 });
+      const withMana = ecs.insert({ mana: 1 });
+      const withName = ecs.insert({ name: "x" });
+
+      // (health OR mana) AND NOT name
+      const matched = ecs.query((q: QueryBuilder) =>
+        q
+          .every(components.health)
+          .or((b: QueryBuilder) => b.every(components.mana))
+          .not(components.name),
+      );
+      const set = new Set(matched);
+      expect(set.has(withHealth.id!)).toBe(true);
+      expect(set.has(withMana.id!)).toBe(true);
+      expect(set.has(withName.id!)).toBe(false);
+    });
+  });
+
+  describe("API cleanup & correctness (proposal 19)", () => {
+    beforeEach(() => {
+      ecs.initialize();
+    });
+
+    // 19 §4a — actToSubtree removed; act is the subtree operation.
+    test("actToSubtree is removed from the public API", () => {
+      expect((ecs as unknown as Record<string, unknown>).actToSubtree).toBeUndefined();
+    });
+
+    // 19 §4d — insert must not mutate the caller's object and must return the
+    // entity carrying the generated id.
+    test("insert does not mutate the caller's object; returns entity with id", () => {
+      const original: Entity = { health: 100 }; // no id
+      const returned = ecs.insert(original);
+      // Caller's original object is untouched (no backfilled id).
+      expect(original.id).toBeUndefined();
+      // Returned entity carries the generated id and the data.
+      expect(returned.id).toBeDefined();
+      expect(returned.health).toBe(100);
+      expect(returned).not.toBe(original); // a copy was returned
+    });
+
+    test("insert with provided id returns the same object (no needless copy)", () => {
+      const original: Entity = { id: "fixed", health: 7 };
+      const returned = ecs.insert(original);
+      expect(returned.id).toBe("fixed");
+      expect(returned).toBe(original); // id already present -> same reference
+    });
+
+    // 19 §7.2 — insert-ordering observer: an event system observing the entity at
+    // insert time must already see the committed entity data (no torn read where
+    // the archetype has the component but the entity data is absent).
+    test("insert records the entity before event systems observe it", () => {
+      const observed: Array<{ id: string; health: number | undefined }> = [];
+      ecs.subscribe(
+        createEventSystem(
+          (entities) => {
+            for (const id of entities) {
+              observed.push({ id, health: ecs.entity(id)?.health });
+            }
+          },
+          (q: QueryBuilder) => q.every(components.health),
+        ),
+      );
+
+      ecs.insert({ id: "observed-1", health: 42 });
+      // The observer must have seen the entity WITH its committed data.
+      const rec = observed.find((o) => o.id === "observed-1");
+      expect(rec).toBeDefined();
+      expect(rec!.health).toBe(42); // data already committed at observation time
+    });
+
+    // 19 §4f / §7.3 — transformEntity schedules a behavior-cache rebuild so act()
+    // runs the NEW archetype's behaviors, not the old archetype's stale set.
+    test("transformEntity rebuilds behavior cache (no stale behaviors)", async () => {
+      const tagEvent = 7777;
+      const ranOn: string[] = [];
+      // Behavior applies only to archetypes that have `mana`.
+      ecs.registerBehavior(
+        createBehavior<TestContext, [number], TestAction, number, Entity, EntityDelta>(
+          tagEvent,
+          (_w, entity) => {
+            ranOn.push(entity.id!);
+          },
+          (q: QueryBuilder) => q.every(components.mana),
+        ),
+      );
+
+      // Start the entity in an archetype WITHOUT mana (behavior should not apply).
+      const e = ecs.insert({ id: "shapeshift", health: 1 });
+      ecs.rebuildBehaviorCache(e.id!);
+      await ecs.act(e.id!, { tag: tagEvent, value: "x" });
+      expect(ranOn).not.toContain("shapeshift"); // no mana yet
+
+      // Transform into an archetype WITH mana.
+      const manaArch = ecs.prefabricate([components.mana]);
+      ecs.transformEntity("shapeshift", manaArch);
+      ecs.update(0); // flush deferred cache rebuilds scheduled by transformEntity
+
+      await ecs.act("shapeshift", { tag: tagEvent, value: "x" });
+      expect(ranOn).toContain("shapeshift"); // new archetype's behavior now runs
+    });
+
+    // 19 §4c / §7.4 — transformArchetype must NOT mutate the live archetype mask.
+    test("transformArchetype does not mutate the source archetype mask", () => {
+      const a = ecs.createEntity();
+      ecs.addComponent(a, "health");
+      const arch = ecs.entityArchetype.get(a)!;
+      const before = arch.mask.array().slice();
+
+      // Adding a second component transforms off `arch` to a new archetype.
+      ecs.addComponent(a, "level");
+
+      // The source archetype's mask must be unchanged (no transient flip).
+      expect(arch.mask.array()).toEqual(before);
+    });
+
+    // 19 §4e / §7.1 — nested-scope atomicity: inner success + OUTER abort ⇒
+    // nothing committed to base.
+    test("nested scope: inner success + outer abort commits nothing", async () => {
+      await expect(
+        ecs.withScope(async () => {
+          await ecs.withScope(async () => {
+            ecs.insert({ id: "tx-entity", health: 100 });
+          });
+          // Inner merged up into parent and is visible in the parent's shadow...
+          expect(ecs.entity("tx-entity")?.health).toBe(100);
+          // ...but the OUTER scope aborts before flushing.
+          throw new Error("outer abort");
+        }),
+      ).rejects.toThrow("outer abort");
+
+      // Nothing was flushed to base: the entity must not exist.
+      expect(ecs.entities.has("tx-entity")).toBe(false);
+    });
+
+    test("nested scope: inner + outer both succeed commits exactly once", async () => {
+      const { mutations } = await ecs.withScope(async () => {
+        await ecs.withScope(async () => {
+          ecs.insert({ id: "tx-ok", health: 200 });
+        });
+        return "done";
+      });
+      // Outermost scope coalesced the inner mutation and flushed it once.
+      expect(mutations.get("tx-ok")).toBeDefined();
+      expect(ecs.entities.get("tx-ok")?.health).toBe(200);
+    });
+
+    // 19 §4g / §7.5 — scoped-insert clone contract: mutating the ORIGINAL object
+    // after a scoped insert must not affect the committed entity.
+    test("scoped insert isolates the committed entity from the original object", async () => {
+      const original: Entity = { id: "iso", health: 10, name: "before" };
+      await ecs.withScope(async () => {
+        ecs.insert(original);
+      });
+      // Mutate the original AFTER the scope committed.
+      original.health = 999;
+      original.name = "after";
+      const committed = ecs.entities.get("iso")!;
+      expect(committed.health).toBe(10);
+      expect(committed.name).toBe("before");
     });
   });
 });

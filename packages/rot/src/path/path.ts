@@ -7,6 +7,9 @@ export type PassableCallback = (x: number, y: number) => boolean;
 
 export interface Options {
   topology: 4 | 6 | 8;
+  /** Optional map width; lets pathfinders derive exact, collision-free numeric
+   * cell keys (y * width + x). When omitted a large default stride is used. */
+  width?: number;
 }
 
 /**

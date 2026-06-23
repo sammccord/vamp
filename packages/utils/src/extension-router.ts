@@ -69,7 +69,7 @@ export class TempoExtensionRouterConfiguration {
    */
   constructor() {
     this.maxReceiveMessageSize = TempoRouterConfiguration.defaultMaxReceiveMessageSize;
-    this.maxRetryAttempts = TempoRouterConfiguration.defaultMaxRetryAttempts;
+    this.maxSendMessageSize = TempoRouterConfiguration.defaultMaxSendMessageSize;
     this.maxRetryAttempts = TempoRouterConfiguration.defaultMaxRetryAttempts;
   }
 }
@@ -309,7 +309,9 @@ export class TempoExtensionRouter<
     const invocation = method.invoke(generator, context);
     this.clientStreams.set(messageId, invocation);
     this.events.emit(messageId, request);
-    return await invocation;
+    return await (invocation as Promise<BebopRecord>).finally(() => {
+      this.clientStreams.delete(messageId);
+    });
   }
 
   private async invokeServerStreamMethod(
@@ -368,7 +370,8 @@ export class TempoExtensionRouter<
           if (this.hooks !== undefined) {
             await this.hooks.executeRequestHooks(context);
           }
-          if (request.status === TempoStatusCode.CANCELLED) {
+          // Check the CURRENT frame's status, not the original captured request.
+          if (message.status === TempoStatusCode.CANCELLED) {
             cancel();
             return;
           }
@@ -392,6 +395,22 @@ export class TempoExtensionRouter<
     return invocation;
   }
 
+  /**
+   * Tear down all open streams for this connection. Emits a synthetic CANCELLED
+   * to each in-flight client/duplex stream so its generator ends, then clears
+   * all listeners.
+   */
+  public async closeConnection(): Promise<void> {
+    for (const id of [...this.clientStreams.keys()]) {
+      this.events.emit(
+        id,
+        Message({ messageId: id, status: TempoStatusCode.CANCELLED, data: new Uint8Array() }),
+      );
+      this.clientStreams.delete(id);
+    }
+    this.events.removeAllListeners();
+  }
+
   public override async process(req: Message, response: Message, ctx: Ctx) {
     let request = Message(req);
     let context: ServerContext;
@@ -408,12 +427,11 @@ export class TempoExtensionRouter<
       const metadataHeader = request.customMetadata;
       const metadata = metadataHeader ? Metadata.fromHttpHeader(metadataHeader) : new Metadata();
 
-      const previousAttempts = metadata.get("tempo-previous-rpc-attempts");
-      if (previousAttempts !== undefined) {
-        const numberOfAttempts = previousAttempts.at(0);
-        if (numberOfAttempts && Number(numberOfAttempts) > this.maxRetryAttempts) {
-          throw new TempoError(TempoStatusCode.RESOURCE_EXHAUSTED, "max retry attempts exceeded");
-        }
+      // Read the retry counter from the top-level Message field the channel
+      // writes, not metadata, so the guard actually fires. Matches ws-router.
+      const previousAttempts = request.previousAttempts;
+      if (previousAttempts !== undefined && previousAttempts > this.maxRetryAttempts) {
+        throw new TempoError(TempoStatusCode.RESOURCE_EXHAUSTED, "max retry attempts exceeded");
       }
 
       let deadline: Deadline | undefined;

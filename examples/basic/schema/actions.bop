@@ -9,4 +9,15 @@ union Actions {
 		2 -> guid target;
 		3 -> uint32 damage;
 	}
+	3 -> message Heal {
+		1 -> guid source;
+		2 -> guid target;
+		3 -> uint32 amount;
+	}
+	4 -> message AreaAttack {
+		1 -> guid source;
+		2 -> guid target;
+		3 -> uint32 damage;
+		4 -> uint32 radius;
+	}
 }

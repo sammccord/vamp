@@ -6,15 +6,21 @@ export class SystemError<Tag extends string> extends TempoError {
   readonly _tag: Tag;
   readonly cause: BebopError;
   constructor(tag: Tag, error?: Partial<Omit<BebopError, "tag">>) {
-    const err = defaults(error || {}, {
-      code: TempoStatusCode.UNKNOWN,
-      stack: "",
-      msg: "Unknown error occured",
-      details: new Map(),
-    });
-    super(err.code, err.msg, err);
-    this._tag = (err as any).tag = tag;
-    this.cause = err as BebopError;
+    // Copy the caller-provided partial first so lodash `defaults` (which mutates
+    // its first argument) cannot mutate the caller's object.
+    const err = defaults(
+      { ...error },
+      {
+        code: TempoStatusCode.UNKNOWN,
+        stack: "",
+        msg: "Unknown error occured",
+        details: new Map(),
+      },
+    );
+    const cause = { ...err, tag } as BebopError;
+    super(err.code, err.msg, cause);
+    this._tag = tag;
+    this.cause = cause;
   }
 
   static generic(err: unknown, tag?: ErrorTags, opts?: Partial<Omit<BebopError, "tag">>) {

@@ -80,12 +80,22 @@ export class TempoWSChannel extends BaseChannel {
   public static readonly defaultCredential: CallCredential = InsecureChannelCredential.create();
   public static readonly defaultContentType: BebopContentType = "bebop";
 
-  public readonly ws: Websocket;
+  public ws!: Websocket;
   public readonly events = new EventEmitter<Record<string, (message: Message) => void>>();
+
+  // Reject callbacks for in-flight unary / client-stream calls, keyed by
+  // messageId. Lets close()/error() settle parked requests instead of hanging.
+  public readonly pending = new Map<string, (e: unknown) => void>();
+  private closed = false;
 
   private readonly isSecure: boolean;
   private readonly credential: CallCredential;
   private readonly userAgent: string;
+  private readonly maxReceiveMessageSize: number;
+  private readonly maxSendMessageSize: number;
+
+  private readonly _url: URL;
+  private readonly _wsOptions: TempoWSChannelOptions;
 
   public get log() {
     return this.logger;
@@ -106,6 +116,8 @@ export class TempoWSChannel extends BaseChannel {
       options.contentType ?? TempoWSChannel.defaultContentType,
     );
     this.logger.trace("creating new TempoWSChannel");
+    this._url = url;
+    this._wsOptions = options;
     this.isSecure = target.protocol === "https:" || target.protocol === "wss:";
     this.credential = options.credential ?? TempoWSChannel.defaultCredential;
     if (
@@ -115,37 +127,15 @@ export class TempoWSChannel extends BaseChannel {
     ) {
       throw new Error("Cannot use secure credential with insecure channel");
     }
-    this.credential = options.credential ?? TempoWSChannel.defaultCredential;
+    this.maxReceiveMessageSize =
+      options.maxReceiveMessageSize ?? TempoWSChannel.defaultMaxReceiveMessageSize;
+    this.maxSendMessageSize =
+      options.maxSendMessageSize ?? TempoWSChannel.defaultMaxSendMessageSize;
     this.userAgent = TempoUtil.buildUserAgent("javascript", TempoVersion, undefined, {
       runtime: TempoUtil.getEnvironmentName(),
     });
 
-    if (target instanceof URL) {
-      this.ws = new Websocket(url.toString(), [], options);
-    } else {
-      //@ts-expect-error
-      this.ws = new ExistingWebSocket(target, [], options);
-    }
-    this.ws.binaryType = options.binaryType || "arraybuffer";
-
-    // Add event listeners
-    this.ws.addEventListener(WebsocketEvent.open, () => {
-      this.logger.trace(`opened TempoWSChannel for ${url.href} / ${this.userAgent}`);
-    });
-    this.ws.addEventListener(WebsocketEvent.close, () =>
-      this.logger.trace(`closed TempoWSChannel for ${url.href} / ${this.userAgent}`),
-    );
-    this.ws.addEventListener(WebsocketEvent.message, (_ws, ev) => {
-      let message: Message;
-      if (typeof ev.data === "string") message = Message(JSON.parse(ev.data));
-      else {
-        // this is a hack to fix decoding
-        message = Message(Message.decode(new Uint8Array(ev.data)));
-      }
-      const messageId = message.messageId;
-      this.events.emit(messageId!, message);
-      this.logger.trace(`received new message ${messageId}`);
-    });
+    this._setupWebSocket(target);
 
     this.logger.trace(`created new TempoWSChannel for ${url.href} / ${this.userAgent}`);
   }
@@ -178,6 +168,62 @@ export class TempoWSChannel extends BaseChannel {
     }
     options ??= {};
     return new TempoWSChannel(address, options);
+  }
+
+  private _setupWebSocket(target: URL | WebSocket): void {
+    if (target instanceof URL) {
+      this.ws = new Websocket(target.toString(), [], this._wsOptions);
+    } else {
+      //@ts-expect-error
+      this.ws = new ExistingWebSocket(target, [], this._wsOptions);
+    }
+    this.ws.binaryType = this._wsOptions.binaryType || "arraybuffer";
+
+    this.ws.addEventListener(WebsocketEvent.open, () => {
+      this.logger.trace(`opened TempoWSChannel for ${this._url.href} / ${this.userAgent}`);
+    });
+    this.ws.addEventListener(WebsocketEvent.close, (ws) => {
+      if (this.closed) return;
+      // If the socket was never opened (connection failure before first open),
+      // waitForOpen's own listeners handle it — do not tear down the channel.
+      if (ws.lastConnection === undefined) return;
+      this.logger.trace(`closed TempoWSChannel for ${this._url.href} / ${this.userAgent}`);
+      this.close(new TempoError(TempoStatusCode.UNAVAILABLE, "channel closed"));
+    });
+    this.ws.addEventListener(WebsocketEvent.error, (ws) => {
+      if (this.closed) return;
+      // Only tear down if we were previously connected — waitForOpen handles
+      // pre-open errors with its own retry logic.
+      if (ws.lastConnection === undefined) return;
+      this.close(new TempoError(TempoStatusCode.UNAVAILABLE, "channel transport error"));
+    });
+    this.ws.addEventListener(WebsocketEvent.message, (_ws, ev) => {
+      // Bound the inbound frame BEFORE decoding so an oversized/hostile frame is
+      // never allocated into a Message. The corresponding call surfaces the
+      // failure via its deadline or the channel close() reject-all path.
+      const byteLength =
+        typeof ev.data === "string" ? ev.data.length : (ev.data as ArrayBuffer).byteLength;
+      if (byteLength > this.maxReceiveMessageSize) {
+        this.logger.error(
+          `inbound frame ${byteLength}B exceeds maxReceiveMessageSize ${this.maxReceiveMessageSize}B; dropping`,
+        );
+        return;
+      }
+      let message: Message;
+      if (typeof ev.data === "string") message = Message(JSON.parse(ev.data));
+      else {
+        // this is a hack to fix decoding
+        message = Message(Message.decode(new Uint8Array(ev.data)));
+      }
+      const messageId = message.messageId;
+      this.events.emit(messageId!, message);
+      this.logger.trace(`received new message ${messageId}`);
+    });
+  }
+
+  private _reconnect(): void {
+    this.ws.close();
+    this._setupWebSocket(new URL(this._url.href));
   }
 
   public override async removeCredential(): Promise<void> {
@@ -271,21 +317,27 @@ export class TempoWSChannel extends BaseChannel {
   }
 
   private async fetchUnary(init: Message, options?: CallOptions): Promise<Message> {
-    return await new Promise((resolve, reject) => {
-      const messageId = init.messageId!;
-      const listener = (message: Message) => {
-        resolve(message);
-        this.events.off(messageId, listener);
-      };
+    const messageId = init.messageId!;
+    let listener!: (message: Message) => void;
+    let onAbort: (() => void) | undefined;
+    // Single idempotent cleanup runs on EVERY settlement (resolve, reject,
+    // abort, timeout/deadline) via .finally — fixes the listener/pending leak.
+    const cleanup = () => {
+      this.events.off(messageId, listener);
+      if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
+      this.pending.delete(messageId);
+    };
+    const promise = new Promise<Message>((resolve, reject) => {
+      listener = (message: Message) => resolve(message);
+      this.pending.set(messageId, reject); // close()/error() can reject a parked request
       if (options?.controller) {
-        options.controller.signal.addEventListener("abort", () => {
-          this.events.off(messageId, listener);
-          reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
-        });
+        onAbort = () => reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
+        options.controller.signal.addEventListener("abort", onAbort, { once: true });
       }
       this.events.on(messageId, listener);
       this.send(init);
     });
+    return await promise.finally(cleanup);
   }
 
   // should loop over generator, send all, and resolve on one response
@@ -295,30 +347,35 @@ export class TempoWSChannel extends BaseChannel {
     generator: () => AsyncGenerator<BebopRecord, void, undefined>,
     options?: CallOptions,
   ): Promise<Message> {
-    const messageId = init.messageId;
-    return await new Promise((resolve, reject) => {
-      const listener = (message: Message) => {
-        resolve(message);
-        this.events.off(messageId!, listener);
-      };
+    const messageId = init.messageId!;
+    let listener!: (message: Message) => void;
+    let onAbort: (() => void) | undefined;
+    const cleanup = () => {
+      this.events.off(messageId, listener);
+      if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
+      this.pending.delete(messageId);
+    };
+    const promise = new Promise<Message>((resolve, reject) => {
+      listener = (message: Message) => resolve(message);
+      this.pending.set(messageId, reject);
       if (options?.controller) {
-        options.controller.signal.addEventListener("abort", () => {
-          this.events.off(messageId!, listener);
-          reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
-        });
+        onAbort = () => reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
+        options.controller.signal.addEventListener("abort", onAbort, { once: true });
       }
-      this.events.on(messageId!, listener);
+      this.events.on(messageId, listener);
+      // A generator-side failure must settle (and therefore clean up) the call
+      // rather than hang waiting for a server response that will never come.
       runGenerator.call(this).catch(reject);
       async function runGenerator(this: TempoWSChannel) {
+        // Fresh Message per frame (never mutate the shared `init`) so concurrent
+        // sends cannot alias and a terminal CANCELLED cannot leak into a later frame.
         for await (const value of generator()) {
-          init.data = new Uint8Array(method.serialize(value));
-          this.send(init);
+          this.send(Message({ ...init, data: new Uint8Array(method.serialize(value)) }));
         }
-        init.status = TempoStatusCode.CANCELLED;
-        init.data = new Uint8Array();
-        this.send(init);
+        this.send(Message({ ...init, status: TempoStatusCode.CANCELLED, data: new Uint8Array() }));
       }
     });
+    return await promise.finally(cleanup);
   }
 
   // should send message, then return a createEventIterator from incoming events, stopping on CANCEL
@@ -329,31 +386,52 @@ export class TempoWSChannel extends BaseChannel {
     method: MethodInfo<BebopRecord, BebopRecord>,
     options?: CallOptions,
   ): AsyncGenerator<BebopRecord, void, undefined> {
-    const messageId = init.messageId;
-    return createEventIterator<BebopRecord>(({ emit, cancel }) => {
+    const messageId = init.messageId!;
+    return createEventIterator<BebopRecord>(({ emit, cancel, error }) => {
+      let terminated = false;
+      let onAbort: (() => void) | undefined;
       const eventHandler = async (message: Message) => {
-        if (message.status === TempoStatusCode.CANCELLED) {
-          cancel();
-          return;
+        try {
+          if (message.status === TempoStatusCode.CANCELLED) {
+            terminated = true; // server ended the stream; do not echo CANCELLED back
+            cancel();
+            return;
+          }
+          await this.processResponseHeaders(message, context, method.type);
+          const requestData = message.data;
+          const record = method.deserialize(requestData!);
+          if (this.hooks !== undefined) {
+            await this.hooks.executeDecodeHooks(context, record);
+          }
+          emit(record);
+        } catch (e) {
+          // Surface transport/decode failures at the consumer instead of letting
+          // the EventEmitter swallow them.
+          error(e);
         }
-        await this.processResponseHeaders(message, context, method.type);
-        const requestData = message.data;
-        const record = method.deserialize(requestData!);
-        if (this.hooks !== undefined) {
-          await this.hooks.executeDecodeHooks(context, record);
-        }
-        emit(record);
       };
       if (options?.controller) {
-        options.controller.signal.addEventListener("abort", () => {
-          cancel();
-          throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {});
-        });
+        // Route abort through the iterator error channel; never throw inside a listener.
+        onAbort = () => error(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
+        options.controller.signal.addEventListener("abort", onAbort, { once: true });
       }
-      this.events.on(messageId!, eventHandler);
+      this.events.on(messageId, eventHandler);
       this.send(init);
       return () => {
-        this.events.off(messageId!, eventHandler);
+        this.events.off(messageId, eventHandler);
+        if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
+        // Tell the server to stop streaming (fresh message — never mutate init).
+        if (!terminated && !this.closed) {
+          this.send(
+            Message({
+              messageId,
+              methodId: init.methodId,
+              status: TempoStatusCode.CANCELLED,
+              data: new Uint8Array(),
+              timestamp: new Date(),
+            }),
+          );
+        }
       };
     });
   }
@@ -370,32 +448,48 @@ export class TempoWSChannel extends BaseChannel {
     const iterator = createDuplexIterator<BebopRecord>(
       generator(),
       (value) => {
-        init.data = new Uint8Array(method.serialize(value));
-        this.send(init);
+        this.send(Message({ ...init, data: new Uint8Array(method.serialize(value)) }));
       },
-      ({ emit, cancel }) => {
+      ({ emit, cancel, error }) => {
+        let terminated = false;
+        let onAbort: (() => void) | undefined;
         const eventHandler = async (message: Message) => {
-          if (message.status === TempoStatusCode.CANCELLED) {
-            cancel();
-            return;
+          try {
+            if (message.status === TempoStatusCode.CANCELLED) {
+              terminated = true;
+              cancel();
+              return;
+            }
+            await this.processResponseHeaders(message, context, method.type);
+            const requestData = message.data!;
+            const record = method.deserialize(requestData);
+            if (this.hooks !== undefined) {
+              await this.hooks.executeDecodeHooks(context, record);
+            }
+            emit(record);
+          } catch (e) {
+            error(e);
           }
-          await this.processResponseHeaders(message, context, method.type);
-          const requestData = message.data!;
-          const record = method.deserialize(requestData);
-          if (this.hooks !== undefined) {
-            await this.hooks.executeDecodeHooks(context, record);
-          }
-          emit(record);
         };
         if (options?.controller) {
-          options.controller.signal.addEventListener("abort", () => {
-            cancel();
-            throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {});
-          });
+          onAbort = () => error(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
+          options.controller.signal.addEventListener("abort", onAbort, { once: true });
         }
         this.events.on(messageId, eventHandler);
         return () => {
           this.events.off(messageId, eventHandler);
+          if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
+          if (!terminated && !this.closed) {
+            this.send(
+              Message({
+                messageId,
+                methodId: init.methodId,
+                status: TempoStatusCode.CANCELLED,
+                data: new Uint8Array(),
+                timestamp: new Date(),
+              }),
+            );
+          }
         };
       },
     );
@@ -487,18 +581,103 @@ export class TempoWSChannel extends BaseChannel {
   }
 
   public async waitForOpen(): Promise<void> {
-    if (this.ws.readyState === 1) return;
-    await Deadline.after(5, "seconds").executeWithinDeadline(
-      () =>
-        new Promise((resolve, reject) => {
-          this.ws.addEventListener(WebsocketEvent.open, resolve);
-          this.ws.addEventListener(WebsocketEvent.error, reject);
-        }),
-    );
+    const maxAttempts = 2;
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 100));
+        this._reconnect();
+      }
+
+      const state = this.ws.readyState;
+      if (state === 1 /* OPEN */) return;
+      if (state === 2 /* CLOSING */ || state === 3 /* CLOSED */) {
+        throw new TempoError(TempoStatusCode.UNAVAILABLE, "socket is closing or closed");
+      }
+
+      try {
+        await Deadline.after(5, "seconds").executeWithinDeadline(
+          () =>
+            new Promise<void>((resolve, reject) => {
+              const teardown = () => {
+                this.ws.removeEventListener(WebsocketEvent.open, onOpen);
+                this.ws.removeEventListener(WebsocketEvent.error, onError);
+                this.ws.removeEventListener(WebsocketEvent.close, onClose);
+              };
+              const onOpen = () => {
+                teardown();
+                resolve();
+              };
+              const onError = (ws: Websocket, event: Event) => {
+                teardown();
+                // `ErrorEvent` is a DOM global and is NOT defined in Node (the
+                // test/server runtime), so `event instanceof ErrorEvent` throws
+                // a ReferenceError that escapes as an uncaught exception. Duck-type
+                // the `message` field instead, falling back to the event `type`.
+                const message = (event as Event & { message?: unknown }).message;
+                const detail = typeof message === "string" ? message : event.type;
+                reject(
+                  new TempoError(
+                    TempoStatusCode.UNAVAILABLE,
+                    `socket error before open: ${detail}`,
+                  ),
+                );
+              };
+              const onClose = () => {
+                teardown();
+                reject(new TempoError(TempoStatusCode.UNAVAILABLE, "socket closed before open"));
+              };
+              this.ws.addEventListener(WebsocketEvent.open, onOpen);
+              this.ws.addEventListener(WebsocketEvent.error, onError);
+              this.ws.addEventListener(WebsocketEvent.close, onClose);
+            }),
+        );
+        return;
+      } catch (err) {
+        lastError = err as Error;
+        if (
+          attempt < maxAttempts - 1 &&
+          err instanceof TempoError &&
+          err.message.startsWith("socket error before open")
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw lastError ?? new TempoError(TempoStatusCode.UNAVAILABLE, "socket error before open");
   }
 
   public send(message: Message) {
-    this.ws.send(Message.encode(message));
+    const frame = Message.encode(message);
+    if (frame.length > this.maxSendMessageSize) {
+      throw new TempoError(
+        TempoStatusCode.INVALID_ARGUMENT,
+        `outbound frame ${frame.length}B exceeds maxSendMessageSize ${this.maxSendMessageSize}B`,
+      );
+    }
+    this.ws.send(frame);
+  }
+
+  /**
+   * Tear down the channel: reject every in-flight unary/client-stream call,
+   * remove all event listeners, and close the socket. Idempotent and safe to
+   * invoke from the socket `close`/`error` events or by an explicit caller.
+   */
+  public close(reason?: TempoError): void {
+    if (this.closed) return;
+    this.closed = true;
+    const err = reason ?? new TempoError(TempoStatusCode.CANCELLED, "channel disposed");
+    for (const reject of this.pending.values()) reject(err);
+    this.pending.clear();
+    this.events.removeAllListeners();
+    try {
+      this.ws.close();
+    } catch {
+      /* already closed */
+    }
   }
 
   /**

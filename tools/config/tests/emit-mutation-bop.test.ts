@@ -16,7 +16,12 @@ message Entity {
 `;
 
 function generate(): string {
-  return emitMutationSchema(parseEntityMessage(ENTITY_SOURCE), "./entity.bop");
+  // PoolDelta is user-supplied (via the imported pool.bop), so reuse it verbatim.
+  return emitMutationSchema(
+    parseEntityMessage(ENTITY_SOURCE),
+    "./entity.bop",
+    new Set(["PoolDelta"]),
+  );
 }
 
 describe("emitMutationSchema", () => {

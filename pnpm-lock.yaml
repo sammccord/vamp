@@ -48,6 +48,9 @@ catalogs:
     lodash-es:
       specifier: ^4.17.23
       version: 4.17.23
+    mitata:
+      specifier: ^1.0.34
+      version: 1.0.34
     pino:
       specifier: ^10.3.1
       version: 10.3.1
@@ -138,6 +141,9 @@ importers:
       bebop-tools:
         specifier: 'catalog:'
         version: 3.2.3
+      mitata:
+        specifier: 'catalog:'
+        version: 1.0.34
       typescript:
         specifier: ^5.5.2
         version: 5.9.3
@@ -2720,6 +2726,9 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
+  mitata@1.0.34:
+    resolution: {integrity: sha512-Mc3zrtNBKIMeHSCQ0XqRLo1vbdIx1wvFV9c8NJAiyho6AjNfMY8bVhbS12bwciUdd1t4rj8099CH3N3NFahaUA==}
+
   mrmime@2.0.1:
     resolution: {integrity: sha512-Y3wQdFg2Va6etvQ5I82yUhGdsKrcYox6p7FfL1LbK2J4V01F9TGlepTIhnK24t7koZibmg82KGglhA1XK5IsLQ==}
     engines: {node: '>=10'}
@@ -4676,6 +4685,8 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  mitata@1.0.34: {}
 
   mrmime@2.0.1: {}
 

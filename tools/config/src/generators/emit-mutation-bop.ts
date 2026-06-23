@@ -13,11 +13,59 @@ function arrayDeltaName(memberType: string): string {
 }
 
 /**
+ * True for a component sub-field that should be treated as a CRDT signed
+ * counter in a synthesized delta (any integer/float scalar). Non-numeric
+ * scalars (string/guid/bool/date) and custom fields are last-write-wins.
+ */
+function isCounterField(field: SourceField): boolean {
+  if (!field.isScalar) return false;
+  return (
+    field.typeName !== "string" &&
+    field.typeName !== "guid" &&
+    field.typeName !== "bool" &&
+    field.typeName !== "date"
+  );
+}
+
+/**
+ * Resolution of the delta strategy for a custom (non-scalar/array/map)
+ * component field. `userDeltas` is the set of `<Type>Delta` message names
+ * already reachable from the user's schema (e.g. `{"PoolDelta"}`).
+ */
+export type CustomDeltaPlan = { deltaName: string; emit: boolean };
+
+export function planCustomDelta(
+  field: SourceField,
+  userDeltas: ReadonlySet<string>,
+): CustomDeltaPlan {
+  const deltaName = `${field.typeName}Delta`;
+  // If the user (or an import like pool.bop) already declares it, reuse verbatim.
+  if (userDeltas.has(deltaName)) return { deltaName, emit: false };
+  // Otherwise we must synthesize one from the component's own fields, or fail.
+  return { deltaName, emit: true };
+}
+
+/**
+ * Synthesize a `<Type>Delta` message from a component message. Numeric fields
+ * become signed `int32` CRDT deltas (mirroring the hand-written `PoolDelta`);
+ * non-numeric fields are last-write-wins (their raw type).
+ */
+export function emitSynthesizedDelta(component: SourceMessage): string {
+  const fields = component.fields
+    .map((f) => {
+      const t = isCounterField(f) ? "int32" : f.rawType;
+      return `  ${f.index} -> ${t} ${f.name};`;
+    })
+    .join("\n");
+  return `message ${component.name}Delta {\n${fields}\n}`;
+}
+
+/**
  * Resolve the bebop delta type for an Entity field. Mirrors the TS delta
  * mapping in emit-delta.ts so the bebop wire type stays structurally aligned
  * with the in-memory TS EntityDelta type.
  */
-function deltaTypeForField(field: SourceField): string {
+function deltaTypeForField(field: SourceField, userDeltas: ReadonlySet<string>): string {
   // tags is last-write-wins (keep the raw `Tags[]` shape).
   if (field.name === "tags") return field.rawType;
 
@@ -35,7 +83,7 @@ function deltaTypeForField(field: SourceField): string {
   if (field.isScalar) return field.typeName;
 
   // Custom message/struct fields use the `<Type>Delta` naming convention.
-  return `${field.typeName}Delta`;
+  return planCustomDelta(field, userDeltas).deltaName;
 }
 
 /** Collect the distinct scalar-array member types that need a delta message. */
@@ -56,9 +104,9 @@ function emitArrayDeltaMessage(memberType: string): string {
 }`;
 }
 
-function emitEntityDelta(entity: SourceMessage): string {
+function emitEntityDelta(entity: SourceMessage, userDeltas: ReadonlySet<string>): string {
   const fields = entity.fields
-    .map((f) => `  ${f.index} -> ${deltaTypeForField(f)} ${f.name};`)
+    .map((f) => `  ${f.index} -> ${deltaTypeForField(f, userDeltas)} ${f.name};`)
     .join("\n");
   return `message EntityDelta {\n${fields}\n}`;
 }
@@ -86,21 +134,108 @@ const MUTATION_SCOPE = `message MutationScope {
 }`;
 
 /**
+ * Determine which custom component fields need a delta type, and which of those
+ * deltas must be synthesized (because the user did not supply one). Throws if a
+ * component's delta is neither supplied nor synthesizable.
+ *
+ * @param entity Parsed Entity message.
+ * @param userDeltas Set of `<Type>Delta` message names reachable from the schema.
+ * @param components Map of component name -> parsed component message (for
+ *   synthesizing a missing delta). May be empty if no component sources were
+ *   resolved.
+ * @param entitySchemaPath Path to the entity schema, for error messages.
+ */
+export interface MutationSchemaPlan {
+  /** Synthesized `<Type>Delta` message source blocks to inject. */
+  synthesized: string[];
+}
+
+export function planMutationSchema(
+  entity: SourceMessage,
+  userDeltas: ReadonlySet<string>,
+  components: ReadonlyMap<string, SourceMessage>,
+  entitySchemaPath: string,
+): MutationSchemaPlan {
+  const synthesized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const field of entity.fields) {
+    if (field.name === "tags" || field.isArray || field.isMap || field.isScalar) continue;
+    const plan = planCustomDelta(field, userDeltas);
+    if (!plan.emit) continue;
+
+    const component = components.get(field.typeName);
+    if (!component) {
+      throw new Error(
+        `Entity field '${field.name}: ${field.typeName}' is a custom component but no ` +
+          `'${plan.deltaName}' was found and its definition could not be located to ` +
+          `synthesize one. Declare a '${plan.deltaName}' message or move it into a ` +
+          `schema file reachable from '${entitySchemaPath}'.`,
+      );
+    }
+
+    // P0 policy: only synthesize for numeric components. A non-numeric sub-field
+    // has no safe CRDT/default mapping yet (tracked in plan 21), so fail loudly
+    // rather than emit a wrongly-typed default.
+    const nonNumeric = component.fields.filter((f) => !isCounterField(f));
+    if (nonNumeric.length > 0) {
+      throw new Error(
+        `Cannot synthesize '${plan.deltaName}' for Entity field '${field.name}': component ` +
+          `'${field.typeName}' has non-numeric field(s) ` +
+          `[${nonNumeric.map((f) => `${f.name}: ${f.rawType}`).join(", ")}]. ` +
+          `Declare a '${plan.deltaName}' message explicitly in a schema reachable from ` +
+          `'${entitySchemaPath}'.`,
+      );
+    }
+
+    if (!seen.has(plan.deltaName)) {
+      seen.add(plan.deltaName);
+      synthesized.push(emitSynthesizedDelta(component));
+    }
+  }
+
+  return { synthesized };
+}
+
+/**
  * Emit the bebop schema providing serializable EntityDelta + MutationScope
  * types, derived from the Entity message.
  *
  * @param entity Parsed Entity message.
  * @param entityImportPath Import path to the entity schema, relative to the
  *   emitted file (e.g. "./entity.bop").
+ * @param userDeltas Set of `<Type>Delta` message names already reachable from
+ *   the user's schema (so they are reused verbatim, not re-synthesized).
+ * @param components Map of component name -> parsed component message, used to
+ *   synthesize a `<Type>Delta` when one is not user-supplied.
+ * @param entitySchemaPath Absolute path to the entity schema (for error text).
  */
-export function emitMutationSchema(entity: SourceMessage, entityImportPath: string): string {
+export function emitMutationSchema(
+  entity: SourceMessage,
+  entityImportPath: string,
+  userDeltas: ReadonlySet<string> = new Set(),
+  components: ReadonlyMap<string, SourceMessage> = new Map(),
+  entitySchemaPath = "<entity schema>",
+): string {
+  const plan = planMutationSchema(entity, userDeltas, components, entitySchemaPath);
+
   const sections: string[] = [HEADER, `import "${entityImportPath}"`];
 
   for (const member of collectArrayDeltaMembers(entity)) {
     sections.push(emitArrayDeltaMessage(member));
   }
 
-  sections.push(emitEntityDelta(entity), MUTATION_TYPE, MUTATION_RECORD, MUTATION_SCOPE);
+  // Inject any synthesized <Type>Delta messages before EntityDelta references them.
+  for (const block of plan.synthesized) {
+    sections.push(block);
+  }
+
+  sections.push(
+    emitEntityDelta(entity, userDeltas),
+    MUTATION_TYPE,
+    MUTATION_RECORD,
+    MUTATION_SCOPE,
+  );
 
   return sections.join("\n\n") + "\n";
 }

@@ -11,8 +11,11 @@ export class ContextLogger extends ConsoleLogger {
   ) {
     super(sourceName, logLevel, parent);
     this.bindings = bindings || {};
-    // Workaround to allow multiple loggers with same
-    TempoLogger.instances.clear();
+    // Allow re-creating a logger with the same source name without the
+    // TempoLogger constructor throwing on a duplicate. Only drop THIS logger's
+    // own registration (the normalized sourceName key) instead of clearing the
+    // entire global registry, which would wipe every other component's logger.
+    TempoLogger.instances.delete(sourceName.replace(/\s+/g, "_"));
   }
 
   correlate<TLogger extends TempoLogger>(

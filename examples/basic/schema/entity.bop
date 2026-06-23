@@ -1,6 +1,14 @@
 import "../node_modules/@vamp/utils/schema/pool.bop"
 import "./tags.bop"
 
+// A 2D vector component. Numeric-only, so `vamp generate` synthesizes a
+// `Vec2Delta` (signed CRDT counters) automatically. Used for position/velocity
+// so the movement system can integrate position += velocity each frame.
+message Vec2 {
+	1 -> float32 x;
+	2 -> float32 y;
+}
+
 message Entity {
 	1 -> guid id;
 	2 -> guid root;
@@ -8,4 +16,11 @@ message Entity {
 	4 -> guid parent;
 	5 -> guid[] children;
 	6 -> Pool health;
+	7 -> Vec2 position;
+	8 -> Vec2 velocity;
+	9 -> Pool mana;
+	10 -> Pool stamina;
+	11 -> uint32 level;
+	12 -> uint32 xp;
+	13 -> uint32 faction;
 }

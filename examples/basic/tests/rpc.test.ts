@@ -67,64 +67,82 @@ function makeEntity(points: number) {
 
 describe("basic RPC service (integration)", () => {
   let proc: ChildProcess;
-  let channel: TempoWSChannel;
-  let client: RpcClient;
-  let observeStream: AsyncGenerator<MutationScope, void, undefined>;
-  const scopes: MutationScope[] = [];
+  let port: number;
+
+  function createRpcClient(
+    ns: string,
+    extraQuery = "",
+  ): { channel: TempoWSChannel; client: RpcClient } {
+    const channel = TempoWSChannel.forAddress(
+      `ws://127.0.0.1:${port}/v1/game?ns=${ns}${extraQuery}`,
+      {
+        logger: new ConsoleLogger(crypto.randomUUID().slice(0, 8), TempoLogLevel.None),
+      },
+    );
+    return { channel, client: channel.getClient(RpcClient) };
+  }
 
   beforeAll(async () => {
     const dev = await startWranglerDev();
     proc = dev.proc;
-
-    // Unique namespace per run: `wrangler dev` persists durable object state.
-    const ns = `integration-test-${Date.now()}`;
-    // Drive the generated RPC client over a real tempo websocket channel, the
-    // same stack a browser/worker client uses. The channel frames each call in
-    // the shared `Message` envelope and routes responses by `messageId`.
-    channel = TempoWSChannel.forAddress(`ws://127.0.0.1:${dev.port}/v1/game?ns=${ns}`, {
-      logger: new ConsoleLogger("rpc-test", TempoLogLevel.None),
-    });
-    client = channel.getClient(RpcClient);
-
-    // Begin observing; collect every streamed mutation scope in the background.
-    observeStream = await client.observe(MutationScope({}));
-    void (async () => {
-      try {
-        for await (const scope of observeStream) scopes.push(scope);
-      } catch {
-        // stream torn down on teardown
-      }
-    })();
+    port = dev.port;
   });
 
   afterAll(async () => {
-    // The observe generator is parked awaiting the next frame, so awaiting its
-    // return() would block; fire-and-forget it and let closing the socket tear
-    // the background consumer down.
-    void observeStream?.return(undefined);
-    try {
-      channel?.ws.close();
-    } catch {
-      // ignore
-    }
     proc?.kill("SIGINT");
     await new Promise((r) => setTimeout(r, 500));
     proc?.kill("SIGKILL");
   });
 
   it("upgrades the websocket connection", async () => {
+    const { channel } = createRpcClient(`test-ws-${crypto.randomUUID().slice(0, 8)}`);
+
     await channel.waitForOpen();
     expect(channel.ws.readyState).toBe(WebSocket.OPEN);
+
+    channel.close();
   });
 
   it("spawns an entity and echoes it back", async () => {
+    const { channel, client } = createRpcClient(`test-spawn-${crypto.randomUUID().slice(0, 8)}`);
+
     const { id, entity } = makeEntity(100);
     const spawned = await client.spawn(entity);
     expect(spawned.id).toBe(id);
     expect(spawned.health?.points).toBe(100);
+
+    channel.close();
+  });
+
+  it("derives per-namespace world context from the request query seed", async () => {
+    // Each namespace is a distinct Durable Object, so its world context is
+    // resolved independently from the query-param seed forwarded by the handler.
+    // The example applies `context.faction` as the default faction for spawned
+    // entities, so the spawn response reflects the per-DO runtime context.
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const { channel: chA, client: clientA } = createRpcClient(`test-ctx-a-${suffix}`, "&faction=7");
+    const { channel: chB, client: clientB } = createRpcClient(`test-ctx-b-${suffix}`, "&faction=9");
+
+    // makeEntity does not set a faction, so the world default is applied.
+    const spawnedA = await clientA.spawn(makeEntity(10).entity);
+    const spawnedB = await clientB.spawn(makeEntity(10).entity);
+
+    expect(spawnedA.faction).toBe(7);
+    expect(spawnedB.faction).toBe(9);
+
+    chA.close();
+    chB.close();
   });
 
   it("streams the spawned entity to observers as an insert", async () => {
+    const { channel, client } = createRpcClient(`test-insert-${crypto.randomUUID().slice(0, 8)}`);
+
+    const observeStream = await client.observe(MutationScope({}));
+    const scopes: MutationScope[] = [];
+    const bgPromise = (async () => {
+      for await (const scope of observeStream) scopes.push(scope);
+    })();
+
     const { id, entity } = makeEntity(50);
     await client.spawn(entity);
 
@@ -134,9 +152,21 @@ describe("basic RPC service (integration)", () => {
     );
     expect(record.tag).toBe(1); // Insert
     expect(record.tag === 1 && record.value.entity.id).toBe(id);
+
+    await observeStream.return(undefined);
+    await bgPromise.catch(() => {});
+    channel.close();
   });
 
   it("applies an action and streams the resulting health update", async () => {
+    const { channel, client } = createRpcClient(`test-attack-${crypto.randomUUID().slice(0, 8)}`);
+
+    const observeStream = await client.observe(MutationScope({}));
+    const scopes: MutationScope[] = [];
+    const bgPromise = (async () => {
+      for await (const scope of observeStream) scopes.push(scope);
+    })();
+
     const { id, entity } = makeEntity(100);
     await client.spawn(entity);
 
@@ -153,5 +183,65 @@ describe("basic RPC service (integration)", () => {
     );
     expect(update.tag).toBe(2); // Update
     expect(update.tag === 2 && update.value.delta.health?.points).toBe(-30);
+
+    await observeStream.return(undefined);
+    await bgPromise.catch(() => {});
+    channel.close();
+  });
+
+  it("delivers observe events to multiple clients sharing the same namespace", async () => {
+    const ns = `test-multi-${crypto.randomUUID().slice(0, 8)}`;
+
+    const { channel: chA, client: clientA } = createRpcClient(ns);
+    const { channel: chB, client: clientB } = createRpcClient(ns);
+
+    const streamA = await clientA.observe(MutationScope({}));
+    const streamB = await clientB.observe(MutationScope({}));
+
+    const scopesA: MutationScope[] = [];
+    const scopesB: MutationScope[] = [];
+    const bgA = (async () => {
+      for await (const scope of streamA) scopesA.push(scope);
+    })();
+    const bgB = (async () => {
+      for await (const scope of streamB) scopesB.push(scope);
+    })();
+
+    const { id, entity } = makeEntity(80);
+    await clientA.spawn(entity);
+
+    const findInsert = (scopes: MutationScope[], key: string) =>
+      scopes.flatMap((s) => [...(s.mutations ?? [])]).find(([k]) => k === key)?.[1];
+
+    const insertA = await waitFor(() => findInsert(scopesA, id), { label: "insert in A" });
+    const insertB = await waitFor(() => findInsert(scopesB, id), { label: "insert in B" });
+
+    expect(insertA.tag).toBe(1);
+    expect(insertA.tag === 1 && insertA.value.entity.id).toBe(id);
+    expect(insertB.tag).toBe(1);
+    expect(insertB.tag === 1 && insertB.value.entity.id).toBe(id);
+
+    const attack = Actions.fromAttack(Attack({ source: id, target: id, damage: 25 }));
+    await clientB.act(attack);
+
+    const findUpdate = (scopes: MutationScope[], key: string) =>
+      scopes
+        .flatMap((s) => [...(s.mutations ?? [])])
+        .find(([k, r]) => k === key && r.tag === 2)?.[1];
+
+    const updateA = await waitFor(() => findUpdate(scopesA, id), { label: "update in A" });
+    const updateB = await waitFor(() => findUpdate(scopesB, id), { label: "update in B" });
+
+    expect(updateA.tag).toBe(2);
+    expect(updateA.tag === 2 && updateA.value.delta.health?.points).toBe(-25);
+    expect(updateB.tag).toBe(2);
+    expect(updateB.tag === 2 && updateB.value.delta.health?.points).toBe(-25);
+
+    await streamA.return(undefined);
+    await streamB.return(undefined);
+    await bgA.catch(() => {});
+    await bgB.catch(() => {});
+    chA.close();
+    chB.close();
   });
 });

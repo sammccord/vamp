@@ -69,59 +69,66 @@ export function createArchetype(
   });
 }
 
-export function transformArchetype(archetype: Archetype, componentId: number): Archetype {
+/**
+ * Find (or create) the archetype reached by toggling `componentId` on `archetype`.
+ *
+ * The `index` is a per-ECS `Map<string, Archetype>` keyed by archetype id. Passing
+ * it lets discovery of a novel archetype be an O(1) map lookup instead of an
+ * O(n) `traverseArchetypeGraph` rescan — turning warmup from O(n²) to O(n)
+ * (proposal 15). The live archetype's mask is never mutated: we clone first and
+ * flip the clone, so the function is re-entrant and the "frozen" mask is never
+ * transiently corrupted (proposal 19).
+ */
+export function transformArchetype(
+  archetype: Archetype,
+  componentId: number,
+  index?: Map<string, Archetype>,
+): Archetype {
   const existing = archetype.adjacent.get(componentId);
   if (existing !== undefined) {
     return existing;
   }
 
-  // Mutate the current mask in order to avoid creating garbage (in case the archetype already exists)
-  const mask = archetype.mask;
-  mask.flip(componentId);
-  const nextId = archetypeId(mask, archetype.tagMask);
+  // Clone first; never touch the live archetype's mask (re-entrancy safety).
+  const nextMask = archetype.mask.clone();
+  nextMask.flip(componentId);
+  const nextId = archetypeId(nextMask, archetype.tagMask);
 
-  let existingArchetype: Archetype | null = null;
-  traverseArchetypeGraph(archetype, (node) => {
-    if (node === archetype) return;
-    if (node.id === nextId) {
-      existingArchetype = node;
-      return false;
-    }
-    return existingArchetype === null;
-  });
-
-  const transformed =
-    existingArchetype || createArchetype(nextId, mask.clone(), archetype.tagMask.clone());
-  // reset current mask of input archetype, see comment above
-  mask.flip(componentId);
+  let transformed = index?.get(nextId);
+  if (transformed === undefined) {
+    transformed = createArchetype(nextId, nextMask, archetype.tagMask.clone());
+    index?.set(nextId, transformed);
+  }
   transformed.adjacent.set(componentId, archetype);
   archetype.adjacent.set(componentId, transformed);
   return transformed;
 }
 
-export function transformArchetypeTag(archetype: Archetype, tagId: number): Archetype {
+/**
+ * Find (or create) the archetype reached by toggling `tagId` on `archetype`.
+ * Same id-index lookup and clone-first (non-mutating) contract as
+ * {@link transformArchetype}.
+ */
+export function transformArchetypeTag(
+  archetype: Archetype,
+  tagId: number,
+  index?: Map<string, Archetype>,
+): Archetype {
   const existing = archetype.tagAdjacent.get(tagId);
   if (existing !== undefined) {
     return existing;
   }
 
-  const tagMask = archetype.tagMask;
-  tagMask.flip(tagId);
-  const nextId = archetypeId(archetype.mask, tagMask);
+  // Clone first; never touch the live archetype's tagMask (re-entrancy safety).
+  const nextTagMask = archetype.tagMask.clone();
+  nextTagMask.flip(tagId);
+  const nextId = archetypeId(archetype.mask, nextTagMask);
 
-  let existingArchetype: Archetype | null = null;
-  traverseArchetypeGraph(archetype, (node) => {
-    if (node === archetype) return;
-    if (node.id === nextId) {
-      existingArchetype = node;
-      return false;
-    }
-    return existingArchetype === null;
-  });
-
-  const transformed =
-    existingArchetype || createArchetype(nextId, archetype.mask.clone(), tagMask.clone());
-  tagMask.flip(tagId);
+  let transformed = index?.get(nextId);
+  if (transformed === undefined) {
+    transformed = createArchetype(nextId, archetype.mask.clone(), nextTagMask);
+    index?.set(nextId, transformed);
+  }
   transformed.tagAdjacent.set(tagId, archetype);
   archetype.tagAdjacent.set(tagId, transformed);
   return transformed;

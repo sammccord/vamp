@@ -21,6 +21,12 @@ import { type BaseEntity, type EntityMutator, MutationRecord, MutationType } fro
 
 export type EntityCallback = (entity: string, archetype: Archetype) => Promise<unknown>;
 
+// Shared frozen empty array for behavior-cache misses. Iterating it with
+// `for...of` is a no-op and allocates nothing, replacing the `|| []` idiom that
+// allocated a throwaway empty array on every miss (the common case) in
+// `act`/`actWithBubbling` (proposal 15 §4e).
+const EMPTY_BEHAVIORS: readonly never[] = Object.freeze([]);
+
 export interface ECSOptions<E extends BaseEntity, D> {
   createId: () => string;
   components: Record<Exclude<keyof E, "tags">, number>;
@@ -33,7 +39,24 @@ export type StateWithScope<C extends Record<string, unknown>, E extends BaseEnti
   scope?: MutationScope<E, D>;
 };
 
-// TODO refactor this to just be strings its fine
+/**
+ * The core Entity-Component-System world.
+ *
+ * The generic parameters are a deliberate, stable part of the public API and are
+ * NOT reducible to plain strings: entities are addressed by string id internally,
+ * but consumers parametrize the world with their own `State`, `UpdateArguments`,
+ * `Actions`, `Tags`, entity (`E`) and delta (`D`) types so that systems,
+ * behaviors, queries and mutations are statically type-checked against the
+ * consumer's domain model. Treat this signature as locked; downstream packages
+ * depend on it.
+ *
+ * @typeParam State - Per-world context object (carries the active mutation scope).
+ * @typeParam UpdateArguments - Extra arguments threaded into every `update()` call.
+ * @typeParam Actions - The action union dispatched via `act`/`actWithBubbling`.
+ * @typeParam Tags - Numeric tag id space for tag archetypes.
+ * @typeParam E - The consumer's entity shape (must extend {@link BaseEntity}).
+ * @typeParam D - The delta shape used by `put`/`upsert` and mutation coalescing.
+ */
 export class ECS<
   State extends Record<string, unknown>,
   UpdateArguments extends Array<unknown>,
@@ -47,6 +70,14 @@ export class ECS<
     new TypedFastBitSet(),
     new TypedFastBitSet(),
   );
+  // Per-ECS id -> Archetype index. Lets transformArchetype/transformArchetypeTag
+  // resolve a novel archetype with an O(1) Map lookup instead of an O(n)
+  // traverseArchetypeGraph rescan (proposal 15). Owned per-instance so multiple
+  // ECS worlds in one isolate never cross-contaminate. Seeded with the root
+  // archetype so the very first transform off the root resolves consistently.
+  private readonly _archetypeIndex = new Map<string, Archetype>([
+    [this.rootArchetype.id, this.rootArchetype],
+  ]);
   readonly entityArchetype: Map<string, Archetype> = new Map();
   readonly deletedEntities = new Set<string>();
   readonly systems: System<State, UpdateArguments, Actions, Tags, E, D>[] = [];
@@ -63,6 +94,23 @@ export class ECS<
   >();
   // Defer cache rebuilding until end of update cycle
   private readonly _deferredCacheRebuilds = new Set<string>();
+  // Cache `upsert`/`query(q => q.every(...))` shapes by their sorted component-id
+  // key so repeated upserts of the same shape reuse one Query instead of
+  // building a fresh QueryBuilder and re-traversing the whole archetype graph
+  // each call (proposal 15 §4d). Cached queries are kept current by
+  // `_tryAddArchetypeToQueries` as new archetypes appear.
+  private readonly _queryCache = new Map<string, Query>();
+  // Per-entity-system scratch buffer, refilled in place each frame instead of
+  // spreading `[...arch.entities]` into a fresh array per archetype per frame
+  // (proposal 15 §4b). The buffer is TRANSIENT: it is valid only for the single
+  // `system.execute(...)` call it is passed to and is reused on the next call,
+  // so a system MUST NOT retain it past the call. `query()` never returns this
+  // buffer (it owns a fresh array), so the no-escape invariant from proposal 07
+  // is preserved. Keyed by system so each per-entity system gets its own.
+  private readonly _systemScratch = new WeakMap<
+    System<State, UpdateArguments, Actions, Tags, E, D>,
+    string[]
+  >();
   readonly handleCreate: LifecycleSystem[] = [];
   readonly handleDelete: LifecycleSystem[] = [];
   readonly deferred: (() => void)[] = [];
@@ -93,25 +141,11 @@ export class ECS<
     this._flushHandler = handler;
   }
 
-  // Array pool for entity collections to reduce GC pressure
-  readonly _arrayPool: string[][] = [];
-
-  private _getPooledArray(size: number): string[] {
-    const pooled = this._arrayPool.pop();
-    if (pooled) {
-      pooled.length = size; // Reset array to required size
-      return pooled;
-    }
-    return Array.from<string>({ length: size });
-  }
-
-  private _returnPooledArray(array: string[]): void {
-    if (array.length < 1000) {
-      // Only pool reasonably sized arrays
-      array.length = 0; // Clear the array
-      this._arrayPool.push(array);
-    }
-  }
+  // Upper bound on the recently-deleted id ring. `deletedEntities` exists only
+  // to power the EntityDeletedError vs EntityNotExistError diagnostic; recent
+  // ids still report "deleted", older ones degrade to "does not exist". Bounding
+  // it prevents unbounded growth under per-frame spawn/despawn churn.
+  private static readonly DELETED_RING_CAP = 1024;
 
   public readonly context: StateWithScope<State, E, D>;
   protected readonly _entities: Map<string, E>;
@@ -189,31 +223,89 @@ export class ECS<
       //@ts-expect-error indexing component options by dynamic key
       components.push(this.options.components[component]);
     }
-    const entity = this.query((q) => q.every(...components)).find((e, i, obj) =>
-      filter(this.entity(e), i, obj),
-    );
+    // Before initialization, novel archetypes are not propagated to any query
+    // (initialize() does the full sweep), so a cached query could be stale.
+    // Fall back to a fresh full traversal in that rare path to preserve the old
+    // "always see all archetypes" behavior.
+    let matched: string[];
+    if (this.initialized) {
+      // Reuse a cached Query keyed by the sorted component-id list so repeated
+      // upserts of the same shape don't rebuild a QueryBuilder + matcher chain
+      // each call. The cached query's `archetypes` set is kept current by
+      // `_tryAddArchetypeToQueries`, so we read it directly instead of
+      // re-traversing the whole archetype graph.
+      const key = components
+        .slice()
+        .sort((a, b) => a - b)
+        .join(",");
+      let q = this._queryCache.get(key);
+      if (q === undefined) {
+        q = query((b) => b.every(...components));
+        // Seed the freshly-cached query with every archetype that already
+        // exists; subsequent novel archetypes are propagated via
+        // _tryAddArchetypeToQueries.
+        traverseArchetypeGraph(this.rootArchetype, (archetype) => {
+          q!.tryAdd(archetype);
+        });
+        this._queryCache.set(key, q);
+      }
+      // Build the matched-id array (same membership/order as `query(q)`) so the
+      // caller's `filter` still receives the full (e, i, obj) signature.
+      matched = this._collectQueryEntities(q);
+    } else {
+      matched = this.query((q) => q.every(...components));
+    }
+
+    const entity = matched.find((e, i, obj) => filter(this.entity(e), i, obj));
     if (entity === undefined) return this.insert(this.options.materializeDelta(delta));
     return this.put(entity, delta, mutate);
   }
 
+  /**
+   * Collect every entity id from the archetypes a (kept-current) Query already
+   * matches, in the same reverse-archetype order `query()` uses. Used by
+   * `upsert` to avoid re-traversing the whole archetype graph per call.
+   */
+  private _collectQueryEntities(q: Query): string[] {
+    // Match query()'s iteration order exactly: collect archetypes forward, then
+    // emit entities in reverse-archetype order. Preserves `find()` first-match
+    // semantics for upsert callers.
+    const archetypes: Archetype[] = [];
+    let total = 0;
+    for (const arch of q.archetypes) {
+      archetypes.push(arch);
+      total += arch.entities.size;
+    }
+    const entities = new Array<string>(total);
+    let i = 0;
+    for (let a = archetypes.length - 1; a >= 0; a--) {
+      for (const entity of archetypes[a].entities) entities[i++] = entity;
+    }
+    return entities;
+  }
+
   public insert(entity: E): E {
     const id = this.createEntity(undefined, entity.id, false);
-    // assign generated id to entity
-    if (!entity.id) entity.id = id;
-    for (const component in entity) {
+    // Work on a copy when we had to generate an id, so we never mutate the
+    // caller's object. The caller gets the id via the returned `committed`.
+    const committed: E = entity.id ? entity : { ...entity, id };
+    // Record the insert mutation FIRST so observers (event/lifecycle systems
+    // fired below) never see a state where the archetype already has the
+    // component but the entity's data has not yet been committed — a torn read.
+    this._mutate(id, MutationRecord.fromInsert<E, D>({ entity: committed }));
+    for (const component in committed) {
       if (component === "tags") continue;
-      if (entity[component as keyof E] === undefined) continue;
+      if (committed[component as keyof E] === undefined) continue;
       this.addComponent(id, component as unknown as Exclude<keyof E, "tags">, false);
     }
-    if (entity.tags) {
-      for (const tag of entity.tags) {
+    if (committed.tags) {
+      for (const tag of committed.tags) {
         this.addTag(id, tag, false);
       }
     }
-    this._mutate(id, MutationRecord.fromInsert<E, D>({ entity }));
     this.executeEventSystems(id);
     this._handleCreate(id);
-    return entity;
+    return committed;
   }
 
   public put(id: string | undefined, delta: D, mutating = false): E {
@@ -287,8 +379,9 @@ export class ECS<
       totalEntities += archetypes[a].entities.size;
     }
 
-    // Use pooled array with exact size needed
-    const entities = this._getPooledArray(totalEntities);
+    // Private array returned to the caller. Must NOT be a pooled/shared buffer:
+    // callers may retain the result, so it cannot be recycled underfoot.
+    const entities = new Array<string>(totalEntities);
     let entityIndex = 0;
 
     // reverse iterating in case a system adds/removes component resulting in new archetype that matches query for the system
@@ -370,8 +463,14 @@ export class ECS<
       totalEntities += arch.entities.size;
     }
 
-    // Use pooled array with exact size needed
-    const entities = this._getPooledArray(totalEntities);
+    // Fresh, non-escaping array. The result is consumed synchronously inside
+    // sys.execute() and never handed to a query() caller. We deliberately do NOT
+    // reuse a scratch buffer here (unlike the per-entity systems in update()):
+    // an event system's execute() can synchronously re-fire the SAME event
+    // system (e.g. by mutating an entity), and a reused buffer would be clobbered
+    // mid-iteration. A fresh array keeps this path re-entrancy-safe while still
+    // honoring the no-escape invariant from proposal 07.
+    const entities = new Array<string>(totalEntities);
     let entityIndex = 0;
 
     // Direct iteration over Set is faster than spreading
@@ -381,9 +480,6 @@ export class ECS<
       }
     }
     sys.execute(entities);
-
-    // Return array to pool for reuse
-    this._returnPooledArray(entities);
   }
 
   private _executeDeferred() {
@@ -403,17 +499,20 @@ export class ECS<
   }
 
   private _tryAddArchetypeToQueries(archetype: Archetype) {
-    const systems = [
-      ...this.systems,
-      ...this.subscriptions,
-      ...this.handleCreate,
-      ...this.handleDelete,
-      ...Array.from(this.behaviors.values()).flat(),
-    ] as System<State, UpdateArguments, Actions, Tags, E, D>[];
-
-    for (let i = 0, l = systems.length; i < l; i++) {
-      systems[i].query.tryAdd(archetype);
-    }
+    // Iterate every registered query collection in place: no intermediate
+    // arrays (the old `[...a, ...b, ...Array.from(...).flat()]` allocated four
+    // throwaway arrays on every novel archetype, a hot gameplay path).
+    const { systems, subscriptions, handleCreate, handleDelete } = this;
+    for (let i = 0, l = systems.length; i < l; i++) systems[i].query.tryAdd(archetype);
+    for (let i = 0, l = subscriptions.length; i < l; i++) subscriptions[i].query.tryAdd(archetype);
+    for (let i = 0, l = handleCreate.length; i < l; i++) handleCreate[i].query.tryAdd(archetype);
+    for (let i = 0, l = handleDelete.length; i < l; i++) handleDelete[i].query.tryAdd(archetype);
+    for (const list of this.behaviors.values())
+      for (let i = 0, l = list.length; i < l; i++) list[i].query.tryAdd(archetype);
+    // Keep cached upsert/query shapes current as new archetypes appear; without
+    // this a cached query would silently miss entities in archetypes created
+    // after the cache entry (a correctness regression, proposal 15 §6).
+    for (const q of this._queryCache.values()) q.tryAdd(archetype);
   }
 
   private _assertEntity(entity: string) {
@@ -438,7 +537,7 @@ export class ECS<
     if (adjacent !== undefined) {
       current = adjacent;
     } else {
-      current = transformArchetype(current, componentId);
+      current = transformArchetype(current, componentId, this._archetypeIndex);
       if (this.initialized) {
         this._tryAddArchetypeToQueries(current);
       }
@@ -456,7 +555,7 @@ export class ECS<
     if (tagAdjacent !== undefined) {
       current = tagAdjacent;
     } else {
-      current = transformArchetypeTag(current, tagId);
+      current = transformArchetypeTag(current, tagId, this._archetypeIndex);
       if (this.initialized) {
         this._tryAddArchetypeToQueries(current);
       }
@@ -478,12 +577,16 @@ export class ECS<
       if (d.set !== undefined) {
         targetTags = d.set;
       } else {
+        // Apply additions first, then removals, against a working copy of the
+        // current tags. `remove` must filter the post-`add` array (not the
+        // original `currentTags` snapshot) so a combined { add, remove } delta
+        // composes correctly; otherwise the added tags are silently dropped.
         targetTags = [...currentTags];
         if (d.add)
           for (const t of d.add) {
             if (!targetTags.includes(t)) targetTags.push(t);
           }
-        if (d.remove) targetTags = currentTags.filter((t) => !d.remove!.includes(t));
+        if (d.remove) targetTags = targetTags.filter((t) => !d.remove!.includes(t));
       }
     } else if (Array.isArray(tagsDelta)) {
       targetTags = tagsDelta;
@@ -515,7 +618,7 @@ export class ECS<
       if (adjacent !== undefined) {
         archetype = adjacent;
       } else {
-        archetype = transformArchetype(archetype, componentId);
+        archetype = transformArchetype(archetype, componentId, this._archetypeIndex);
         if (this.initialized) {
           this._tryAddArchetypeToQueries(archetype);
         }
@@ -529,7 +632,7 @@ export class ECS<
       if (tagAdjacent !== undefined) {
         archetype = tagAdjacent;
       } else {
-        archetype = transformArchetypeTag(archetype, tagId);
+        archetype = transformArchetypeTag(archetype, tagId, this._archetypeIndex);
         if (this.initialized) {
           this._tryAddArchetypeToQueries(archetype);
         }
@@ -578,6 +681,13 @@ export class ECS<
         behavior.query.tryAdd(archetype);
         return true;
       });
+      // A new behavior invalidates every derived behavior cache. Clear the
+      // shared archetype cache and rebuild per-entity caches so the new behavior
+      // is picked up by act()/actWithBubbling without a manual rebuild call.
+      // registerBehavior is a setup/feature-load operation, not a per-frame one,
+      // so the O(entities) rebuild here is acceptable.
+      this.archetypeBehaviorCache.clear();
+      this.rebuildAllBehaviorCaches();
     }
   }
 
@@ -657,9 +767,21 @@ export class ECS<
         system.execute(archetypes, this, ...args);
       }
       if (system.type === 0) {
-        // reverse iterating in case a system adds/removes component resulting in new archetype that matches query for the system
+        // Reuse one scratch buffer per system, refilled in place per archetype,
+        // instead of allocating a fresh `[...arch.entities]` array each time.
+        // The buffer is transient (valid only for this execute call) and never
+        // escapes to query() callers.
+        let buf = this._systemScratch.get(system);
+        if (buf === undefined) {
+          buf = [];
+          this._systemScratch.set(system, buf);
+        }
+        // iterating archetypes in case a system adds/removes a component, producing a new archetype that matches the system's query
         for (const arch of archetypes) {
-          system.execute([...arch.entities], this, ...args);
+          let i = 0;
+          for (const entity of arch.entities) buf[i++] = entity;
+          buf.length = i;
+          system.execute(buf, this, ...args);
         }
       }
     }
@@ -688,7 +810,7 @@ export class ECS<
 
     // Act on current entity
     const entityCache = this.entityBehaviorCache.get(entityId);
-    const applicableBehaviors = entityCache?.get(payload.tag) || [];
+    const applicableBehaviors = entityCache?.get(payload.tag) ?? EMPTY_BEHAVIORS;
 
     for (const behavior of applicableBehaviors) {
       if (ac.defaultPrevented) return true; // Early termination
@@ -708,10 +830,6 @@ export class ECS<
     return false;
   }
 
-  public actToSubtree<Ac extends Actions>(entityId: string, payload: Ac): Promise<boolean> {
-    return this.act(entityId, payload);
-  }
-
   // Act on entity and propagate up the hierarchy
   async actWithBubbling<Ac extends Actions>(entityId: string, action: Ac): Promise<void> {
     let currentId: string | undefined = entityId;
@@ -724,7 +842,7 @@ export class ECS<
 
       // Execute behaviors for current entity
       const entityCache = this.entityBehaviorCache.get(currentId);
-      const applicableBehaviors = entityCache?.get(action.tag) || [];
+      const applicableBehaviors = entityCache?.get(action.tag) ?? EMPTY_BEHAVIORS;
 
       for (const behavior of applicableBehaviors) {
         if (ac.defaultPrevented) break;
@@ -775,6 +893,7 @@ export class ECS<
       scope.initializeFromParent(previousScope);
     }
 
+    let succeeded = false;
     try {
       this.context.scope = scope;
       // Invoke scope-open callbacks (e.g., drain remote changes into scope)
@@ -782,17 +901,34 @@ export class ECS<
         cb(scope);
       }
       const result = await fn();
+      succeeded = true;
       return { result, mutations: scope.mutations };
     } finally {
       this.context.scope = previousScope!;
 
-      if (this._flushHandler) {
-        // Custom flush handler (e.g., batch all mutations in a single transaction)
-        this._flushHandler(scope.mutations);
-      } else {
-        // Default: flush coalesced mutations using base mutator (bypasses wrapper)
-        for (const [id, mutation] of scope.mutations) {
-          this._baseMutate(id, mutation);
+      // Transactional commit: only on success. If `fn` threw, the scope is
+      // discarded and nothing is committed/merged — an aborted scope (inner or
+      // outer) leaves no trace, which is what makes nested scopes atomic
+      // (proposal 19 §4e/§7.1).
+      if (succeeded) {
+        if (previousScope) {
+          // Nested scope: merge this scope's coalesced mutations UP into the
+          // parent instead of flushing to base. The outermost scope owns the
+          // commit, so an inner scope's writes are not committed if the outer
+          // scope later aborts.
+          for (const [id, mutation] of scope.mutations) {
+            previousScope.applyMutation(id, mutation);
+          }
+        } else if (this._flushHandler) {
+          // Outermost scope, custom flush handler (e.g., batch all mutations in a
+          // single transaction).
+          this._flushHandler(scope.mutations);
+        } else {
+          // Outermost scope, default: flush coalesced mutations using base
+          // mutator (bypasses wrapper).
+          for (const [id, mutation] of scope.mutations) {
+            this._baseMutate(id, mutation);
+          }
         }
       }
     }
@@ -862,7 +998,16 @@ export class ECS<
     // much faster than delete operator, but achieves the same (ish)
     // an alternative is to leave it be, and use archetype.entitySet.has(entity) as a check for entity being deleted, but that too is a little slower.
     this.entityArchetype.delete(entity);
+    // Evict per-entity state BEFORE firing delete handlers so a recycled id
+    // cannot inherit a stale behavior cache and handlers cannot resurrect one.
+    this.entityBehaviorCache.delete(entity);
+    this._deferredCacheRebuilds.delete(entity);
+    // Record as recently-deleted, bounded to a small ring (see DELETED_RING_CAP).
     this.deletedEntities.add(entity);
+    if (this.deletedEntities.size > ECS.DELETED_RING_CAP) {
+      // Set iterates in insertion order; drop the oldest id.
+      this.deletedEntities.delete(this.deletedEntities.values().next().value!);
+    }
     this._executeEventSystems(archetype);
     this._handleDelete(entity, archetype);
   }
@@ -891,6 +1036,11 @@ export class ECS<
     const archetype = prefabricate as Archetype;
     archetype.entities.add(entity);
     this.entityArchetype.set(entity, archetype);
+    // The entity moved to a different archetype, so the set of behaviors that
+    // apply to it changed. Schedule a behavior-cache rebuild (batched at the end
+    // of the update cycle, matching addComponent/removeComponent) so
+    // act()/actWithBubbling don't run the OLD archetype's stale behavior set.
+    this._deferredCacheRebuilds.add(entity);
     this._executeEventSystems(archetype);
   }
 

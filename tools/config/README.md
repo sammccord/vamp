@@ -1,23 +1,20 @@
-# tsdown-starter
+# @vamp/config
 
-A starter for creating a TypeScript package.
+ECS code generator CLI for @vamp. Parses Bebop (`.bop`) schemas and emits the
+TypeScript ECS components, factories, deltas, and mutation schemas used by a
+`@vamp` game.
+
+## Usage
+
+```bash
+config init        # scaffold schema/ and a vamp.json config
+config generate    # parse the .bop schemas and (re)generate TypeScript output
+```
 
 ## Development
 
-- Install dependencies:
-
 ```bash
-npm install
-```
-
-- Run the unit tests:
-
-```bash
-npm run test
-```
-
-- Build the library:
-
-```bash
-npm run build
+vp install   # install dependencies
+vp test      # run the unit tests
+vp build     # build the CLI
 ```

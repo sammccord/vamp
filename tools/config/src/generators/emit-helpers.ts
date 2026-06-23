@@ -5,8 +5,26 @@ function hasDeltaDef(field: SchemaField, schema: ParsedSchema): boolean {
   return schema.definitions.has(`${field.typeName}Delta`);
 }
 
+/** True when the entity has at least one array field (so the shared array applier is needed). */
+function needsArrayHelper(entity: SchemaDefinition): boolean {
+  return entity.fields.some((f) => f.isArray);
+}
+
+/** Type-correct default literal for a component sub-field (used by materializeDelta). */
+function defaultForField(bf: SchemaField): string {
+  if (bf.isArray) return "[]";
+  if (isScalar(bf.typeName)) {
+    if (bf.typeName === "string" || bf.typeName === "guid") return "''";
+    if (bf.typeName === "bool") return "false";
+    if (bf.typeName === "date") return "new Date(0)";
+    return "0"; // numeric scalars (incl. float64 after plan 10)
+  }
+  return "undefined as any"; // nested custom — no safe literal; leave to base
+}
+
 export function emitHelpers(entity: SchemaDefinition, schema: ParsedSchema): string {
   return [
+    emitArrayHelper(entity),
     emitPoolHelper(entity, schema),
     emitMaterializeDelta(entity, schema),
     emitMergeDelta(entity, schema),
@@ -14,6 +32,23 @@ export function emitHelpers(entity: SchemaDefinition, schema: ParsedSchema): str
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * Shared array-delta applier so `materializeDelta` and `mergeDelta` agree on
+ * set/add/remove semantics (plan 14 §4.5). Only emitted when the entity has an
+ * array field.
+ */
+function emitArrayHelper(entity: SchemaDefinition): string {
+  if (!needsArrayHelper(entity)) return "";
+  return `function applyArrayDelta<T>(base: T[], d?: { set?: T[]; add?: T[]; remove?: T[] }): T[] {
+  if (!d) return base;
+  if (d.set) return d.set;
+  let out = base.slice();
+  if (d.add) for (const x of d.add) if (!out.includes(x)) out.push(x);
+  if (d.remove) out = out.filter((x) => !d.remove!.includes(x));
+  return out;
+}`;
 }
 
 function needsPoolHelper(entity: SchemaDefinition, schema: ParsedSchema): boolean {
@@ -39,11 +74,14 @@ function emitMaterializeDelta(entity: SchemaDefinition, schema: ParsedSchema): s
       return `    tags: delta.tags ?? base?.tags ?? []`;
     }
     if (f.isArray) {
-      return `    ${f.name}: delta.${f.name}?.set ?? base?.${f.name} ?? []`;
+      // Honor set/add/remove (matches mergeDelta) via the shared applier.
+      return `    ${f.name}: applyArrayDelta(base?.${f.name} ?? [], delta.${f.name})`;
     }
     if (!isScalar(f.typeName) && hasDeltaDef(f, schema)) {
       const baseMsg = schema.definitions.get(f.typeName);
-      const defaultFields = baseMsg ? baseMsg.fields.map((bf) => `${bf.name}: 0`).join(", ") : "";
+      const defaultFields = baseMsg
+        ? baseMsg.fields.map((bf) => `${bf.name}: ${defaultForField(bf)}`).join(", ")
+        : "";
       return `    ${f.name}: delta.${f.name} ? applyPoolDelta(base?.${f.name} ?? { ${defaultFields} }, delta.${f.name} as Record<string, number>) : base?.${f.name} ?? { ${defaultFields} }`;
     }
     if (isScalar(f.typeName)) {

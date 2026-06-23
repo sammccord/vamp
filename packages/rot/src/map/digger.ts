@@ -132,27 +132,30 @@ export default class Digger extends Dungeon {
   }
 
   _digCallback = (x: number, y: number, value: number) => {
-    this._map[x][y] = value;
-    if (value == 0) {
+    if (value == 0 || value == 2) {
+      /* dig out a free space (floor or door cell) */
+      this._map[x][y] = 0;
       this._dug++;
+    } else {
+      /* value == 1: this is a wall — make it available for future digging */
+      this._walls[x + "," + y] = 1;
+      this._map[x][y] = value;
     }
   };
 
   _isWallCallback = (x: number, y: number) => {
     if (x < 0 || y < 0 || x >= this._width || y >= this._height) {
-      return true;
+      return false;
     }
-    if (this._map[x][y] != 0) {
-      return true;
-    }
-    return false;
+    return this._map[x][y] == 1;
   };
 
   _canBeDugCallback = (x: number, y: number) => {
-    if (x < 0 || y < 0 || x >= this._width || y >= this._height) {
+    if (x < 1 || y < 1 || x + 1 >= this._width || y + 1 >= this._height) {
       return false;
     }
-    return this._map[x][y] == 0;
+    /* an undug cell is still wall (1) and is therefore available to dig into */
+    return this._map[x][y] == 1;
   };
 
   _priorityWallCallback = (x: number, y: number) => {

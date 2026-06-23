@@ -8,7 +8,8 @@
     "start": "wrangler dev",
     "cf-typegen": "wrangler types",
     "generate": "config generate",
-    "test": "vp test"
+    "test": "vp test",
+    "bench": "NODE_OPTIONS=--expose-gc vp test run -c vitest.bench.config.mts"
   },
   "dependencies": {
     "@tempojs/client": "catalog:",
@@ -25,6 +26,7 @@
     "@types/ws": "^8.5.12",
     "@vamp/config": "workspace:*",
     "bebop-tools": "catalog:",
+    "mitata": "catalog:",
     "typescript": "^5.5.2",
     "vite-plus": "catalog:",
     "vitest": "catalog:",

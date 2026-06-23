@@ -2,7 +2,17 @@
   "name": "@vamp/config",
   "version": "0.0.0",
   "description": "ECS code generator CLI for @vamp",
+  "homepage": "https://github.com/sammccord/vamp/tree/main/tools/config#readme",
+  "bugs": {
+    "url": "https://github.com/sammccord/vamp/issues"
+  },
   "license": "MIT",
+  "author": "Sam McCord <sam.mccord@protonmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sammccord/vamp.git",
+    "directory": "tools/config"
+  },
   "bin": {
     "config": "./dist/cli.mjs"
   },
@@ -20,6 +30,7 @@
     "dev": "vp pack --watch",
     "test": "vp test",
     "typecheck": "tsc --noEmit",
+    "codegen:typecheck-fixtures": "vp test --run roundtrip",
     "release": "bumpp",
     "prepublishOnly": "pnpm run build"
   },

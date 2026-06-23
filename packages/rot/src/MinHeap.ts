@@ -17,11 +17,11 @@ export class MinHeap<T> {
     return a.key == b.key ? a.timestamp < b.timestamp : a.key < b.key;
   }
   shift(v: number) {
-    this.heap = this.heap.map(({ key, value, timestamp }) => ({
-      key: key + v,
-      value,
-      timestamp,
-    }));
+    // Mutate keys in place: relative-key semantics preserved (EventQueue.get
+    // relies on shift(-time) after advancing), but no array/wrapper allocation.
+    for (let i = 0; i < this.heap.length; i++) {
+      this.heap[i].key += v;
+    }
   }
   len() {
     return this.heap.length;
@@ -54,26 +54,28 @@ export class MinHeap<T> {
     return null;
   }
   remove(v: T) {
-    let index = null;
+    // Find the FIRST matching element (stop on first hit so the index we act on
+    // is the one we will overwrite; avoids the duplicate-value drop).
+    let index = -1;
     for (let i = 0; i < this.len(); i++) {
       if (v == this.heap[i].value) {
         index = i;
+        break;
       }
     }
-    if (index === null) {
+    if (index < 0) {
       return false;
     }
 
-    if (this.len() > 1) {
-      let last = this.heap.pop() as HeapWrapper<T>;
-      if (last.value != v) {
-        // if the last one is being removed, do nothing
-        this.heap[index] = last;
-        this.updateDown(index);
-      }
-      return true;
-    } else {
-      this.heap.pop();
+    // Move the last element into the freed slot. If the removed element WAS the
+    // last slot, popping it already removed it and there is nothing to re-place.
+    const last = this.heap.pop() as HeapWrapper<T>;
+    if (index < this.len()) {
+      this.heap[index] = last;
+      // The moved element may be out of order relative to its parent OR its
+      // children. Sift both ways; at most one direction does any work.
+      this.updateUp(index);
+      this.updateDown(index);
     }
 
     return true;
@@ -95,16 +97,6 @@ export class MinHeap<T> {
     this.heap[x] = this.heap[y];
     this.heap[y] = t;
   }
-  private minNode(numbers: number[]) {
-    const validnumbers = numbers.filter(this.existNode.bind(this));
-    let minimal = validnumbers[0];
-    for (const i of validnumbers) {
-      if (this.lessThan(this.heap[i], this.heap[minimal])) {
-        minimal = i;
-      }
-    }
-    return minimal;
-  }
   private updateUp(x: number) {
     if (x == 0) {
       return;
@@ -116,13 +108,17 @@ export class MinHeap<T> {
     }
   }
   private updateDown(x: number) {
-    const leftChild = this.leftChildNode(x);
-    const rightChild = this.rightChildNode(x);
-    if (!this.existNode(leftChild)) {
-      return;
+    const l = this.leftChildNode(x);
+    const r = this.rightChildNode(x);
+    if (!this.existNode(l)) {
+      return; /* no children → done */
     }
-    const m = this.minNode([x, leftChild, rightChild]);
-    if (m != x) {
+    // 3-way min inline: x vs the smaller of l / r. No array/bind allocation.
+    let m = l;
+    if (this.existNode(r) && this.lessThan(this.heap[r], this.heap[l])) {
+      m = r;
+    }
+    if (this.lessThan(this.heap[m], this.heap[x])) {
       this.swap(x, m);
       this.updateDown(m);
     }

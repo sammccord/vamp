@@ -162,14 +162,22 @@ export function createBuilder(): QueryBuilder {
       return this;
     },
     toQuery() {
-      const [first = alwaysTrue, ...rest] = _matchers;
-      const matcher = rest.length ? makeAndMatcher(first, ...rest) : first;
+      // Snapshot the matcher list and run a flat, monomorphic loop in `tryAdd`
+      // instead of composing a recursive `makeAndMatcher(first, ...rest)` closure
+      // chain. Same boolean algebra (AND of all matchers; `or` already folded its
+      // alternatives into a single matcher), but `tryAdd` no longer pays an
+      // `Array.prototype.every` call + polymorphic dispatch per archetype tested.
+      const matchers = _matchers.slice();
+      const len = matchers.length;
 
       const archetypes: Set<Archetype> = new Set();
       return Object.freeze({
         archetypes,
         tryAdd(archetype: Archetype, add = true): boolean {
-          if (!matcher(archetype.mask, archetype)) return false;
+          const mask = archetype.mask;
+          for (let i = 0; i < len; i++) {
+            if (!matchers[i](mask, archetype)) return false;
+          }
           if (add) archetypes.add(archetype);
           return true;
         },

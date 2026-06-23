@@ -10,8 +10,15 @@ const entityDef: SchemaDefinition = {
   name: "Entity",
   kind: "message",
   fields: [
-    { name: "id", typeId: -12, isArray: false, isMap: false, typeName: "guid" },
-    { name: "root", typeId: -12, isArray: false, isMap: false, typeName: "guid" },
+    { name: "id", typeId: -12, isArray: false, isMap: false, typeName: "guid", constantValue: 1 },
+    {
+      name: "root",
+      typeId: -12,
+      isArray: false,
+      isMap: false,
+      typeName: "guid",
+      constantValue: 2,
+    },
     {
       name: "tags",
       typeId: 1,
@@ -19,8 +26,16 @@ const entityDef: SchemaDefinition = {
       isMap: false,
       typeName: "array",
       memberTypeName: "Tags",
+      constantValue: 3,
     },
-    { name: "parent", typeId: -12, isArray: false, isMap: false, typeName: "guid" },
+    {
+      name: "parent",
+      typeId: -12,
+      isArray: false,
+      isMap: false,
+      typeName: "guid",
+      constantValue: 4,
+    },
     {
       name: "children",
       typeId: -14,
@@ -28,8 +43,16 @@ const entityDef: SchemaDefinition = {
       isMap: false,
       typeName: "array",
       memberTypeName: "guid",
+      constantValue: 5,
     },
-    { name: "health", typeId: 0, isArray: false, isMap: false, typeName: "pool" },
+    {
+      name: "health",
+      typeId: 0,
+      isArray: false,
+      isMap: false,
+      typeName: "pool",
+      constantValue: 6,
+    },
   ],
 };
 
@@ -72,14 +95,24 @@ const schema: ParsedSchema = {
 };
 
 describe("emitComponents", () => {
-  it("generates component ID map skipping tags field", () => {
+  it("generates a tag-derived component ID map skipping tags field", () => {
     const result = emitComponents(entityDef);
-    expect(result).toContain("id: 0");
-    expect(result).toContain("root: 1");
-    expect(result).toContain("parent: 3");
-    expect(result).toContain("children: 4");
-    expect(result).toContain("health: 5");
+    // Ids derive from the bebop field tag (constantValue), not array position.
+    expect(result).toContain("id: 1");
+    expect(result).toContain("root: 2");
+    expect(result).toContain("parent: 4");
+    expect(result).toContain("children: 5");
+    expect(result).toContain("health: 6");
     expect(result).toContain('satisfies Record<keyof Omit<Entity, "tags">, number>');
+  });
+
+  it("throws when a field has no bebop tag", () => {
+    const noTag: SchemaDefinition = {
+      name: "Entity",
+      kind: "message",
+      fields: [{ name: "id", typeId: -12, isArray: false, isMap: false, typeName: "guid" }],
+    };
+    expect(() => emitComponents(noTag)).toThrow(/no bebop field tag/);
   });
 });
 

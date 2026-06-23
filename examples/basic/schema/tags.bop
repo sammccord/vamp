@@ -3,4 +3,9 @@ enum Tags
     Human = 1;
     PlayerControlled = 2;
     Hostile = 3;
+    Undead = 4;
+    Flying = 5;
+    Boss = 6;
+    Invulnerable = 7;
+    Stunned = 8;
 }

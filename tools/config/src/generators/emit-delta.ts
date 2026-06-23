@@ -1,20 +1,16 @@
 import type { ParsedSchema, SchemaDefinition, SchemaField } from "./parse-bop";
+import { SOURCE_ONLY_SCALARS, WireBaseType } from "./parse-bop";
 
-const SCALAR_TYPES = new Set([
-  "bool",
-  "byte",
-  "uint8",
-  "int16",
-  "uint16",
-  "int32",
-  "uint32",
-  "int64",
-  "uint64",
-  "float32",
-  "float64",
-  "string",
-  "guid",
-  "date",
+/**
+ * Canonical scalar vocabulary, derived from the single source of truth
+ * (`WireBaseType` in parse-bop.ts) plus the source-only aliases. Deriving it
+ * here — rather than re-declaring a parallel list — guarantees the parser and
+ * the emitter agree on what counts as a scalar. A drift-guard test asserts
+ * every `WireBaseType` name also has a `scalarToTs` case.
+ */
+export const SCALAR_TYPES: ReadonlySet<string> = new Set([
+  ...Object.values(WireBaseType),
+  ...SOURCE_ONLY_SCALARS,
 ]);
 
 export function scalarToTs(type: string): string {
@@ -28,10 +24,11 @@ export function scalarToTs(type: string): string {
     case "int32":
     case "uint32":
     case "float32":
+    // bebop emits float64 as `number` (DataView.getFloat64); only 64-bit ints are bigint.
+    case "float64":
       return "number";
     case "int64":
     case "uint64":
-    case "float64":
       return "bigint";
     case "string":
     case "guid":
@@ -57,13 +54,19 @@ export function deltaTypeForField(field: SchemaField, schema: ParsedSchema): str
     return scalarToTs(field.typeName);
   }
 
-  // Check if there's a <Name>Delta definition
+  // A `<Type>Delta` must exist for every custom component — either user-supplied
+  // or synthesized by the mutation-schema step (see emit-mutation-bop.ts). Never
+  // fall back to `Partial<Type>`, which would silently diverge from the bebop
+  // wire type. If it is missing, the mutation-schema/bebopc step did not run or
+  // failed; fail loudly rather than emit a contradictory TS type.
   const deltaName = `${field.typeName}Delta`;
   if (schema.definitions.has(deltaName)) {
     return deltaName;
   }
-
-  return `Partial<${field.typeName}>`;
+  throw new Error(
+    `No '${deltaName}' found in the compiled schema for Entity field '${field.name}'. ` +
+      `The mutation schema generation step should have produced it; re-run 'vamp generate'.`,
+  );
 }
 
 export function emitDelta(entity: SchemaDefinition, schema: ParsedSchema): string {

@@ -14,4 +14,7 @@ const main = defineCommand({
   },
 });
 
-runMain(main).catch(console.error);
+runMain(main).catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

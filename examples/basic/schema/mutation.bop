@@ -9,6 +9,11 @@ message GuidArrayDelta {
   3 -> guid[] remove;
 }
 
+message Vec2Delta {
+  1 -> int32 x;
+  2 -> int32 y;
+}
+
 message EntityDelta {
   1 -> guid id;
   2 -> guid root;
@@ -16,6 +21,13 @@ message EntityDelta {
   4 -> guid parent;
   5 -> GuidArrayDelta children;
   6 -> PoolDelta health;
+  7 -> Vec2Delta position;
+  8 -> Vec2Delta velocity;
+  9 -> PoolDelta mana;
+  10 -> PoolDelta stamina;
+  11 -> uint32 level;
+  12 -> uint32 xp;
+  13 -> uint32 faction;
 }
 
 enum MutationType {

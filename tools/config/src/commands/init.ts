@@ -1,10 +1,35 @@
 import { defineCommand } from "citty";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { entityTemplate } from "../templates/entity.bop";
+import { relative, resolve } from "node:path";
+import {
+  POOL_IMPORT_FALLBACK,
+  POOL_IMPORT_PLACEHOLDER,
+  entityTemplate,
+} from "../templates/entity.bop";
 import { actionsTemplate } from "../templates/actions.bop";
 import { stateTemplate } from "../templates/state.bop";
 import { tagsTemplate } from "../templates/tags.bop";
+import { resolveBebopImport } from "../generators/resolve-imports";
+
+/**
+ * Resolve a bebop import path (relative to `schemaDir`) for
+ * `@vamp/utils/schema/pool.bop` using Node module resolution, so the scaffolded
+ * import is correct under hoisted or pnpm `node_modules` layouts. Falls back to
+ * a literal path (with a warning) when resolution fails.
+ */
+export function resolvePoolImport(cwd: string, schemaDir: string): string {
+  const resolved = resolveBebopImport("@vamp/utils/schema/pool.bop", cwd);
+  if (!resolved) {
+    console.warn(
+      "Warning: could not resolve '@vamp/utils/schema/pool.bop'. Scaffolding a literal " +
+        "import path that may not resolve under your node_modules layout — fix the import " +
+        "in schema/entity.bop if `bebopc build` fails.",
+    );
+    return POOL_IMPORT_FALLBACK;
+  }
+  const rel = relative(schemaDir, resolved).split("\\").join("/");
+  return rel.startsWith(".") ? rel : `./${rel}`;
+}
 
 export const initCommand = defineCommand({
   meta: {
@@ -26,9 +51,13 @@ export const initCommand = defineCommand({
     mkdirSync(schemaDir, { recursive: true });
     console.log("Created schema/");
 
+    // Resolve the pool.bop import path for the actual node_modules layout.
+    const poolImport = resolvePoolImport(cwd, schemaDir);
+    const entityContent = entityTemplate.replace(POOL_IMPORT_PLACEHOLDER, poolImport);
+
     // Write template .bop files (skip if they exist)
     const files = [
-      { path: "schema/entity.bop", content: entityTemplate },
+      { path: "schema/entity.bop", content: entityContent },
       { path: "schema/actions.bop", content: actionsTemplate },
       { path: "schema/state.bop", content: stateTemplate },
       { path: "schema/tags.bop", content: tagsTemplate },

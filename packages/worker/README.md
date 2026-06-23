@@ -1,23 +1,13 @@
-# tsdown-starter
+# @vamp/worker
 
-A starter for creating a TypeScript package.
+Cloudflare Workers Durable Object integration for @vamp. Hosts the ECS runtime
+in a Durable Object, syncs state via yjs, and serves tempo RPC over hibernatable
+WebSockets.
 
 ## Development
 
-- Install dependencies:
-
 ```bash
-npm install
-```
-
-- Run the unit tests:
-
-```bash
-npm run test
-```
-
-- Build the library:
-
-```bash
-npm run build
+vp install   # install dependencies
+vp test      # run the unit tests
+vp build     # build the library
 ```

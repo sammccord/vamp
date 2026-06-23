@@ -60,6 +60,14 @@ interface DurableObjectStorage {
   transaction<T>(closure: (txn: DurableObjectTransaction) => Promise<T>): Promise<T>;
   transactionSync<T>(closure: () => T): T;
   sync(): Promise<void>;
+  // Durable Object alarm API: the only mechanism that can run code on a clock
+  // inside a DO and wake an evicted DO. Used by the ECS tick loop.
+  getAlarm(options?: { allowConcurrency?: boolean }): Promise<number | null>;
+  setAlarm(
+    scheduledTime: number | Date,
+    options?: { allowConcurrency?: boolean; allowUnconfirmed?: boolean },
+  ): Promise<void>;
+  deleteAlarm(options?: { allowConcurrency?: boolean; allowUnconfirmed?: boolean }): Promise<void>;
   readonly sql: SqlStorage;
 }
 
@@ -141,8 +149,25 @@ declare class WebSocketRequestResponsePair {
 // Durable Object binding types
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * The RPC surface the ECS DO consumes from the storage provider namespace. It
+ * is structurally compatible with `y-durablestream`'s `YStreamProviderStub`
+ * (so it can back a `YStreamClient`) and adds `compact()` (exposed by
+ * `ECSStorage`) so the tick loop can drive periodic compaction. Declared
+ * structurally here because this ambient `.d.ts` cannot import the real type
+ * without becoming a module and losing its global declarations.
+ */
+interface GameStorageStub {
+  subscribe(): Promise<ReadableStream<Uint8Array>>;
+  update(data: Uint8Array): Promise<Uint8Array | void>;
+  getYDoc(): Promise<Uint8Array>;
+  compact(): Promise<void>;
+}
+
 interface CloudflareBindings {
-  GAME_STORAGE: DurableObjectNamespace;
+  // Typed with the provider stub so `get(...)` returns a correctly-typed stub
+  // and the double `as unknown as YStreamProviderStub` cast can be dropped.
+  GAME_STORAGE: DurableObjectNamespace<GameStorageStub>;
 }
 
 declare class DurableObjectNamespace<T = unknown> {

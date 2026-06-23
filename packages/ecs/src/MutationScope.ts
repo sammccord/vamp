@@ -35,8 +35,15 @@ export class MutationScope<E, D> {
   }
 
   insert(entityId: string, entity: E): void {
-    // Clone entity to prevent shared reference issues
-    const clonedEntity = structuredClone(entity);
+    // Shallow-copy the entity to break the shared reference between the caller's
+    // object and the scope's shadow/mutation record. This matches the
+    // framework's "entities are flat data" contract (the same `{ ...entity }`
+    // strategy `initializeFromParent` already uses). It is both cheaper than
+    // `structuredClone` and, unlike it, never throws on non-cloneable fields
+    // (functions, class instances, etc.). NOTE: nested mutable fields are shared
+    // by reference, not deep-copied — entities are expected to hold flat,
+    // value-like data.
+    const clonedEntity = { ...entity };
 
     const existing = this.mutations.get(entityId);
 
@@ -98,6 +105,28 @@ export class MutationScope<E, D> {
     // Update shadow state
     this.shadowEntities.delete(entityId);
     this.deletedIds.add(entityId);
+  }
+
+  /**
+   * Merge a coalesced mutation record from a nested (inner) scope into this
+   * (parent) scope, routing it through this scope's own insert/update/delete
+   * coalescing so the parent's shadow + mutation map stay consistent. Used when
+   * a nested `withScope` exits: inner writes become visible to the parent's
+   * shadow but only commit when the OUTERMOST scope flushes (transactional
+   * atomicity).
+   */
+  applyMutation(id: string, record: MutationRecord<E, D>): void {
+    switch (record.tag) {
+      case MutationType.Insert:
+        this.insert(id, record.value.entity);
+        break;
+      case MutationType.Update:
+        this.update(id, record.value.delta);
+        break;
+      case MutationType.Delete:
+        this.delete(id, record.value.entity);
+        break;
+    }
   }
 
   clear(): void {

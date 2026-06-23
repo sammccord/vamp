@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        # version is taken from the root package.json `packageManager` field
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # engines.node >= 22.12.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 1. format + lint + type-check (oxfmt + oxlint typeAware + tsc)
+      - name: Check (fmt + lint + typecheck)
+        run: pnpm vp check
+
+      # 2. full recursive test suite (incl. the ECS suite)
+      - name: Test
+        run: pnpm vp test -r
+
+      # 3. codegen round-trip: regenerate the example and prove the output
+      #    still type-checks and is deterministic / committed.
+      - name: Codegen round-trip
+        run: |
+          pnpm --filter basic run generate
+          pnpm --filter basic exec tsc --noEmit
+          git diff --exit-code examples/basic/src
+
+      # 4. publish-readiness gate + lightweight metadata lint
+      - name: Ready gate
+        run: pnpm run ready
+
+      - name: Package metadata lint
+        run: pnpm --filter "@vamp/*" exec npm pack --dry-run

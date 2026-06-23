@@ -1,23 +1,12 @@
-# tsdown-starter
+# @vamp/ecs
 
-A starter for creating a TypeScript package.
+Entity-Component-System runtime for @vamp game state. Archetype-graph storage,
+component queries, event-driven behaviors, and transactional mutation scopes.
 
 ## Development
 
-- Install dependencies:
-
 ```bash
-npm install
-```
-
-- Run the unit tests:
-
-```bash
-npm run test
-```
-
-- Build the library:
-
-```bash
-npm run build
+vp install   # install dependencies
+vp test      # run the unit tests
+vp build     # build the library
 ```

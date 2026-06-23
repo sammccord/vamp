@@ -2,9 +2,28 @@ import "./entity.bop"
 import "./actions.bop"
 import "./mutation.bop"
 
+// Request to advance the server-authoritative simulation. `steps` update cycles
+// are run back-to-back inside a single mutation scope (one Yjs transaction), so
+// the round-trip measures the full per-frame system + mutation + sync cost.
+message TickRequest {
+	1 -> uint32 steps;
+	2 -> uint32 dtMs;
+}
+
+// Server-measured result of a `tick` call: how many frames ran, how many
+// entities the world held, and the server-side wall-clock spent (microseconds),
+// so the benchmark can derive FPS excluding network round-trip.
+message TickResult {
+	1 -> uint32 frames;
+	2 -> uint32 entities;
+	3 -> uint32 micros;
+}
+
 service RPC {
     spawn(Entity): Entity;
     act(Actions): Actions;
+    // Drive the server simulation N frames and report server-side timing.
+    tick(TickRequest): TickResult;
     // Low-level entity changes are communicated as a serializable MutationScope.
     observe(MutationScope): stream MutationScope;
     // subscribe(): stream Actions;

@@ -37,6 +37,26 @@ export class TempoExtensionChannel extends BaseChannel {
 
   private readonly events = new EventEmitter<Record<string, (message: Message) => void>>();
   private readonly userAgent: string;
+  // Reject callbacks for in-flight unary / client-stream calls, keyed by messageId.
+  public readonly pending = new Map<string, (e: unknown) => void>();
+  private closed = false;
+
+  // Stored so close() can remove it; guards decode so foreign/malformed runtime
+  // traffic is dropped instead of throwing synchronously inside the listener.
+  private readonly onMessage = (msg: unknown): Promise<void> => {
+    let message: Message;
+    try {
+      message = Message(Message.decode(new Uint8Array(msg as number[])));
+    } catch (e) {
+      this.logger.warn("dropping undecodable runtime message", {}, e as Error);
+      return Promise.resolve();
+    }
+    if (message.messageId) {
+      this.events.emit(message.messageId, message);
+      this.logger.debug(`received new message ${message.messageId}`);
+    }
+    return Promise.resolve();
+  };
 
   /**
    * Constructs a new TempoChannel instance.
@@ -56,14 +76,27 @@ export class TempoExtensionChannel extends BaseChannel {
       runtime: TempoUtil.getEnvironmentName(),
     });
 
-    browser.runtime.onMessage.addListener((msg: unknown) => {
-      const message = Message(Message.decode(new Uint8Array(msg as number[])));
-      this.events.emit(message.messageId!, message);
-      this.logger.debug(`received new message ${message.messageId!}`);
-      return Promise.resolve();
-    });
+    browser.runtime.onMessage.addListener(this.onMessage);
 
     this.logger.debug(`created new TempoExtensionChannel`);
+  }
+
+  /**
+   * Tear down the channel: remove the runtime message listener, reject every
+   * in-flight call, and clear all event listeners. Idempotent.
+   */
+  public close(reason?: TempoError): void {
+    if (this.closed) return;
+    this.closed = true;
+    try {
+      browser.runtime.onMessage.removeListener(this.onMessage);
+    } catch {
+      /* listener already gone */
+    }
+    const err = reason ?? new TempoError(TempoStatusCode.CANCELLED, "channel disposed");
+    for (const reject of this.pending.values()) reject(err);
+    this.pending.clear();
+    this.events.removeAllListeners();
   }
 
   public override async removeCredential(): Promise<void> {
@@ -157,21 +190,25 @@ export class TempoExtensionChannel extends BaseChannel {
   }
 
   private async fetchUnary(init: Message, options?: CallOptions): Promise<Message> {
-    return await new Promise((resolve, reject) => {
-      const messageId = init.messageId!;
-      const listener = (message: Message) => {
-        resolve(message);
-        this.events.off(messageId, listener);
-      };
+    const messageId = init.messageId!;
+    let listener!: (message: Message) => void;
+    let onAbort: (() => void) | undefined;
+    const cleanup = () => {
+      this.events.off(messageId, listener);
+      if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
+      this.pending.delete(messageId);
+    };
+    const promise = new Promise<Message>((resolve, reject) => {
+      listener = (message: Message) => resolve(message);
+      this.pending.set(messageId, reject);
       if (options?.controller) {
-        options.controller.signal.addEventListener("abort", () => {
-          this.events.off(messageId, listener);
-          reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
-        });
+        onAbort = () => reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
+        options.controller.signal.addEventListener("abort", onAbort, { once: true });
       }
       this.events.on(messageId, listener);
       this.sendMessage(init).catch(reject);
     });
+    return await promise.finally(cleanup);
   }
 
   // should loop over generator, send all, and resolve on one response
@@ -182,29 +219,34 @@ export class TempoExtensionChannel extends BaseChannel {
     options?: CallOptions,
   ): Promise<Message> {
     const messageId = init.messageId!;
-    return await new Promise((resolve, reject) => {
-      const listener = (message: Message) => {
-        resolve(message);
-        this.events.off(messageId, listener);
-      };
+    let listener!: (message: Message) => void;
+    let onAbort: (() => void) | undefined;
+    const cleanup = () => {
+      this.events.off(messageId, listener);
+      if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
+      this.pending.delete(messageId);
+    };
+    const promise = new Promise<Message>((resolve, reject) => {
+      listener = (message: Message) => resolve(message);
+      this.pending.set(messageId, reject);
       if (options?.controller) {
-        options.controller.signal.addEventListener("abort", () => {
-          this.events.off(messageId, listener);
-          reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
-        });
+        onAbort = () => reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
+        options.controller.signal.addEventListener("abort", onAbort, { once: true });
       }
       this.events.on(messageId, listener);
       runGenerator.call(this).catch(reject);
       async function runGenerator(this: TempoExtensionChannel) {
+        // Fresh Message per frame, and AWAIT each send so concurrent un-awaited
+        // sends cannot serialize an overwritten payload (shared-`init` race).
         for await (const value of generator()) {
-          init.data = method.serialize(value);
-          this.sendMessage(init).catch(reject);
+          await this.sendMessage(Message({ ...init, data: method.serialize(value) }));
         }
-        init.status = TempoStatusCode.CANCELLED;
-        init.data = new Uint8Array();
-        this.sendMessage(init).catch(reject);
+        await this.sendMessage(
+          Message({ ...init, status: TempoStatusCode.CANCELLED, data: new Uint8Array() }),
+        );
       }
     });
+    return await promise.finally(cleanup);
   }
 
   // should send message, then return a createEventIterator from incoming events, stopping on CANCEL
@@ -216,30 +258,47 @@ export class TempoExtensionChannel extends BaseChannel {
     options?: CallOptions,
   ): AsyncGenerator<BebopRecord, void, undefined> {
     const messageId = init.messageId!;
-    return createEventIterator<BebopRecord>(({ emit, cancel }) => {
+    return createEventIterator<BebopRecord>(({ emit, cancel, error }) => {
+      let terminated = false;
+      let onAbort: (() => void) | undefined;
       const eventHandler = async (message: Message) => {
-        if (message.status === TempoStatusCode.CANCELLED) {
-          cancel();
-          return;
+        try {
+          if (message.status === TempoStatusCode.CANCELLED) {
+            terminated = true;
+            cancel();
+            return;
+          }
+          this.processResponseHeaders(message, context, method.type);
+          const responseData = message.data!;
+          const record = method.deserialize(responseData);
+          if (this.hooks !== undefined) {
+            await this.hooks.executeDecodeHooks(context, record);
+          }
+          emit(record);
+        } catch (e) {
+          error(e);
         }
-        this.processResponseHeaders(message, context, method.type);
-        const responseData = message.data!;
-        const record = method.deserialize(responseData);
-        if (this.hooks !== undefined) {
-          await this.hooks.executeDecodeHooks(context, record);
-        }
-        emit(record);
       };
       if (options?.controller) {
-        options.controller.signal.addEventListener("abort", () => {
-          cancel();
-          throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {});
-        });
+        onAbort = () => error(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
+        options.controller.signal.addEventListener("abort", onAbort, { once: true });
       }
       this.events.on(messageId, eventHandler);
       void this.sendMessage(init);
       return () => {
         this.events.off(messageId, eventHandler);
+        if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
+        // Tell the server to stop streaming (fresh message — never mutate init).
+        if (terminated || this.closed) return;
+        void this.sendMessage(
+          Message({
+            messageId,
+            methodId: init.methodId,
+            status: TempoStatusCode.CANCELLED,
+            data: new Uint8Array(),
+            timestamp: new Date(),
+          }),
+        );
       };
     });
   }
@@ -256,32 +315,35 @@ export class TempoExtensionChannel extends BaseChannel {
     const iterator = createDuplexIterator<BebopRecord>(
       generator(),
       (value) => {
-        init.data = method.serialize(value);
-        void this.sendMessage(init);
+        void this.sendMessage(Message({ ...init, data: method.serialize(value) }));
       },
-      ({ emit, cancel }) => {
+      ({ emit, cancel, error }) => {
+        let onAbort: (() => void) | undefined;
         const eventHandler = async (message: Message) => {
-          if (message.status === TempoStatusCode.CANCELLED) {
-            cancel();
-            return;
+          try {
+            if (message.status === TempoStatusCode.CANCELLED) {
+              cancel();
+              return;
+            }
+            this.processResponseHeaders(message, context, method.type);
+            const requestData = message.data!;
+            const record = method.deserialize(requestData);
+            if (this.hooks !== undefined) {
+              await this.hooks.executeDecodeHooks(context, record);
+            }
+            emit(record);
+          } catch (e) {
+            error(e);
           }
-          this.processResponseHeaders(message, context, method.type);
-          const requestData = message.data!;
-          const record = method.deserialize(requestData);
-          if (this.hooks !== undefined) {
-            await this.hooks.executeDecodeHooks(context, record);
-          }
-          emit(record);
         };
         if (options?.controller) {
-          options.controller.signal.addEventListener("abort", () => {
-            cancel();
-            throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {});
-          });
+          onAbort = () => error(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
+          options.controller.signal.addEventListener("abort", onAbort, { once: true });
         }
         this.events.on(messageId, eventHandler);
         return () => {
           this.events.off(messageId, eventHandler);
+          if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
         };
       },
     );

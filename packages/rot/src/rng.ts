@@ -19,7 +19,11 @@ class RNG {
   }
 
   /**
-   * Seed the number generator
+   * Seed the number generator.
+   * NOTE: seeds < 1 are mapped via 1/seed (so setSeed(0) → Infinity); this is
+   * intentional upstream-rot.js behavior, allowing a Math.random() value in
+   * [0,1) to be used directly as a seed by mapping it into [1, ∞). Callers
+   * wanting reproducible integer seeds should pass an integer >= 1.
    */
   setSeed(seed: number) {
     seed = seed < 1 ? 1 / seed : seed;

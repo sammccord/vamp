@@ -1,63 +1,59 @@
 import type { BebopRecord } from "bebop";
-import type { CleanupFn, Context } from "./create-event-iterator";
+import { AsyncQueue, type AsyncQueueOptions } from "./async-queue";
+import { type CleanupFn, type Context, queueIterator } from "./create-event-iterator";
 
 export type Writer<T> = (context: Context<T>) => void | CleanupFn | Promise<CleanupFn | void>;
 
-export async function* createDuplexIterator<T>(
+/**
+ * Duplex stream iterator. The outgoing generator is pumped in its own task and
+ * the incoming stream is drained independently off a bounded {@link AsyncQueue}
+ * — the two are never coupled, so an outgoing send with no incoming reply (or a
+ * server push with no matching outgoing send) neither deadlocks nor drops
+ * frames. Consumer teardown halts the outgoing pump and unsubscribes incoming.
+ */
+export function createDuplexIterator<T>(
   outgoing: AsyncGenerator<BebopRecord, void, undefined>,
   emitter: (record: BebopRecord) => void,
   incoming: Writer<T>,
+  options?: AsyncQueueOptions,
 ): AsyncGenerator<T> {
-  const events: T[] = [];
-  let cancelled = false;
-
-  // Prime the promise BEFORE incoming() runs to prevent race condition
-  // This ensures resolveNext is never null when events arrive
-  let resolveNext: (() => void) | null = null;
-  let nextPromise = new Promise<void>((resolve) => {
-    resolveNext = resolve;
+  let unsubscribe: CleanupFn | void;
+  // When the consumer goes away, dispose() must both unsubscribe AND stop the
+  // outgoing pump so it cannot send on a torn-down transport.
+  const queue = new AsyncQueue<T>(options, async () => {
+    await outgoing.return?.(undefined); // halt the outgoing pump
+    await unsubscribe?.();
   });
 
-  const emit = (event: T) => {
-    events.push(event);
-    // If we are awaiting for a new event, resolve the promise
-    if (resolveNext) {
-      resolveNext();
-      // Create next promise immediately after resolving
-      nextPromise = new Promise<void>((resolve) => {
-        resolveNext = resolve;
-      });
-    }
+  const context: Context<T> = {
+    emit: (value) => {
+      queue.push(value);
+    },
+    cancel: () => queue.close(),
+    error: (e) => queue.fail(e),
   };
 
-  const cancel = () => {
-    cancelled = true;
-    if (resolveNext) resolveNext();
-  };
+  // Plain async iterator (not an `async function*`) so a consumer `return()`
+  // issued while a `next()` is parked does not deadlock — see `queueIterator`.
+  // Subscribing + starting the outgoing pump runs lazily on the first pull,
+  // matching the previous async-generator body's lazy execution.
+  return queueIterator(queue, async () => {
+    unsubscribe = await incoming(context);
 
-  const unsubscribe = await incoming({ emit, cancel });
-  try {
-    while (!cancelled) {
-      const { value, done } = await outgoing.next();
-      if (value && !done) {
-        emitter(value);
-        await nextPromise;
-        if (events.length > 0) {
-          yield events.shift()!;
+    // Outgoing runs as an independent task. Normal completion does NOT close the
+    // incoming stream (the server may keep pushing after the client stops
+    // sending); an outgoing-side failure surfaces to the consumer via the error
+    // channel.
+    const pump = (async () => {
+      try {
+        for await (const record of outgoing) {
+          emitter(record);
         }
-      } else if (done) {
-        await nextPromise;
-        if (events.length > 0) {
-          yield events.shift()!;
-        }
-        break;
+      } catch (e) {
+        queue.fail(e);
       }
-    }
-    // Process any remaining events that were emitted before cancellation.
-    while (events.length > 0) {
-      yield events.shift()!;
-    }
-  } finally {
-    await unsubscribe?.();
-  }
+    })();
+    // Avoid an unhandled rejection if the pump rejects after the consumer parks.
+    void pump.catch(() => {});
+  });
 }

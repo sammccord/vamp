@@ -21,7 +21,7 @@ export default class Action<T = any> extends Scheduler<T> {
    * @see ROT.Scheduler#add
    */
   add(item: T, repeat: boolean, time?: number) {
-    this._queue.add(item, time || this._defaultDuration);
+    this._queue.add(item, time !== undefined ? time : this._defaultDuration);
     return super.add(item, repeat);
   }
 
@@ -42,7 +42,9 @@ export default class Action<T = any> extends Scheduler<T> {
    */
   next() {
     if (this._current !== null && this._repeat.indexOf(this._current) != -1) {
-      this._queue.add(this._current, this._duration || this._defaultDuration);
+      /* _duration is always a number (default 1, or whatever setDuration stored);
+       * honor a legitimate 0-cost duration instead of coercing it to the default. */
+      this._queue.add(this._current, this._duration);
       this._duration = this._defaultDuration;
     }
     return super.next();

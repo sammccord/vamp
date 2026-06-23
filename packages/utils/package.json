@@ -1,16 +1,17 @@
 {
   "name": "@vamp/utils",
   "version": "0.0.0",
-  "description": "A starter for creating a TypeScript package.",
-  "homepage": "https://github.com/author/library#readme",
+  "description": "Tempo RPC, Bebop serialization, transports, and async primitives for @vamp.",
+  "homepage": "https://github.com/sammccord/vamp/tree/main/packages/utils#readme",
   "bugs": {
-    "url": "https://github.com/author/library/issues"
+    "url": "https://github.com/sammccord/vamp/issues"
   },
   "license": "MIT",
-  "author": "Author Name <author.name@mail.com>",
+  "author": "Sam McCord <sam.mccord@protonmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/author/library.git"
+    "url": "git+https://github.com/sammccord/vamp.git",
+    "directory": "packages/utils"
   },
   "files": [
     "dist",
@@ -18,6 +19,7 @@
   ],
   "type": "module",
   "exports": {
+    "./async-queue": "./dist/async-queue.mjs",
     "./bebop": "./dist/bebop.mjs",
     "./context-logger": "./dist/context-logger.mjs",
     "./create-duplex-iterator": "./dist/create-duplex-iterator.mjs",
