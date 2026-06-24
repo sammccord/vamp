@@ -9,6 +9,7 @@
     "cf-typegen": "wrangler types",
     "generate": "config generate",
     "test": "vp test",
+    "test:e2e": "vp test run -c vitest.solid.config.mts",
     "bench": "NODE_OPTIONS=--expose-gc vp test run -c vitest.bench.config.mts"
   },
   "dependencies": {
@@ -16,18 +17,24 @@
     "@tempojs/common": "catalog:",
     "@tempojs/server": "catalog:",
     "@vamp/ecs": "workspace:*",
+    "@vamp/solid": "workspace:*",
     "@vamp/utils": "workspace:*",
     "@vamp/worker": "workspace:*",
     "bebop": "catalog:",
-    "hono": "catalog:"
+    "hono": "catalog:",
+    "solid-js": "catalog:"
   },
   "devDependencies": {
+    "@solidjs/testing-library": "^0.8.10",
     "@types/node": "^25.5.0",
     "@types/ws": "^8.5.12",
     "@vamp/config": "workspace:*",
     "bebop-tools": "catalog:",
+    "jsdom": "^26.0.0",
     "mitata": "catalog:",
     "typescript": "^5.5.2",
+    "undici": "^7.24.4",
+    "vite-plugin-solid": "^2.11.6",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
     "websocket-ts": "catalog:",

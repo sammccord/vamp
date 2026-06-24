@@ -4,6 +4,20 @@ import type { CustomAction, GenericAction } from "./Actions";
 import { query as buildQuery, type Query, type QueryBuilder } from "./Query";
 import type { BaseEntity } from "./types";
 
+/**
+ * Discriminator for the {@link System} union. Numeric values are load-bearing
+ * (the update loop and registration dispatch on them); they are NOT serialized,
+ * so the names — not the numbers — are the API. Use these constants instead of
+ * raw `0..4` literals everywhere a system's `type` is read.
+ */
+export enum SystemType {
+  Entity = 0,
+  Archetype = 1,
+  Event = 2,
+  Lifecycle = 3,
+  Behavior = 4,
+}
+
 export type BaseSystem = {
   readonly query: Query;
 };
@@ -16,11 +30,7 @@ export type EntitySystem<
   E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 > = BaseSystem & {
-  /**
-   * 0 = entitySystem
-   * 1 = archetypeSystem
-   */
-  readonly type: 0;
+  readonly type: SystemType.Entity;
   execute(
     entities: Array<string>,
     world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
@@ -36,11 +46,7 @@ export type ArchetypeSystem<
   E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 > = BaseSystem & {
-  /**
-   * 0 = entitySystem
-   * 1 = archetypeSystem
-   */
-  readonly type: 1;
+  readonly type: SystemType.Archetype;
   execute(
     archetypes: Set<Archetype>,
     world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
@@ -49,20 +55,12 @@ export type ArchetypeSystem<
 };
 
 export type EventSystem = BaseSystem & {
-  /**
-   * 0 = entitySystem
-   * 1 = archetypeSystem
-   */
-  readonly type: 2;
+  readonly type: SystemType.Event;
   execute(entities: Array<string>): void;
 };
 
 export type LifecycleSystem = BaseSystem & {
-  /**
-   * 0 = entitySystem
-   * 1 = archetypeSystem
-   */
-  readonly type: 3;
+  readonly type: SystemType.Lifecycle;
   execute(entity: string): void;
 };
 
@@ -74,7 +72,7 @@ export type Behavior<
   E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
 > = BaseSystem & {
-  readonly type: 4;
+  readonly type: SystemType.Behavior;
   tag: number;
   handler: (
     world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
@@ -125,7 +123,7 @@ export function createEntitySystem<
   return Object.freeze({
     execute,
     query,
-    type: 0,
+    type: SystemType.Entity,
   });
 }
 
@@ -157,7 +155,7 @@ export function createArchetypeSystem<
   return Object.freeze({
     execute,
     query,
-    type: 1,
+    type: SystemType.Archetype,
   });
 }
 
@@ -177,7 +175,7 @@ export function createEventSystem(
   return Object.freeze({
     execute,
     query,
-    type: 2,
+    type: SystemType.Event,
   });
 }
 
@@ -189,7 +187,7 @@ export function createLifecycleSystem(
   return Object.freeze({
     execute,
     query,
-    type: 3,
+    type: SystemType.Lifecycle,
   });
 }
 
@@ -216,6 +214,6 @@ export function createBehavior<
     handler,
     query,
     priority,
-    type: 4,
+    type: SystemType.Behavior,
   });
 }

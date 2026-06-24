@@ -116,6 +116,26 @@ function makeStressEntity(i: number): Entity {
   });
 }
 
+/** A positioned entity, for the zoned interest (AOI) fan-out variant. */
+function makeEntityAt(x: number, y: number): Entity {
+  return Entity({
+    id: crypto.randomUUID(),
+    tags: [],
+    children: [],
+    position: { x, y },
+    health: { points: 100, min: 0, max: 100, rate: 0, interval: 0 },
+  });
+}
+
+/** Observe as a specific viewer (interest is the example's distance-based AOI). */
+function observeAs(client: RpcClient, viewerId: string): Promise<ObserveStream> {
+  return client.observe(
+    MutationScope({
+      mutations: new Map([[viewerId, { tag: 1, value: { entity: Entity({ id: viewerId }) } }]]),
+    }),
+  ) as Promise<ObserveStream>;
+}
+
 /** A minimal combat-capable entity (health + stamina) used as a cascade leaf. */
 function makeLeaf(): Entity {
   return Entity({
@@ -456,6 +476,97 @@ test("full-stack FPS stress benchmark", async () => {
     );
 
     // Isolate the next row: end this room's observe streams (removes sinks).
+    await detachObservers(streams);
+    await sleep(100);
+  }
+
+  // Zoned interest fan-out: the same rooms, but each observer declares a viewer
+  // in ONE of `ZONES` well-separated zones, so the server's interest routing
+  // (`canSee`) delivers each mutation only to observers whose zone contains it.
+  // Expectation vs the naive fan-out above: sends-per-mutation drops from ~M to
+  // ~M/ZONES, so effective room capacity rises ~ZONES×. We also assert zero
+  // cross-zone leakage (an act in zone 0 reaches no observer of another zone).
+  console.log("\n=== Zoned interest fan-out: AOI broadcast delivery throughput ===");
+  const ZONES: Array<[number, number]> = [
+    [0, 0],
+    [1000, 0],
+    [0, 1000],
+    [1000, 1000],
+  ];
+  console.log(
+    `  (${ZONES.length} zones ${2 * 100}+ apart; act in zone 0 → only zone-0 observers receive it)`,
+  );
+  for (const m of FANOUT_OBSERVERS) {
+    if (m === 0) continue;
+    const ns = `bench-zoned-${m}-${crypto.randomUUID().slice(0, 8)}`;
+    const actor = createClient(ns);
+
+    // A viewer + a populated neighborhood + an act target at each zone center.
+    const viewerIds: string[] = [];
+    const zoneTargets: string[] = [];
+    for (const [cx, cy] of ZONES) {
+      const viewer = makeEntityAt(cx, cy);
+      viewerIds.push(viewer.id as string);
+      await actor.spawn(viewer);
+      for (let k = 0; k < 16; k++) await actor.spawn(makeEntityAt(cx + (k % 9), cy + (k % 7)));
+      const target = makeEntityAt(cx, cy);
+      zoneTargets.push(target.id as string);
+      await actor.spawn(target);
+    }
+    await actor.tick(TickRequest({ steps: 1, dtMs: 16 }));
+
+    // Spread M observers evenly across the zones.
+    const states: ObserverState[] = [];
+    const streams: ObserveStream[] = [];
+    const zoneOf: number[] = [];
+    for (let i = 0; i < m; i++) {
+      const z = i % ZONES.length;
+      const stream = await observeAs(createClient(ns), viewerIds[z]);
+      fanoutStreams.push(stream);
+      streams.push(stream);
+      const state: ObserverState = { n: 0 };
+      states.push(state);
+      zoneOf.push(z);
+      void (async () => {
+        try {
+          for await (const scope of stream) state.n += scope.mutations?.size ?? 0;
+        } catch {
+          /* stream closed on teardown */
+        }
+      })();
+    }
+    await sleep(200); // let initial (zone-filtered) snapshots land
+
+    const ACT_K = 300;
+    const baseline = states.map((o) => o.n);
+    const act = await measureDelivery(
+      states,
+      () =>
+        actor.act(
+          Actions.fromAttack(Attack({ source: zoneTargets[0], target: zoneTargets[0], damage: 1 })),
+        ),
+      ACT_K,
+    );
+
+    // Cross-zone leakage: only zone-0 observers should have received the acts.
+    let zone0 = 0;
+    let otherZones = 0;
+    for (let i = 0; i < states.length; i++) {
+      const delta = states[i].n - baseline[i];
+      if (zoneOf[i] === 0) zone0 += delta;
+      else otherZones += delta;
+    }
+    const inZone0 = zoneOf.filter((z) => z === 0).length;
+    console.log(
+      `  ${String(m).padStart(3)} obs (${inZone0} in zone 0) | act ${act.opsPerSec.toFixed(0).padStart(5)}/s → ${fmtRate(act.msgsPerSec).padStart(7)} msg/s` +
+        ` | zone-0 recv ${zone0}, other-zone recv ${otherZones} (leak)`,
+    );
+    if (otherZones !== 0) {
+      throw new Error(
+        `cross-zone leakage: ${otherZones} mutations reached observers outside zone 0`,
+      );
+    }
+
     await detachObservers(streams);
     await sleep(100);
   }

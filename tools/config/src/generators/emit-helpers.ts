@@ -10,6 +10,10 @@ function needsArrayHelper(entity: SchemaDefinition): boolean {
   return entity.fields.some((f) => f.isArray);
 }
 
+function needsPoolHelper(entity: SchemaDefinition, schema: ParsedSchema): boolean {
+  return entity.fields.some((f) => !f.isArray && !isScalar(f.typeName) && hasDeltaDef(f, schema));
+}
+
 /** Type-correct default literal for a component sub-field (used by materializeDelta). */
 function defaultForField(bf: SchemaField): string {
   if (bf.isArray) return "[]";
@@ -22,50 +26,30 @@ function defaultForField(bf: SchemaField): string {
   return "undefined as any"; // nested custom — no safe literal; leave to base
 }
 
+/**
+ * Import of the canonical delta-algebra appliers from `@vamp/ecs`, narrowed to
+ * exactly the helpers this entity's fields use. The set/add/remove (array) and
+ * additive (pool) semantics live in `@vamp/ecs` so `materializeDelta`,
+ * `mergeDelta`, and `accumulateDelta` cannot drift; the generated code only
+ * dispatches per field. Returns "" when the entity has neither array nor pool
+ * fields (so no unused import is emitted).
+ */
+export function emitHelperImports(entity: SchemaDefinition, schema: ParsedSchema): string {
+  const names: string[] = [];
+  if (needsArrayHelper(entity)) names.push("applyArrayDelta", "accumulateArrayDelta");
+  if (needsPoolHelper(entity, schema)) names.push("applyPoolDelta", "accumulatePoolDelta");
+  if (names.length === 0) return "";
+  return `import { ${names.join(", ")} } from "@vamp/ecs";`;
+}
+
 export function emitHelpers(entity: SchemaDefinition, schema: ParsedSchema): string {
   return [
-    emitArrayHelper(entity),
-    emitPoolHelper(entity, schema),
     emitMaterializeDelta(entity, schema),
     emitMergeDelta(entity, schema),
     emitAccumulateDelta(entity, schema),
   ]
     .filter(Boolean)
     .join("\n\n");
-}
-
-/**
- * Shared array-delta applier so `materializeDelta` and `mergeDelta` agree on
- * set/add/remove semantics (plan 14 §4.5). Only emitted when the entity has an
- * array field.
- */
-function emitArrayHelper(entity: SchemaDefinition): string {
-  if (!needsArrayHelper(entity)) return "";
-  return `function applyArrayDelta<T>(base: T[], d?: { set?: T[]; add?: T[]; remove?: T[] }): T[] {
-  if (!d) return base;
-  if (d.set) return d.set;
-  let out = base.slice();
-  if (d.add) for (const x of d.add) if (!out.includes(x)) out.push(x);
-  if (d.remove) out = out.filter((x) => !d.remove!.includes(x));
-  return out;
-}`;
-}
-
-function needsPoolHelper(entity: SchemaDefinition, schema: ParsedSchema): boolean {
-  return entity.fields.some((f) => !f.isArray && !isScalar(f.typeName) && hasDeltaDef(f, schema));
-}
-
-function emitPoolHelper(entity: SchemaDefinition, schema: ParsedSchema): string {
-  if (!needsPoolHelper(entity, schema)) return "";
-  return `function applyPoolDelta<T>(base: T, delta: Record<string, number>): T {
-  const result = { ...base } as Record<string, number>;
-  for (const key in delta) {
-    if (delta[key] !== undefined) {
-      result[key] = (result[key] ?? 0) + delta[key];
-    }
-  }
-  return result as unknown as T;
-}`;
 }
 
 function emitMaterializeDelta(entity: SchemaDefinition, schema: ParsedSchema): string {
@@ -104,31 +88,10 @@ function emitMergeDelta(entity: SchemaDefinition, schema: ParsedSchema): string 
       return `  if (delta.tags !== undefined) entity.tags = delta.tags;`;
     }
     if (f.isArray) {
-      return `  if (delta.${f.name}) {
-    if (delta.${f.name}.set) {
-      entity.${f.name} = delta.${f.name}.set;
-    } else {
-      if (!entity.${f.name}) entity.${f.name} = [];
-      if (delta.${f.name}.add) {
-        for (const item of delta.${f.name}.add) {
-          if (!entity.${f.name}.includes(item)) entity.${f.name}.push(item);
-        }
-      }
-      if (delta.${f.name}.remove) {
-        entity.${f.name} = entity.${f.name}.filter((item) => !delta.${f.name}!.remove!.includes(item));
-      }
-    }
-  }`;
+      return `  if (delta.${f.name}) entity.${f.name} = applyArrayDelta(entity.${f.name} ?? [], delta.${f.name});`;
     }
     if (!isScalar(f.typeName) && hasDeltaDef(f, schema)) {
-      return `  if (delta.${f.name}) {
-    if (!entity.${f.name}) entity.${f.name} = {} as any;
-    const t = entity.${f.name} as Record<string, number>;
-    const d = delta.${f.name} as Record<string, number>;
-    for (const key in d) {
-      if (d[key] !== undefined) t[key] = (t[key] ?? 0) + d[key];
-    }
-  }`;
+      return `  if (delta.${f.name}) entity.${f.name} = applyPoolDelta((entity.${f.name} ?? {}) as Record<string, number>, delta.${f.name} as Record<string, number>) as Entity[${JSON.stringify(f.name)}];`;
     }
     if (isScalar(f.typeName)) {
       return `  if (delta.${f.name} !== undefined) entity.${f.name} = delta.${f.name};`;
@@ -147,32 +110,10 @@ function emitAccumulateDelta(entity: SchemaDefinition, schema: ParsedSchema): st
       return `  if (from.tags !== undefined) to.tags = from.tags;`;
     }
     if (f.isArray) {
-      return `  if (from.${f.name}) {
-    if (from.${f.name}.set) {
-      to.${f.name} = from.${f.name};
-    } else {
-      if (!to.${f.name}) to.${f.name} = {};
-      if (from.${f.name}.add) {
-        to.${f.name}.add = [...(to.${f.name}.add ?? []), ...from.${f.name}.add];
-      }
-      if (from.${f.name}.remove) {
-        to.${f.name}.remove = [...(to.${f.name}.remove ?? []), ...from.${f.name}.remove];
-      }
-    }
-  }`;
+      return `  if (from.${f.name}) to.${f.name} = accumulateArrayDelta(to.${f.name}, from.${f.name});`;
     }
     if (!isScalar(f.typeName) && hasDeltaDef(f, schema)) {
-      return `  if (from.${f.name}) {
-    if (!to.${f.name}) {
-      to.${f.name} = { ...from.${f.name} };
-    } else {
-      const t = to.${f.name} as Record<string, number>;
-      const d = from.${f.name} as Record<string, number>;
-      for (const key in d) {
-        if (d[key] !== undefined) t[key] = (t[key] ?? 0) + d[key];
-      }
-    }
-  }`;
+      return `  if (from.${f.name}) to.${f.name} = accumulatePoolDelta(to.${f.name} as Record<string, number> | undefined, from.${f.name} as Record<string, number>) as EntityDelta[${JSON.stringify(f.name)}];`;
     }
     if (isScalar(f.typeName)) {
       return `  if (from.${f.name} !== undefined) to.${f.name} = from.${f.name};`;

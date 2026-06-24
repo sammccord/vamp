@@ -1,102 +1,37 @@
 import type { ServerContext } from "@tempojs/server";
-import { createEventIterator } from "@vamp/utils/create-event-iterator";
 import {
   type Actions,
   BaseRpcService,
   type Entity,
-  type MutationRecord,
-  MutationScope,
+  type MutationScope,
   TempoServiceRegistry,
   type TickRequest,
   TickResult,
 } from "./bebop";
-import type { GameContext } from "./game.generated";
+import { observe, type WorldContext } from "./observe-routing";
 
-/**
- * The runtime-configurable world context for this example. It is derived per
- * Durable Object at bootstrap from the handler's request (see `resolveContext`
- * in `index.ts`) and survives hibernation via the persisted seed. `faction` is
- * applied as the default faction for entities spawned into this world, so the
- * world's runtime context is observable through the `spawn` RPC response.
- */
-export type GameWorldContext = { faction: number; seededAt: number };
-
-/** The example's ECS context tuple, typed with the world context above. */
-type WorldContext = GameContext<{}, GameWorldContext>;
-
-/**
- * Active observer sinks, keyed at module scope.
- *
- * The tempo service registry invokes service methods *unbound* (it stores
- * `service.spawn` etc. as the method `invoke`), so `this` is not available
- * inside the handlers. We therefore keep shared state at module scope rather
- * than on the instance. The service is a per-isolate singleton, so this is
- * equivalent to instance state for a single durable object.
- */
-const observers = new Set<(scope: MutationScope) => void>();
-
-/**
- * Per-connection teardown callbacks, keyed by the underlying WebSocket. The
- * `observe` generator registers a callback that removes its sink and ends its
- * stream here, so the durable object's connection-close path can drive it on
- * disconnect/error — not only when the generator happens to be returned. Keyed
- * weakly so a dropped socket does not leak the map entry.
- */
-const connectionTeardowns = new WeakMap<WebSocket, Set<() => void>>();
-
-function registerConnectionTeardown(ws: WebSocket, fn: () => void): () => void {
-  let set = connectionTeardowns.get(ws);
-  if (!set) {
-    set = new Set();
-    connectionTeardowns.set(ws, set);
-  }
-  set.add(fn);
-  return () => {
-    set?.delete(fn);
-  };
-}
-
-/**
- * Run and clear all teardown callbacks for a connection. Wired into the durable
- * object's connection-close path via `onConnectionClose` in `defineECSRuntime`.
- */
-export function closeConnectionObservers(ws: WebSocket): void {
-  const set = connectionTeardowns.get(ws);
-  if (!set) return;
-  for (const fn of [...set]) {
-    try {
-      fn();
-    } catch {
-      /* best-effort */
-    }
-  }
-  set.clear();
-  connectionTeardowns.delete(ws);
-}
-
-/** Forward a batch of ECS mutations to every active observer. */
-function broadcast(mutations: Map<string, MutationRecord>): void {
-  if (mutations.size === 0) return;
-  const scope = MutationScope({ mutations });
-  for (const emit of observers) emit(scope);
-}
+// Re-export the interest-broadcast lifecycle hooks the worker entry wires into
+// `defineGameECSRuntime` (connection-close teardown and hibernation re-register).
+export { type GameWorldContext, onConnectionClose, rehydrateConnection } from "./observe-routing";
 
 /**
  * The RPC service implementation for the basic example.
  *
- * - `spawn` inserts an entity into the ECS and streams the resulting mutation
- *   to all active observers.
+ * - `spawn` inserts an entity into the ECS. The commit auto-routes the resulting
+ *   mutation to every interested observer (see ECS `observeMutations`).
  * - `act` dispatches the action through the registered behaviors (see
  *   `registerGameSystems`); `act` propagates down the entity's children, so an
  *   `AreaAttack` on a parent cascades through its subtree.
  * - `tick` advances the server simulation N frames via `ecs.update()` (running
- *   every registered system), one mutation scope / Yjs transaction per frame,
- *   and reports server-measured timing. Used by the FPS stress benchmark.
- * - `observe` yields a snapshot of the current world, then streams every
- *   subsequent mutation produced by `spawn`/`act`/`tick`.
+ *   every registered system), one mutation scope / Yjs transaction per frame.
+ * - `observe` registers an interest-filtered, hibernation-safe broadcast for the
+ *   connection: it yields an initial filtered snapshot, then receives only the
+ *   committed mutations its viewer cares about — pushed generator-free so it
+ *   survives DO hibernation.
  *
- * The ECS-produced mutation records are wire-compatible with the generated
- * bebop `MutationScope`, so they can be forwarded directly to observers.
+ * Routing is automatic: every committed scope fans its coalesced mutations out
+ * to interested observers, so the mutation handlers below no longer broadcast
+ * manually.
  */
 @TempoServiceRegistry.register(BaseRpcService.serviceName)
 export class RpcService extends BaseRpcService {
@@ -113,16 +48,16 @@ export class RpcService extends BaseRpcService {
     // the client did not specify one, so explicit factions still win.
     if (entity.faction === undefined) entity.faction = ecs.context.faction;
 
-    const { result, mutations } = await ecs.withScope(() => ecs.insert(entity));
-    broadcast(mutations as unknown as Map<string, MutationRecord>);
+    // The commit auto-routes the insert to interested observers; no manual broadcast.
+    const { result } = await ecs.withScope(() => ecs.insert(entity));
     return result;
   }
 
   public async act(record: Actions, context: ServerContext): Promise<Actions> {
-    const [ecs] = context.getEnvironment<GameContext>();
+    const [ecs] = context.getEnvironment<WorldContext>();
 
     const target = record.value.target;
-    const { mutations } = await ecs.withScope(async () => {
+    await ecs.withScope(async () => {
       if (!target) return;
       if (!ecs.entity(target)) return;
       // Entities spawned since the last `update()` only have a *deferred* behavior
@@ -137,23 +72,22 @@ export class RpcService extends BaseRpcService {
       await ecs.act(target, record);
     });
 
-    broadcast(mutations as unknown as Map<string, MutationRecord>);
+    // The commit auto-routes the resulting mutations to interested observers.
     return record;
   }
 
   public async tick(record: TickRequest, context: ServerContext): Promise<TickResult> {
-    const [ecs] = context.getEnvironment<GameContext>();
+    const [ecs] = context.getEnvironment<WorldContext>();
 
     const steps = Math.max(1, record.steps ?? 1);
     const start = performance.now();
     for (let i = 0; i < steps; i++) {
       // One scope (one Yjs transaction) per frame: systems' mutations are
-      // coalesced, flushed to the doc, and broadcast to observers exactly like a
-      // server-authoritative tick.
-      const { mutations } = await ecs.withScope(() => {
+      // coalesced, flushed to the doc, and auto-routed to interested observers
+      // exactly like a server-authoritative tick.
+      await ecs.withScope(() => {
         ecs.update();
       });
-      broadcast(mutations as unknown as Map<string, MutationRecord>);
     }
     const micros = Math.max(0, Math.round((performance.now() - start) * 1000));
 
@@ -161,38 +95,14 @@ export class RpcService extends BaseRpcService {
   }
 
   public async *observe(
-    _record: MutationScope,
+    record: MutationScope,
     context: ServerContext,
   ): AsyncGenerator<MutationScope, void, undefined> {
-    const [ecs, ws] = context.getEnvironment<GameContext>();
-
-    // 1. Initial snapshot: every existing entity as an insert.
-    const snapshot = new Map<string, MutationRecord>();
-    for (const [id, entity] of ecs.entities) {
-      snapshot.set(id, { tag: 1, value: { entity } } as MutationRecord);
-    }
-    if (snapshot.size > 0) {
-      yield MutationScope({ mutations: snapshot });
-    }
-
-    // 2. Stream subsequent mutations produced by spawn/act.
-    yield* createEventIterator<MutationScope>(({ emit, cancel }) => {
-      const sink = (scope: MutationScope) => emit(scope);
-      observers.add(sink);
-      // Register with the connection so the durable object's close/error path
-      // can drive this stream to completion (which removes the sink). Without
-      // this, a disconnect would leave the sink in `observers` until the next
-      // broadcast happened to fail a send and return the generator.
-      const unregister = registerConnectionTeardown(ws, () => {
-        observers.delete(sink);
-        cancel();
-      });
-      // The cleanup callback runs on natural generator return/throw too, so the
-      // sink and the registration are removed exactly once regardless of path.
-      return () => {
-        observers.delete(sink);
-        unregister();
-      };
-    });
+    // All interest-broadcast plumbing — viewer resolution, subscription
+    // persistence, the interest-filtered snapshot, generator-free framed
+    // delivery, and hibernation-safe teardown — lives in `@vamp/worker/interest`
+    // (bound to this app's types by the generated `createGameInterestBroadcast`).
+    // The RPC method is just the delegation point.
+    yield* observe(record, context);
   }
 }

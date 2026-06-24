@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "jsxImportSource": "solid-js",
+    "lib": ["es2024", "DOM", "DOM.Iterable"],
+    "types": ["../worker-configuration.d.ts", "node"]
+  },
+  "include": ["."]
+}

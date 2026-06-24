@@ -1,4 +1,4 @@
-import { type InsertMutation, MutationRecord, MutationType } from "./types";
+import { MutationRecord, MutationType } from "./types";
 
 export type MergeDeltaFn<E, D> = (entity: E, delta: D) => void;
 export type AccumulateDeltaFn<D> = (from: D, to: D) => D;
@@ -45,16 +45,11 @@ export class MutationScope<E, D> {
     // value-like data.
     const clonedEntity = { ...entity };
 
-    const existing = this.mutations.get(entityId);
-
-    if (existing?.tag === MutationType.Delete) {
-      // Re-creation after delete = treat as insert
-      const mutable = existing as unknown as InsertMutation<E>;
-      mutable.tag = 1;
-      mutable.value = { entity: clonedEntity };
-    } else {
-      this.mutations.set(entityId, MutationRecord.fromInsert<E, D>({ entity: clonedEntity }));
-    }
+    // The map holds the single NET record per id, so an insert always overwrites
+    // whatever was there — including a Delete left by a prior delete-then-recreate
+    // in the same scope. Setting a fresh Insert record (rather than mutating the
+    // old one in place) keeps records immutable and drops an unsafe double cast.
+    this.mutations.set(entityId, MutationRecord.fromInsert<E, D>({ entity: clonedEntity }));
 
     // Update shadow state
     this.shadowEntities.set(entityId, clonedEntity);

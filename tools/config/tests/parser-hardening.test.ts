@@ -121,10 +121,12 @@ describe("jsonc parse error surfacing (4.8)", () => {
 });
 
 // Fixture 9 — array delta materialize parity (4.5) is asserted in scaffolding/round-trip
-// via emitHelpers; here we assert the emitted source contains the shared applier.
+// via emitHelpers; here we assert the generated source IMPORTS the shared applier
+// from `@vamp/ecs` (the canonical algebra now lives there, not inlined) and uses
+// it from materializeDelta.
 describe("materializeDelta array parity (4.5)", () => {
-  it("emits and uses a shared applyArrayDelta helper", async () => {
-    const { emitHelpers } = await import("../src/generators/emit-helpers.js");
+  it("imports and uses the shared applyArrayDelta helper", async () => {
+    const { emitHelpers, emitHelperImports } = await import("../src/generators/emit-helpers.js");
     const entity = {
       name: "Entity",
       kind: "message" as const,
@@ -142,7 +144,11 @@ describe("materializeDelta array parity (4.5)", () => {
     };
     const schema = { definitions: new Map([["Entity", entity]]) };
     const out = emitHelpers(entity, schema);
-    expect(out).toContain("function applyArrayDelta");
+    const imports = emitHelperImports(entity, schema);
+    // No longer inlined: the algebra is a runtime import, not a generated function body.
+    expect(out).not.toContain("function applyArrayDelta");
+    expect(imports).toContain("applyArrayDelta");
+    expect(imports).toContain('from "@vamp/ecs"');
     expect(out).toContain("children: applyArrayDelta(base?.children ?? [], delta.children)");
   });
 });
