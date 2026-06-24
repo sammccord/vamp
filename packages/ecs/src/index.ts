@@ -1,5 +1,12 @@
 export type { Archetype } from "./Archetype";
 export {
+  accumulateArrayDelta,
+  accumulatePoolDelta,
+  applyArrayDelta,
+  type ArrayDelta,
+  applyPoolDelta,
+} from "./delta";
+export {
   archetypeId,
   createArchetype,
   transformArchetype,
@@ -7,9 +14,21 @@ export {
   traverseArchetypeGraph,
 } from "./Archetype";
 export { ECS, type ECSOptions, type MutationBatch, type MutationObserver } from "./ECS";
+export {
+  applyMutation,
+  type BaseMutatorConfig,
+  type BaseMutatorOptions,
+  createBaseMutator,
+} from "./mutator";
 export { type AccumulateDeltaFn, type MergeDeltaFn, type MutationScope } from "./MutationScope";
 export type { Query, QueryBuilder } from "./Query";
 export * from "./Query";
+export {
+  createQueryMembershipTracker,
+  type QueryMembershipTracker,
+  type QueryMembershipWorld,
+  type TrackedQuery,
+} from "./QueryMembership";
 export type { System } from "./System";
 export * from "./Actions";
 export {
@@ -18,6 +37,7 @@ export {
   createEntitySystem,
   createEventSystem,
   createLifecycleSystem,
+  SystemType,
 } from "./System";
 export {
   type BaseEntity,

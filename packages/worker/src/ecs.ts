@@ -1,11 +1,14 @@
 // src/receiver.ts
 
 import {
+  applyMutation,
   type BaseEntity,
+  createBaseMutator,
   ECS,
   type ECSOptions,
   type GenericAction,
   MutationRecord,
+  MutationType,
 } from "@vamp/ecs";
 import { Message } from "@vamp/utils/bebop";
 import type { ContextLogger } from "@vamp/utils/context-logger";
@@ -476,24 +479,10 @@ export class ECSDurableObject<
       EntityDelta
     >(
       entities,
-      // Base mutator: pure read-copy update of the working entity store
-      (id: string, mutation: MutationRecord<Entity, EntityDelta>) => {
-        switch (mutation.tag) {
-          case 1:
-            entities.set(id, mutation.value.entity);
-            break;
-          case 2: {
-            const entity = entities.get(id);
-            if (entity) {
-              configuration.ecs.mergeDelta(entity, mutation.value.delta);
-            }
-            break;
-          }
-          case 3:
-            entities.delete(id);
-            break;
-        }
-      },
+      // Base mutator: pure read-copy update of the working entity store. The
+      // server authored every Insert, so a missing Update target is a no-op
+      // (no `materializeOnMissingUpdate`).
+      createBaseMutator(entities, configuration.ecs),
       {
         ...configuration.context,
         _: {
@@ -529,19 +518,7 @@ export class ECSDurableObject<
             // Locally-authored mutation: apply it to the working entity store so
             // reads (`ecs.entities` / `ecs.entity`) reflect local changes. Remote
             // changes instead arrive through the Yjs observers above.
-            switch (mutation.tag) {
-              case 1:
-                entities.set(id, mutation.value.entity);
-                break;
-              case 2: {
-                const entity = entities.get(id);
-                if (entity) configuration.ecs.mergeDelta(entity, mutation.value.delta);
-                break;
-              }
-              case 3:
-                entities.delete(id);
-                break;
-            }
+            applyMutation(entities, id, mutation, configuration.ecs);
           }
           // Always mirror to Yjs (idempotent; includes local changes for mixed-case)
           this._writeMutationToDoc(id, mutation);
@@ -989,7 +966,7 @@ export class ECSDurableObject<
   private _writeMutationToDoc(id: string, mutation: MutationRecord<Entity, EntityDelta>) {
     const map = this.doc.getMap<unknown>(id);
     switch (mutation.tag) {
-      case 1: {
+      case MutationType.Insert: {
         // Insert: populate entity map
         const entity = mutation.value.entity as Record<string, unknown>;
         for (const key in entity) {
@@ -1010,7 +987,7 @@ export class ECSDurableObject<
         this._entityIdMirror.add(id);
         break;
       }
-      case 2: {
+      case MutationType.Update: {
         // Update: set changed component keys
         const delta = mutation.value.delta as Record<string, unknown>;
         for (const key in delta) {
@@ -1025,7 +1002,7 @@ export class ECSDurableObject<
         }
         break;
       }
-      case 3: {
+      case MutationType.Delete: {
         // Delete: remove ALL occurrences from the namespace array (high index
         // first) so a double-written id leaves no surviving occurrence that the
         // array observer would re-add as a ghost. Then clear the entity map.

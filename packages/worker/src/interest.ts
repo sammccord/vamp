@@ -1,5 +1,11 @@
 import type { ServerContext } from "@tempojs/server";
-import type { BaseEntity, ECS, MutationBatch, MutationRecord } from "@vamp/ecs";
+import {
+  type BaseEntity,
+  type ECS,
+  type MutationBatch,
+  type MutationRecord,
+  MutationType,
+} from "@vamp/ecs";
 import { createEventIterator } from "@vamp/utils/create-event-iterator";
 import {
   encodeServerStreamFrame,
@@ -173,7 +179,8 @@ export function createInterestBroadcast<
       interested: (id: string, mutation: MutationRecord<E, D>): boolean => {
         // On delete the entity is gone from the world; read its last state from
         // the mutation payload, not world.entity(id).
-        const target = mutation.tag === 3 ? mutation.value.entity : world.entity(id);
+        const target =
+          mutation.tag === MutationType.Delete ? mutation.value.entity : world.entity(id);
         return target ? canSee(world, viewerId, id, target) : false;
       },
       deliver: (batch: MutationBatch<E, D>): void => {

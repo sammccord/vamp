@@ -30,12 +30,17 @@ function bebopRuntimeDir(): string {
 const ECS_STUB = `
 export interface ECSOptions<E, D> {
   createId: () => string;
-  components: Record<Exclude<keyof E, "tags">, number>;
+  components: Record<string, number>;
   materializeDelta: (delta: D, base?: Partial<E>) => E;
   mergeDelta: (entity: E, delta: D) => void;
   accumulateDelta: (from: D, to: D) => D;
 }
 export type MutationBatch<E, D> = Map<string, unknown>;
+type ArrayDelta<T> = { set?: T[]; add?: T[]; remove?: T[] };
+export function applyArrayDelta<T>(base: T[], d?: ArrayDelta<T>): T[];
+export function applyPoolDelta<T>(base: T, delta: Record<string, number>): T;
+export function accumulateArrayDelta<T>(to: ArrayDelta<T> | undefined, from: ArrayDelta<T>): ArrayDelta<T>;
+export function accumulatePoolDelta(to: Record<string, number> | undefined, from: Record<string, number>): Record<string, number>;
 `;
 
 const WORKER_STUB = `
