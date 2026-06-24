@@ -35,6 +35,7 @@ export interface ECSOptions<E, D> {
   mergeDelta: (entity: E, delta: D) => void;
   accumulateDelta: (from: D, to: D) => D;
 }
+export type MutationBatch<E, D> = Map<string, unknown>;
 `;
 
 const WORKER_STUB = `
@@ -86,6 +87,24 @@ export function defineECSRuntime<
     EntityDelta
   >,
 ): void;
+`;
+
+/** Minimal stub for the `@vamp/worker/interest` subpath the generated wrapper imports. */
+const WORKER_INTEREST_STUB = `
+import type { MutationBatch } from "@vamp/ecs";
+export interface InterestBroadcastConfig<W, Req, E = unknown, D = unknown> {
+  encodeBatch: (batch: MutationBatch<E, D>) => Uint8Array;
+  canSee?: (world: W, viewerId: string | undefined, targetId: string, target: E) => boolean;
+  resolveViewer?: (record: Req) => string | undefined;
+}
+export interface InterestBroadcast<W, Req, Yield> {
+  observe: (record: Req, context: unknown) => AsyncGenerator<Yield, void, undefined>;
+  onConnectionClose: (ws: unknown) => void;
+  rehydrateConnection: (world: W, ws: unknown) => void;
+}
+export function createInterestBroadcast<W, Req, Yield = never, E = unknown, D = unknown>(
+  config: InterestBroadcastConfig<W, Req, E, D>,
+): InterestBroadcast<W, Req, Yield>;
 `;
 
 const CF_STUB = `declare namespace Cloudflare { interface Env {} }`;
@@ -171,7 +190,26 @@ message PoolDelta {
     writeFileSync(join(d, "index.js"), "", "utf-8");
   };
   mkPkg("@vamp/ecs", ECS_STUB);
-  mkPkg("@vamp/worker", WORKER_STUB);
+  // @vamp/worker exposes both the root and the `./interest` subpath the generated
+  // file imports, so give it an explicit exports map (nodenext subpath resolution).
+  const workerDir = join(nm, "@vamp", "worker");
+  mkdirSync(workerDir, { recursive: true });
+  writeFileSync(
+    join(workerDir, "package.json"),
+    JSON.stringify({
+      name: "@vamp/worker",
+      version: "0.0.0",
+      exports: {
+        ".": { types: "./index.d.ts", default: "./index.js" },
+        "./interest": { types: "./interest.d.ts", default: "./interest.js" },
+      },
+    }),
+    "utf-8",
+  );
+  writeFileSync(join(workerDir, "index.d.ts"), WORKER_STUB, "utf-8");
+  writeFileSync(join(workerDir, "index.js"), "", "utf-8");
+  writeFileSync(join(workerDir, "interest.d.ts"), WORKER_INTEREST_STUB, "utf-8");
+  writeFileSync(join(workerDir, "interest.js"), "", "utf-8");
   // Copy the real bebop runtime so the generated bebop.ts type-resolves.
   cpSync(bebopRuntimeDir(), join(nm, "bebop"), { recursive: true });
 

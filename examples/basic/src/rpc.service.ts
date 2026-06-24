@@ -1,6 +1,4 @@
 import type { ServerContext } from "@tempojs/server";
-import { createEventIterator } from "@vamp/utils/create-event-iterator";
-import { STREAM_MESSAGE_ID_KEY, STREAM_METHOD_ID_KEY } from "@vamp/utils/ws-router";
 import {
   type Actions,
   BaseRpcService,
@@ -10,24 +8,11 @@ import {
   type TickRequest,
   TickResult,
 } from "./bebop";
-import {
-  clearSub,
-  frameBatch,
-  interestSnapshot,
-  persistSub,
-  registerConnectionTeardown,
-  registerInterestObserver,
-  resolveViewer,
-  type WorldContext,
-} from "./observe-routing";
+import { observe, type WorldContext } from "./observe-routing";
 
-// Re-export the interest-broadcast surface the worker entry wires into
+// Re-export the interest-broadcast lifecycle hooks the worker entry wires into
 // `defineGameECSRuntime` (connection-close teardown and hibernation re-register).
-export {
-  closeConnectionObservers,
-  type GameWorldContext,
-  rehydrateGameConnection,
-} from "./observe-routing";
+export { type GameWorldContext, onConnectionClose, rehydrateConnection } from "./observe-routing";
 
 /**
  * The RPC service implementation for the basic example.
@@ -113,53 +98,11 @@ export class RpcService extends BaseRpcService {
     record: MutationScope,
     context: ServerContext,
   ): AsyncGenerator<MutationScope, void, undefined> {
-    const [ecs, ws] = context.getEnvironment<WorldContext>();
-
-    // The router exposes the per-call message/method ids via client metadata so
-    // the generator-free broadcast path can frame server->client pushes the
-    // client matches by messageId. Without them we cannot push hibernation-safe
-    // frames; bail (the client's call surfaces the empty stream).
-    const messageId = context.clientMetadata?.get(STREAM_MESSAGE_ID_KEY)?.[0] as string | undefined;
-    const methodIdRaw = context.clientMetadata?.get(STREAM_METHOD_ID_KEY)?.[0] as
-      | string
-      | undefined;
-    const methodId = methodIdRaw !== undefined ? Number(methodIdRaw) : Number.NaN;
-    if (messageId === undefined || Number.isNaN(methodId)) return;
-
-    const viewerId = resolveViewer(record);
-
-    // Persist the subscription so a hibernation re-bootstrap can rebuild this
-    // observer from the socket attachment (see rehydrateGameConnection).
-    persistSub(ws, { messageId, methodId, viewerId });
-
-    // Register the generator-free observer BEFORE the snapshot so no committed
-    // mutation is missed between snapshot and registration.
-    const unobserve = registerInterestObserver(ecs, ws, { messageId, methodId, viewerId });
-
-    // Interest-filtered initial snapshot, sent through the same framed path the
-    // live observer uses (NOT via a generator yield), so the resume path and the
-    // snapshot path are identical bytes on the wire.
-    const snapshot = interestSnapshot(ecs, viewerId);
-    if (snapshot.size > 0 && ws.readyState === 1) {
-      ws.send(frameBatch(methodId, messageId, snapshot));
-    }
-
-    // Park: hold the server stream open WITHOUT yielding (live frames are pushed
-    // generator-free above). The router ends this generator — running the
-    // cleanup below — on a CANCELLED frame or socket close. Because it never
-    // yields, no terminal frame is sent until then, so a hibernation that
-    // destroys this generator leaves the client stream open to resume.
-    yield* createEventIterator<MutationScope>(({ cancel }) => {
-      const unregister = registerConnectionTeardown(ws, () => {
-        unobserve();
-        clearSub(ws);
-        cancel();
-      });
-      return () => {
-        unobserve();
-        clearSub(ws);
-        unregister();
-      };
-    });
+    // All interest-broadcast plumbing — viewer resolution, subscription
+    // persistence, the interest-filtered snapshot, generator-free framed
+    // delivery, and hibernation-safe teardown — lives in `@vamp/worker/interest`
+    // (bound to this app's types by the generated `createGameInterestBroadcast`).
+    // The RPC method is just the delegation point.
+    yield* observe(record, context);
   }
 }
