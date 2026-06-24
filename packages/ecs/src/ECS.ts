@@ -39,6 +39,50 @@ export type StateWithScope<C extends Record<string, unknown>, E extends BaseEnti
   scope?: MutationScope<E, D>;
 };
 
+/** A coalesced set of mutations keyed by entity id (same shape the flush handler gets). */
+export type MutationBatch<E extends BaseEntity, D> = Map<string, MutationRecord<E, D>>;
+
+/**
+ * A remote observer of committed mutations (interest-managed broadcast). The game
+ * supplies `interested` (its subjective area-of-interest policy) and `deliver`
+ * (push the filtered batch to a transport, e.g. a framed `ws.send`). Both are
+ * called by {@link ECS.routeMutations} after a scope commits.
+ *
+ * This is the per-observer routing mechanism that sits beside `setFlushHandler`:
+ * the flush handler is the single authoritative write, mutation observers are the
+ * many filtered readers. Both consume the same coalesced `Map<id, MutationRecord>`.
+ */
+export interface MutationObserver<
+  State extends Record<string, unknown>,
+  UpdateArguments extends Array<unknown>,
+  Actions extends GenericAction,
+  Tags extends number,
+  E extends BaseEntity<Tags>,
+  D,
+> {
+  /**
+   * Is this single committed mutation relevant to this observer? Called once per
+   * (observer × mutation) per routed flush. Close over the observer's
+   * per-connection interest state (its viewer entity id, last-known position,
+   * room…). Keep it cheap; back it with the game's own spatial index for O(1)
+   * when scaling.
+   *
+   * For DELETE mutations the entity is already gone from the world, so read its
+   * last state from `mutation.value.entity`, NOT from `world.entity(id)`.
+   *
+   * MUST be read-only: routing runs in the commit tail, so neither `interested`
+   * nor `deliver` may mutate the world.
+   */
+  interested(
+    entityId: string,
+    mutation: MutationRecord<E, D>,
+    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
+  ): boolean;
+
+  /** Deliver the non-empty interested subset. Called at most once per routed flush. */
+  deliver(batch: MutationBatch<E, D>): void;
+}
+
 /**
  * The core Entity-Component-System world.
  *
@@ -122,6 +166,67 @@ export class ECS<
 
   private _scopeOpenCallbacks = new Set<(scope: MutationScope<E, D>) => void>();
   private _flushHandler: ((mutations: Map<string, MutationRecord<E, D>>) => void) | null = null;
+  // Interest-managed broadcast registry. Per-world (per DO): not a module global,
+  // so colocated worlds never cross-feed. Holds the remote observers that
+  // `routeMutations` fans committed batches out to.
+  private readonly _observers = new Set<
+    MutationObserver<State, UpdateArguments, Actions, Tags, E, D>
+  >();
+
+  /**
+   * Register a mutation observer for interest-managed broadcast. Returns an
+   * unsubscribe function. Per-world (per DO). See {@link MutationObserver}.
+   */
+  observeMutations(
+    observer: MutationObserver<State, UpdateArguments, Actions, Tags, E, D>,
+  ): () => void {
+    this._observers.add(observer);
+    return () => {
+      this._observers.delete(observer);
+    };
+  }
+
+  /** Number of registered mutation observers (e.g. to gate work when zero). */
+  get observerCount(): number {
+    return this._observers.size;
+  }
+
+  /**
+   * Route a committed batch to every interested observer. Builds a per-observer
+   * subset via `interested` and calls `deliver` only when the subset is non-empty
+   * (so an uninterested observer pays no send). O(observers × mutations) predicate
+   * evaluations; zero cost when no observers are registered.
+   *
+   * Called automatically on every outermost-scope commit (see {@link withScope}),
+   * after the authoritative flush, so observers never see uncommitted state.
+   * Also public as an escape hatch for apps that route only certain scopes.
+   */
+  routeMutations(mutations: MutationBatch<E, D>): void {
+    const observers = this._observers;
+    if (observers.size === 0 || mutations.size === 0) return;
+    for (const observer of observers) {
+      let batch: MutationBatch<E, D> | undefined;
+      for (const [id, mutation] of mutations) {
+        if (observer.interested(id, mutation, this)) {
+          (batch ??= new Map()).set(id, mutation);
+        }
+      }
+      if (batch !== undefined) observer.deliver(batch);
+    }
+  }
+
+  /**
+   * Build insert-mutations for every entity matching `predicate`. Use for the
+   * initial interest-filtered snapshot an `observe` RPC yields first, and for
+   * re-sync frames when a viewer's interest set changes.
+   */
+  snapshotMutations(predicate: (id: string, entity: E) => boolean): MutationBatch<E, D> {
+    const batch: MutationBatch<E, D> = new Map();
+    for (const [id, entity] of this._entities) {
+      if (predicate(id, entity)) batch.set(id, MutationRecord.fromInsert<E, D>({ entity }));
+    }
+    return batch;
+  }
 
   /**
    * Register a callback invoked when a mutation scope is opened (before the scope function runs).
@@ -915,20 +1020,27 @@ export class ECS<
           // Nested scope: merge this scope's coalesced mutations UP into the
           // parent instead of flushing to base. The outermost scope owns the
           // commit, so an inner scope's writes are not committed if the outer
-          // scope later aborts.
+          // scope later aborts. Routing is deferred to the outermost commit so a
+          // batch is never broadcast twice.
           for (const [id, mutation] of scope.mutations) {
             previousScope.applyMutation(id, mutation);
           }
-        } else if (this._flushHandler) {
-          // Outermost scope, custom flush handler (e.g., batch all mutations in a
-          // single transaction).
-          this._flushHandler(scope.mutations);
         } else {
-          // Outermost scope, default: flush coalesced mutations using base
-          // mutator (bypasses wrapper).
-          for (const [id, mutation] of scope.mutations) {
-            this._baseMutate(id, mutation);
+          if (this._flushHandler) {
+            // Outermost scope, custom flush handler (e.g., batch all mutations in
+            // a single transaction).
+            this._flushHandler(scope.mutations);
+          } else {
+            // Outermost scope, default: flush coalesced mutations using base
+            // mutator (bypasses wrapper).
+            for (const [id, mutation] of scope.mutations) {
+              this._baseMutate(id, mutation);
+            }
           }
+          // Interest-managed broadcast: fan the committed batch out to interested
+          // observers, AFTER the authoritative write so observers never see
+          // uncommitted state. No-op (and zero cost) when no observers registered.
+          this.routeMutations(scope.mutations);
         }
       }
     }

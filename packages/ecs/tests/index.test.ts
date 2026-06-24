@@ -4,8 +4,8 @@
  * This test suite covers all public API methods and provides a safety net for refactoring.
  */
 import { beforeEach, describe, expect, test } from "vite-plus/test";
-import { ECS, type ECSOptions } from "../src/index.ts";
-import { MutationType, type MutationRecord } from "../src/index.ts";
+import { ECS, type ECSOptions, type MutationBatch } from "../src/index.ts";
+import { MutationRecord, MutationType } from "../src/index.ts";
 import { query } from "../src/Query.ts";
 import type { QueryBuilder } from "../src/Query.ts";
 import {
@@ -2695,5 +2695,150 @@ describe("ECS", () => {
       expect(committed.health).toBe(10);
       expect(committed.name).toBe("before");
     });
+  });
+});
+
+describe("Interest-managed broadcast (observeMutations)", () => {
+  let ecs: ECS<TestContext, [number], TestAction, number, Entity, EntityDelta>;
+
+  beforeEach(() => {
+    ecs = createTestECS();
+    ecs.initialize();
+  });
+
+  test("observeMutations registers, reflects observerCount, and unobserve removes", () => {
+    expect(ecs.observerCount).toBe(0);
+    const unobserve = ecs.observeMutations({ interested: () => true, deliver: () => {} });
+    expect(ecs.observerCount).toBe(1);
+    const unobserve2 = ecs.observeMutations({ interested: () => true, deliver: () => {} });
+    expect(ecs.observerCount).toBe(2);
+    unobserve();
+    expect(ecs.observerCount).toBe(1);
+    unobserve2();
+    expect(ecs.observerCount).toBe(0);
+  });
+
+  test("routeMutations no-ops with zero observers or an empty batch", () => {
+    let delivered = 0;
+    // Zero observers: must not throw, nothing delivered.
+    ecs.routeMutations(
+      new Map([["a", MutationRecord.fromInsert<Entity, EntityDelta>({ entity: { id: "a" } })]]),
+    );
+    // Observer present but empty batch: deliver must not be called.
+    ecs.observeMutations({
+      interested: () => true,
+      deliver: () => {
+        delivered++;
+      },
+    });
+    ecs.routeMutations(new Map());
+    expect(delivered).toBe(0);
+  });
+
+  test("delivers only the interested subset to each observer; empty subset skips deliver", async () => {
+    await ecs.withScope(() => {
+      ecs.insert({ id: "a", name: "a" });
+      ecs.insert({ id: "b", name: "b" });
+      ecs.insert({ id: "c", name: "c" });
+    });
+
+    const aBatches: MutationBatch<Entity, EntityDelta>[] = [];
+    const cBatches: MutationBatch<Entity, EntityDelta>[] = [];
+    let neverCalls = 0;
+    ecs.observeMutations({
+      interested: (id: string) => id === "a" || id === "b",
+      deliver: (batch: MutationBatch<Entity, EntityDelta>) => aBatches.push(batch),
+    });
+    ecs.observeMutations({
+      interested: (id: string) => id === "c",
+      deliver: (batch: MutationBatch<Entity, EntityDelta>) => cBatches.push(batch),
+    });
+    ecs.observeMutations({
+      interested: () => false,
+      deliver: () => {
+        neverCalls++;
+      },
+    });
+
+    await ecs.withScope(() => {
+      ecs.put("a", { health: 5 });
+      ecs.put("c", { health: 7 });
+    });
+
+    expect(aBatches.length).toBe(1);
+    expect([...aBatches[0].keys()]).toEqual(["a"]); // b did not mutate
+    expect(cBatches.length).toBe(1);
+    expect([...cBatches[0].keys()]).toEqual(["c"]);
+    expect(neverCalls).toBe(0); // never interested → deliver skipped, zero sends
+  });
+
+  test("auto-routes once on the outermost commit, not on nested scopes", async () => {
+    await ecs.withScope(() => {
+      ecs.insert({ id: "x", name: "x" });
+    });
+
+    let deliveries = 0;
+    const seen: string[] = [];
+    ecs.observeMutations({
+      interested: () => true,
+      deliver: (batch: MutationBatch<Entity, EntityDelta>) => {
+        deliveries++;
+        for (const k of batch.keys()) seen.push(k);
+      },
+    });
+
+    await ecs.withScope(async () => {
+      ecs.put("x", { health: 1 });
+      await ecs.withScope(() => {
+        ecs.insert({ id: "y", name: "y" });
+      });
+    });
+
+    expect(deliveries).toBe(1); // single delivery for the merged outermost batch
+    expect(seen.sort((a, b) => a.localeCompare(b))).toEqual(["x", "y"]);
+  });
+
+  test("routes delete mutations; interested reads mutation.value.entity (gone from world)", async () => {
+    await ecs.withScope(() => {
+      ecs.insert({ id: "d", name: "doomed", level: 3 });
+    });
+
+    let receivedTag: number | undefined;
+    let lastLevel: number | undefined;
+    ecs.observeMutations({
+      interested: (id: string, m: MutationRecord<Entity, EntityDelta>) => {
+        // On delete the entity is already removed from the world; the predicate
+        // must read its last state from the mutation payload, not world.entity(id).
+        const last = m.tag === 3 ? m.value.entity : ecs.entity(id);
+        if (m.tag === 3) lastLevel = last?.level;
+        return (last?.level ?? 0) >= 1;
+      },
+      deliver: (batch: MutationBatch<Entity, EntityDelta>) => {
+        receivedTag = batch.get("d")?.tag;
+      },
+    });
+
+    const doomed = ecs.entities.get("d")!;
+    await ecs.withScope(() => {
+      ecs.delete(doomed);
+    });
+
+    expect(ecs.entity("d")).toBeUndefined();
+    expect(receivedTag).toBe(MutationType.Delete);
+    expect(lastLevel).toBe(3);
+  });
+
+  test("snapshotMutations builds inserts for matching entities only", async () => {
+    await ecs.withScope(() => {
+      ecs.insert({ id: "p1", level: 5 });
+      ecs.insert({ id: "p2", level: 1 });
+      ecs.insert({ id: "p3", level: 9 });
+    });
+
+    const snap = ecs.snapshotMutations((_id: string, e: Entity) => (e.level ?? 0) >= 5);
+    expect([...snap.keys()].sort((a, b) => a.localeCompare(b))).toEqual(["p1", "p3"]);
+    for (const [, m] of snap) expect(m.tag).toBe(MutationType.Insert);
+    const p1 = snap.get("p1");
+    expect(p1?.tag === MutationType.Insert && p1.value.entity.level).toBe(5);
   });
 });

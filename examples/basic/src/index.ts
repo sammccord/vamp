@@ -6,7 +6,11 @@ import { createECSOptions, defineGameECSRuntime } from "./game.generated";
 // registering the RPC service implementation in this (and the durable object's) isolate.
 // The named import additionally gives us the per-connection observer teardown so
 // it can be wired into the durable object's connection-close path.
-import { closeConnectionObservers, type GameWorldContext } from "./rpc.service";
+import {
+  closeConnectionObservers,
+  type GameWorldContext,
+  rehydrateGameConnection,
+} from "./rpc.service";
 import { registerGameSystems } from "./systems";
 
 // `TempoServiceRegistry#init()` — invoked by every tempo router constructor —
@@ -58,10 +62,13 @@ defineGameECSRuntime<{}, GameWorldContext>(() => ({
   // Install the example's systems + behaviors on the world during bootstrap, so
   // `tick` (update) and `act` drive registered systems/behaviors end-to-end.
   registerSystems: registerGameSystems,
-  // Tear down per-connection observer sinks when a socket closes or errors, so
-  // disconnects do not leak sinks into the module-level `observers` set (and
-  // broadcasts never target dead sockets).
+  // Tear down per-connection interest observers when a socket closes or errors,
+  // so disconnects do not leave observers feeding dead sockets.
   onConnectionClose: closeConnectionObservers,
+  // Rebuild each live socket's interest observer after a hibernation wake from
+  // its persisted subscription, so the generator-free broadcast resumes without
+  // the original `observe` generator (destroyed with the isolate).
+  rehydrateConnection: rehydrateGameConnection,
 }));
 
 const app = new Hono<{

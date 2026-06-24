@@ -118,6 +118,24 @@ export interface ECSRuntimeConfiguration<
   // tear down per-connection state they own outside a returnable generator
   // (e.g. observer sinks registered in a module-level set keyed by socket).
   onConnectionClose?: (ws: WebSocket) => void;
+  // Called once per live WebSocket during hibernation re-bootstrap, after the
+  // world has been re-seeded. The DO's in-memory state (incl. the ECS
+  // `observeMutations` registry and any RPC stream generators) is destroyed on
+  // hibernation; the sockets survive. Apps use this to REBUILD per-connection
+  // ECS observers from durable state persisted in the socket's attachment
+  // (`ws.serializeAttachment`), so the generator-free interest-managed broadcast
+  // resumes without the original `observe` generator. See README §hibernation.
+  rehydrateConnection?: (
+    ecs: ECS<
+      RuntimeContext<UserSession, Context>,
+      UpdateArguments,
+      Actions,
+      Tags,
+      Entity,
+      EntityDelta
+    >,
+    ws: WebSocket,
+  ) => void;
 }
 
 export type ECSRuntimeProvider<
@@ -259,6 +277,21 @@ export class ECSDurableObject<
   private _tickCount = 0;
   // App-level per-connection close hook (e.g. to unsubscribe observer sinks).
   private _onConnectionClose: ((ws: WebSocket) => void) | undefined;
+  // App-level per-connection rehydrate hook, invoked on hibernation wake for each
+  // live socket so apps can rebuild ECS observers from the socket attachment.
+  private _rehydrateConnection:
+    | ((
+        ecs: ECS<
+          RuntimeContext<UserSession, Context>,
+          UpdateArguments,
+          Actions,
+          Tags,
+          Entity,
+          EntityDelta
+        >,
+        ws: WebSocket,
+      ) => void)
+    | undefined;
 
   // Readiness: resolves once the ECS has been seeded + initialized.
   private _readyResolvers: Array<() => void> = [];
@@ -316,6 +349,20 @@ export class ECSDurableObject<
           // to the static `config.context` — identical to the pre-seed behavior.
           const seed = await this.ctx.storage.get<Record<string, unknown>>("__vamp:context");
           await this.setup(namespace, seed, document);
+          // Rebuild per-connection ECS observers from each live socket's durable
+          // attachment, so the generator-free interest-managed broadcast resumes
+          // after wake WITHOUT the original `observe` generator (destroyed with
+          // the isolate). The app reads its persisted subscription from the
+          // attachment inside the hook and re-registers via `observeMutations`.
+          if (this._rehydrateConnection && this.ecs) {
+            for (const ws of hibernating) {
+              try {
+                this._rehydrateConnection(this.ecs, ws);
+              } catch (err) {
+                this.log.error("Error rehydrating connection on wake", {}, err as Error);
+              }
+            }
+          }
         })
         .catch((err) => {
           this.log.error("Hibernation re-bootstrap failed", {}, err as Error);
@@ -372,6 +419,18 @@ export class ECSDurableObject<
       compactEveryNTicks?: number;
       // App-level per-connection close hook.
       onConnectionClose?: (ws: WebSocket) => void;
+      // App-level per-connection rehydrate hook (see ECSRuntimeConfiguration).
+      rehydrateConnection?: (
+        ecs: ECS<
+          RuntimeContext<UserSession, Context>,
+          UpdateArguments,
+          Actions,
+          Tags,
+          Entity,
+          EntityDelta
+        >,
+        ws: WebSocket,
+      ) => void;
     },
   ) {
     // Guard against double bootstrap. `this.ecs` is assigned synchronously below,
@@ -383,6 +442,7 @@ export class ECSDurableObject<
     const document = configuration.document ?? "global";
     this._document = document;
     this._onConnectionClose = configuration.onConnectionClose;
+    this._rehydrateConnection = configuration.rehydrateConnection;
     // Persist the namespace (and resolved document) so a hibernation-recreated
     // constructor can re-bootstrap without a fresh HTTP upgrade. This is durable,
     // per-DO, structured-clone-safe state. Fired via waitUntil so it does not
@@ -653,6 +713,19 @@ export class ECSDurableObject<
           | undefined,
         compactEveryNTicks: config.compactEveryNTicks,
         onConnectionClose: config.onConnectionClose,
+        rehydrateConnection: config.rehydrateConnection as
+          | ((
+              ecs: ECS<
+                RuntimeContext<UserSession, Context>,
+                UpdateArguments,
+                Actions,
+                Tags,
+                Entity,
+                EntityDelta
+              >,
+              ws: WebSocket,
+            ) => void)
+          | undefined,
       });
     }
     await this.ready();

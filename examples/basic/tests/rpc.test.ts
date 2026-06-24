@@ -65,6 +65,30 @@ function makeEntity(points: number) {
   };
 }
 
+/** A positioned entity, for exercising the example's distance-based AOI policy. */
+function makeEntityAt(x: number, y: number): Entity {
+  return Entity({
+    id: crypto.randomUUID(),
+    tags: [],
+    children: [],
+    position: { x, y },
+    health: { points: 100, min: 0, max: 100, rate: 0, interval: 0 },
+  });
+}
+
+/**
+ * Observe as a specific viewer. The example resolves the viewer entity id from
+ * the first key of the request scope's `mutations` map, so we send a one-entry
+ * scope keyed by `viewerId` (the value is ignored server-side).
+ */
+function observeAs(client: RpcClient, viewerId: string) {
+  return client.observe(
+    MutationScope({
+      mutations: new Map([[viewerId, { tag: 1, value: { entity: Entity({ id: viewerId }) } }]]),
+    }),
+  );
+}
+
 describe("basic RPC service (integration)", () => {
   let proc: ChildProcess;
   let port: number;
@@ -236,6 +260,64 @@ describe("basic RPC service (integration)", () => {
     expect(updateA.tag === 2 && updateA.value.delta.health?.points).toBe(-25);
     expect(updateB.tag).toBe(2);
     expect(updateB.tag === 2 && updateB.value.delta.health?.points).toBe(-25);
+
+    await streamA.return(undefined);
+    await streamB.return(undefined);
+    await bgA.catch(() => {});
+    await bgB.catch(() => {});
+    chA.close();
+    chB.close();
+  });
+
+  it("routes only interest-relevant mutations to each viewer (AOI, no cross-zone leakage)", async () => {
+    const ns = `test-aoi-${crypto.randomUUID().slice(0, 8)}`;
+    const { client: actor } = createRpcClient(ns);
+
+    // Two viewer entities far enough apart that neither is in the other's AOI.
+    const viewerA = makeEntityAt(0, 0);
+    const viewerB = makeEntityAt(1000, 1000);
+    await actor.spawn(viewerA);
+    await actor.spawn(viewerB);
+
+    const { channel: chA, client: clientA } = createRpcClient(ns);
+    const { channel: chB, client: clientB } = createRpcClient(ns);
+    const streamA = await observeAs(clientA, viewerA.id as string);
+    const streamB = await observeAs(clientB, viewerB.id as string);
+
+    const seenA = new Set<string>();
+    const seenB = new Set<string>();
+    const collect = (stream: typeof streamA, into: Set<string>) =>
+      (async () => {
+        for await (const scope of stream) {
+          for (const key of scope.mutations?.keys() ?? []) into.add(key);
+        }
+      })();
+    const bgA = collect(streamA, seenA);
+    const bgB = collect(streamB, seenB);
+
+    // Let the interest-filtered initial snapshots land before mutating.
+    await new Promise((r) => setTimeout(r, 200));
+
+    // One entity inside each viewer's AOI; spawned after observers attach so they
+    // arrive as live routed mutations, not via the snapshot.
+    const nearA = makeEntityAt(10, 10);
+    const nearB = makeEntityAt(1010, 1010);
+    await actor.spawn(nearA);
+    await actor.spawn(nearB);
+
+    await waitFor(() => (seenA.has(nearA.id as string) ? true : undefined), {
+      label: "nearA delivered to A",
+    });
+    await waitFor(() => (seenB.has(nearB.id as string) ? true : undefined), {
+      label: "nearB delivered to B",
+    });
+    // Settle to surface any erroneous cross-zone delivery before asserting absence.
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(seenA.has(nearA.id as string)).toBe(true);
+    expect(seenA.has(nearB.id as string)).toBe(false); // B's entity must not leak to A
+    expect(seenB.has(nearB.id as string)).toBe(true);
+    expect(seenB.has(nearA.id as string)).toBe(false); // A's entity must not leak to B
 
     await streamA.return(undefined);
     await streamB.return(undefined);

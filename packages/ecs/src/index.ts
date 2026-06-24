@@ -6,7 +6,7 @@ export {
   transformArchetypeTag,
   traverseArchetypeGraph,
 } from "./Archetype";
-export { ECS, type ECSOptions } from "./ECS";
+export { ECS, type ECSOptions, type MutationBatch, type MutationObserver } from "./ECS";
 export { type AccumulateDeltaFn, type MergeDeltaFn, type MutationScope } from "./MutationScope";
 export type { Query, QueryBuilder } from "./Query";
 export * from "./Query";
