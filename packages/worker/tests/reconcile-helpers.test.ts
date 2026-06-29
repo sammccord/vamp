@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   applyKeyChange,
   componentKeysToReconcile,
+  ENTITY_REFS_KEY,
+  GLOBAL_ENTITIES_KEY,
+  membershipKey,
   nextAlarmTime,
-  occurrenceIndicesDescending,
   type PendingKeyDelta,
   RESERVED_RECONCILE_KEYS,
   shouldCompactThisTick,
-  shouldPushId,
   shouldScheduleAlarm,
 } from "../src/reconcile-helpers.ts";
 
@@ -71,29 +72,22 @@ describe("reconcile-helpers: componentKeysToReconcile", () => {
   });
 });
 
-describe("reconcile-helpers: id-array dedup + delete-all (ghost-entity guard)", () => {
-  it("shouldPushId is false when the id is already present (idempotent push)", () => {
-    expect(shouldPushId(["a", "b"], "b")).toBe(false);
-    expect(shouldPushId(["a", "b"], "c")).toBe(true);
-    expect(shouldPushId([], "a")).toBe(true);
+describe("reconcile-helpers: shared entity-model keys", () => {
+  it("membershipKey is namespace-scoped and distinct from the bare namespace", () => {
+    // Must differ from the namespace itself: the legacy layout used the bare
+    // namespace for a Y.Array, and a Y.Map under the same name would collide.
+    expect(membershipKey("room1")).toBe("__vamp:members:room1");
+    expect(membershipKey("room1")).not.toBe("room1");
+    expect(membershipKey("a")).not.toBe(membershipKey("b"));
+    expect(membershipKey("a")).toBe(membershipKey("a"));
   });
 
-  it("occurrenceIndicesDescending returns every occurrence, high index first", () => {
-    // A double-written id must yield BOTH indices so a delete removes all of
-    // them; first-occurrence-only delete is what leaves a ghost.
-    expect(occurrenceIndicesDescending(["x", "dup", "y", "dup"], "dup")).toEqual([3, 1]);
-    expect(occurrenceIndicesDescending(["x", "y"], "dup")).toEqual([]);
-    expect(occurrenceIndicesDescending(["dup"], "dup")).toEqual([0]);
-  });
-
-  it("deleting by descending indices removes all occurrences without shift errors", () => {
-    // Simulate a Y.Array splice using the descending indices.
-    const arr = ["x", "dup", "y", "dup", "z"];
-    for (const i of occurrenceIndicesDescending(arr, "dup")) {
-      arr.splice(i, 1);
-    }
-    expect(arr).toEqual(["x", "y", "z"]);
-    expect(arr.includes("dup")).toBe(false);
+  it("global keys are stable, distinct, and prefixed to avoid id collisions", () => {
+    expect(GLOBAL_ENTITIES_KEY).toBe("__vamp:entities");
+    expect(ENTITY_REFS_KEY).toBe("__vamp:refs");
+    expect(GLOBAL_ENTITIES_KEY).not.toBe(ENTITY_REFS_KEY);
+    // No membership key can collide with the global stores.
+    expect(membershipKey("entities")).not.toBe(GLOBAL_ENTITIES_KEY);
   });
 });
 

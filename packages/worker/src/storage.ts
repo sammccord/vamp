@@ -1,4 +1,6 @@
 import { type BaseEntity } from "@vamp/ecs";
+import { PinoLogger } from "@vamp/utils/pino-logger";
+import { TempoLogLevel } from "@tempojs/common";
 import { type Env } from "cloudflare:workers";
 import type { YDocStorage } from "y-durablestream";
 import {
@@ -7,6 +9,9 @@ import {
   DurableObjectSqlStorage,
   YStreamProvider,
 } from "y-durablestream";
+import type { Map as YMap } from "yjs";
+
+import { GLOBAL_ENTITIES_KEY } from "./reconcile-helpers";
 
 /**
  * Storage provider for the ECS world document.
@@ -24,6 +29,19 @@ import {
  * (`compactEveryNTicks`) as the time-based backstop for both cases.
  */
 export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvider<Env> {
+  private static log = new PinoLogger("ecs-storage", TempoLogLevel.Info);
+
+  /**
+   * Surface background storage failures (a failed update persist or end-of-life
+   * compaction) through the app logger instead of the base provider's bare
+   * `console.error`. These run under `waitUntil`, so without this they would be
+   * invisible; a failed persist is recovered from a subscriber on the next
+   * SyncStep handshake, so this is an observability hook, not a data-loss path.
+   */
+  protected override onStorageError(error: unknown): void {
+    ECSStorage.log.error("y-durablestream storage operation failed", {}, error as Error);
+  }
+
   protected override createStorage(): YDocStorage {
     return new DurableObjectSqlStorage(this.ctx.storage, {
       // `this.maxBytes`/`this.maxUpdates` are protected fields set from the
@@ -35,8 +53,15 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
     });
   }
 
-  entity(id: string): E {
-    return this.doc.getMap(id).toJSON() as E;
+  /**
+   * Read a single entity's current state from the authoritative doc. Entities
+   * are global (shared across namespaces) and live as nested `Y.Map`s under the
+   * single {@link GLOBAL_ENTITIES_KEY} store, so lookup is by id alone.
+   */
+  entity(id: string): E | undefined {
+    const entities = this.doc.getMap<YMap<unknown>>(GLOBAL_ENTITIES_KEY);
+    const emap = entities.get(id);
+    return emap ? (emap.toJSON() as E) : undefined;
   }
 
   /**
