@@ -1,6 +1,6 @@
 {
   "name": "@vamp/solid",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Solid.js context, hooks, and reactive entity queries for @vamp ECS + bebop RPC clients.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/solid#readme",
   "bugs": {
@@ -20,6 +20,9 @@
   "exports": {
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "vp pack",

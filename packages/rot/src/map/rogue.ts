@@ -228,8 +228,6 @@ export default class Rogue extends Map {
 
           if (validRoom) {
             room["connections"].push([otherRoom["cellx"], otherRoom["celly"]]);
-          } else {
-            console.log("-- Unable to connect room.");
           }
         }
       }

@@ -1,6 +1,6 @@
 {
   "name": "@vamp/worker",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Cloudflare Workers Durable Object integration for @vamp.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/worker#readme",
   "bugs": {
@@ -21,6 +21,9 @@
     ".": "./dist/index.mjs",
     "./interest": "./dist/interest.mjs",
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "vp pack",

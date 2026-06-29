@@ -196,10 +196,6 @@ export class Room extends Feature {
     return this;
   }
 
-  debug() {
-    console.log("room", this._x1, this._y1, this._x2, this._y2);
-  }
-
   isValid(isWallCallback: TestPositionCallback, canBeDugCallback: TestPositionCallback) {
     let left = this._x1 - 1;
     let right = this._x2 + 1;
@@ -295,10 +291,6 @@ export class Corridor extends Feature {
     let length = RNG.getUniformInt(min, max);
 
     return new this(x, y, x + dx * length, y + dy * length);
-  }
-
-  debug() {
-    console.log("corridor", this._startX, this._startY, this._endX, this._endY);
   }
 
   isValid(isWallCallback: TestPositionCallback, canBeDugCallback: TestPositionCallback) {

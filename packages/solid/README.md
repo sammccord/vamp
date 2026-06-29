@@ -47,5 +47,4 @@ function Scene() {
 - `createQuery(input)` — reactive `Accessor<E[]>`; fine-grained over membership + per-entity fields.
 - `createEntity(id)` — reactive `Accessor<E | undefined>`.
 - `createSubscription` / `createOnCreate` / `createOnDelete` — register ECS systems for app reactions.
-- `createQueryObservable` / `createEntityObservable` — TC39/RxJS interop for non-Solid render loops.
-- `defaultApply`, `createEntityStore`, `createQueryRegistry` — lower-level building blocks.
+- `createEntityStore`, `createQueryRegistry` — lower-level building blocks.

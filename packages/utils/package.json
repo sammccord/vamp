@@ -1,6 +1,6 @@
 {
   "name": "@vamp/utils",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Tempo RPC, Bebop serialization, transports, and async primitives for @vamp.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/utils#readme",
   "bugs": {
@@ -36,6 +36,9 @@
     "./ws-channel": "./dist/ws-channel.mjs",
     "./ws-router": "./dist/ws-router.mjs",
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "bebopc build && vp pack",

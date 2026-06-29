@@ -14,7 +14,7 @@ config generate    # parse the .bop schemas and (re)generate TypeScript output
 ## Development
 
 ```bash
-vp install   # install dependencies
-vp test      # run the unit tests
-vp build     # build the CLI
+vp install     # install dependencies
+vp test        # run the unit tests
+vp run build   # build the CLI
 ```

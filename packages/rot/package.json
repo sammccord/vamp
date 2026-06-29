@@ -1,6 +1,6 @@
 {
   "name": "@vamp/rot",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Roguelike toolkit (pathfinding, FOV, map generation, scheduling) for @vamp.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/rot#readme",
   "bugs": {
@@ -53,6 +53,9 @@
     "./text": "./dist/text.mjs",
     "./util": "./dist/util.mjs",
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "vp pack",

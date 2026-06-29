@@ -1,6 +1,6 @@
 {
   "name": "@vamp/config",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "ECS code generator CLI for @vamp",
   "homepage": "https://github.com/sammccord/vamp/tree/main/tools/config#readme",
   "bugs": {
@@ -24,6 +24,9 @@
     ".": "./dist/index.mjs",
     "./cli": "./dist/cli.mjs",
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "vp pack",

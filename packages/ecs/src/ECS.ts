@@ -347,6 +347,12 @@ export class ECS<
     };
   }
 
+  /**
+   * Read an entity by id, or `undefined` if it does not exist. Inside an open
+   * mutation scope this returns the scope's shadow copy — so reads observe
+   * staged, not-yet-committed writes — and `undefined` if it was deleted in the
+   * scope.
+   */
   public entity(id: string): E | undefined {
     // Check scope's shadow entities first
     if (this.context.scope) {
@@ -358,10 +364,17 @@ export class ECS<
     return this._entities.get(id);
   }
 
+  /** Live `Map<id, entity>` of all committed entities. Treat as read-only. */
   public get entities() {
     return this._entities;
   }
 
+  /**
+   * Find the first entity matching `filter` among those carrying every component
+   * present in `delta`, then apply `delta` to it via {@link put}; if none match,
+   * {@link insert} a new entity materialized from `delta`. Repeated calls with the
+   * same component shape reuse a cached query.
+   */
   public upsert(
     delta: D,
     filter: (e: E | undefined, i: number, obj: string[]) => boolean,
@@ -436,6 +449,12 @@ export class ECS<
     return entities;
   }
 
+  /**
+   * Insert a new entity. If `entity.id` is unset a fresh id is generated and a
+   * copy is committed (the caller's object is never mutated); the committed entity
+   * is returned. The insert mutation is recorded before create/event systems fire
+   * so observers never see a torn read.
+   */
   public insert(entity: E): E {
     const id = this.createEntity(undefined, entity.id, false);
     // Work on a copy when we had to generate an id, so we never mutate the
@@ -460,6 +479,13 @@ export class ECS<
     return committed;
   }
 
+  /**
+   * Patch an existing entity by `id` with `delta`, or {@link insert} a new one
+   * (materialized from `delta`) when `id` is missing/unknown. With `mutating:true`,
+   * `undefined` delta keys remove their component (changing the archetype);
+   * otherwise absent keys are left untouched. Returns the pre-change values of the
+   * touched keys.
+   */
   public put(id: string | undefined, delta: D, mutating = false): E {
     if (!id) return this.insert(this.options.materializeDelta(delta));
     const entity = this.entity(id);
@@ -501,6 +527,10 @@ export class ECS<
     return base as E;
   }
 
+  /**
+   * Remove an entity (looked up by its `.id`), recording a delete mutation.
+   * No-op (with a warning) if the id is missing or unknown.
+   */
   public delete(entity: E) {
     const id = entity.id;
     if (id === undefined) {
@@ -518,6 +548,11 @@ export class ECS<
     return e;
   }
 
+  /**
+   * Return the ids of every entity matching the query — either a {@link Query} or
+   * a builder callback, e.g. `query((q) => q.every(A, B).someTag(T))`. The result
+   * is a fresh array owned by the caller (never a recycled/pooled buffer).
+   */
   public query(_query: Query | ((builder: QueryBuilder) => QueryBuilder)): string[] {
     const q = typeof _query === "function" ? query(_query) : _query;
     const archetypes: Archetype[] = [];
@@ -547,6 +582,11 @@ export class ECS<
     return entities;
   }
 
+  /**
+   * Register an event {@link System} that runs whenever a matching entity
+   * changes. Pass `emit:true` to also run it once immediately over current
+   * matches. Returns an unsubscribe function.
+   */
   public subscribe(system: EventSystem, emit = false): () => void {
     this.subscriptions.push(system);
 
@@ -568,6 +608,7 @@ export class ECS<
       )[0];
   }
 
+  /** Register a lifecycle system run when a matching entity is created. Returns an unsubscribe function. */
   public onCreate(system: LifecycleSystem) {
     this.handleCreate.push(system);
     if (this.initialized) {
@@ -583,6 +624,7 @@ export class ECS<
       )[0];
   }
 
+  /** Register a lifecycle system run when a matching entity is deleted. Returns an unsubscribe function. */
   public onDelete(system: LifecycleSystem) {
     this.handleDelete.push(system);
     if (this.initialized) {
@@ -817,6 +859,12 @@ export class ECS<
   }
 
   // Register a behavior (system) for a specific event type
+  /**
+   * Register an event-driven {@link Behavior}, keyed by its action tag and run by
+   * {@link act}. Use the `createBehavior` helper to build one. Registering after
+   * {@link initialize} invalidates the behavior caches so the new behavior is
+   * picked up by already-seen archetypes.
+   */
   registerBehavior(behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>): void {
     if (!this.behaviors.has(behavior.tag)) {
       this.behaviors.set(behavior.tag, []);
@@ -943,12 +991,16 @@ export class ECS<
     this._executeDeferred();
   }
 
-  // Add batch capabilities
+  /** Dispatch the same `action` to every id in `entityIds` concurrently (see {@link act}). */
   async actBatch<Ac extends Actions>(entityIds: string[], action: Ac): Promise<void> {
     await Promise.all(entityIds.map((id) => this.act(id, action)));
   }
 
-  // Act on entity and propagate down to all children (recursive)
+  /**
+   * Dispatch `payload` to the entity's matching behaviors, then propagate the
+   * same action down to its children (recursive), so acting on a parent cascades
+   * to its whole subtree. Resolves `false` if the entity does not exist.
+   */
   async act<Ac extends Actions>(
     entityId: string,
     payload: Ac,
