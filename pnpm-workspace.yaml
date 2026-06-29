@@ -32,7 +32,7 @@ catalog:
   webextension-polyfill: ^0.12.0
   websocket-ts: ^2.2.1
   wrangler: ^4.74.0
-  y-durablestream: ^0.3.0
+  y-durablestream: ^0.4.0
   yjs: ^13.6.30
 
 catalogMode: prefer

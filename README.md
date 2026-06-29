@@ -5,9 +5,11 @@ Real-time multiplayer game framework for Cloudflare Workers.
 ## Packages
 
 - **@vamp/ecs**: Entity-Component-System runtime for game state management
-- **@vamp/rot**: Roguelike toolkit (pathfinding, FOV, map generation)
-- **@vamp/utils**: Tempo RPC, Bebop serialization, WebSocket channels
-- **@vamp/worker**: Cloudflare Workers Durable Object integration
+- **@vamp/rot**: Roguelike toolkit (pathfinding, FOV, map generation, scheduling)
+- **@vamp/utils**: Tempo RPC, Bebop serialization, transports (ws/worker/extension), async primitives
+- **@vamp/worker**: Cloudflare Workers Durable Object integration, including the `@vamp/worker/interest` area-of-interest broadcast API
+- **@vamp/solid**: Solid.js bindings — `<GameProvider>` + reactive entity queries
+- **@vamp/config**: ECS code generator CLI (`config init` / `config generate`) under `tools/config`
 
 ## Setup
 
@@ -22,16 +24,17 @@ See `examples/basic/` for a complete working example.
 3. Run the game worker via Cloudflare Workers
 
 ```bash
-# Check setup
+# Format, lint, typecheck, test, and build everything (publish-readiness gate)
 vp run ready
 
-# Run tests
-vp run test -r
+# Run the test suite across all packages
+# (note: the recursive flag goes BEFORE the task name)
+vp run -r test
 
-# Build
-vp run build -r
+# Build all packages
+vp run -r build
 
-# Development
+# Run the example app (examples/basic) under `wrangler dev`
 vp run dev
 ```
 

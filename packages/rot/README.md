@@ -1,4 +1,4 @@
-# rot
+# @vamp/rot
 
 A TypeScript roguelike toolkit providing low-level utilities for game development: procedural map generation, field-of-view, pathfinding, turn scheduling, lighting, noise, color manipulation, text formatting, and more.
 
@@ -7,22 +7,22 @@ Each module is a focused, standalone utility. Import only what you need via subp
 ## Development
 
 ```bash
-vp install      # install dependencies
-vp test         # run tests
-vp build        # build the library (outputs to dist/)
+vp install        # install dependencies
+vp test           # run tests
+vp run build      # build the library (outputs to dist/)
 ```
 
 ## Import Pattern
 
-All modules are available as subpath exports from the `rot` package:
+All modules are available as subpath exports from the `@vamp/rot` package:
 
 ```ts
-import { RNG } from "rot/rng";
-import { Digger } from "rot/map/digger";
-import { PreciseShadowcasting } from "rot/fov/precise-shadowcasting";
+import { RNG } from "@vamp/rot/rng";
+import { Digger } from "@vamp/rot/map/digger";
+import { PreciseShadowcasting } from "@vamp/rot/fov/precise-shadowcasting";
 ```
 
-`rot` (the root export) is currently empty — always import from the specific subpath.
+`@vamp/rot` has no root export — always import from the specific subpath.
 
 ---
 
@@ -30,10 +30,10 @@ import { PreciseShadowcasting } from "rot/fov/precise-shadowcasting";
 
 ### RNG Singleton
 
-All probabilistic modules share a single `RNG` instance from `rot/rng`. Seed it once at startup to make the entire generation pipeline deterministic:
+All probabilistic modules share a single `RNG` instance from `@vamp/rot/rng`. Seed it once at startup to make the entire generation pipeline deterministic:
 
 ```ts
-import { RNG } from "rot/rng";
+import { RNG } from "@vamp/rot/rng";
 RNG.setSeed(12345);
 ```
 
@@ -92,12 +92,12 @@ const digger = new Digger(80, 25, {
 
 ## Modules
 
-### `rot/rng` — Seedable RNG
+### `@vamp/rot/rng` — Seedable RNG
 
 Seedable pseudorandom number generator (Alea algorithm). Exported as a singleton.
 
 ```ts
-import { RNG } from "rot/rng";
+import { RNG } from "@vamp/rot/rng";
 
 RNG.setSeed(42);
 RNG.getUniform(); // float in [0, 1)
@@ -114,12 +114,12 @@ const rng2 = RNG.clone(); // independent copy
 
 ---
 
-### `rot/color` — Color Manipulation
+### `@vamp/rot/color` — Color Manipulation
 
 Works with the `Color` type: `[R, G, B]` (0–255 each).
 
 ```ts
-import * as Color from "rot/color";
+import * as Color from "@vamp/rot/color";
 
 const red = Color.fromString("red"); // [255, 0, 0]
 const hex = Color.fromString("#ff8800");
@@ -134,10 +134,10 @@ Color.toHex(blended); // '#7f007f'
 
 ---
 
-### `rot/constants` — Shared Constants
+### `@vamp/rot/constants` — Shared Constants
 
 ```ts
-import { DEFAULT_WIDTH, DEFAULT_HEIGHT, DIRS, KEYS } from "rot/constants";
+import { DEFAULT_WIDTH, DEFAULT_HEIGHT, DIRS, KEYS } from "@vamp/rot/constants";
 
 // Direction vectors
 DIRS[4]; // [[0,-1],[1,0],[0,1],[-1,0]]       — cardinal
@@ -151,10 +151,10 @@ KEYS.VK_ESCAPE; // 27
 
 ---
 
-### `rot/util` — Math & String Utilities
+### `@vamp/rot/util` — Math & String Utilities
 
 ```ts
-import { mod, clamp, capitalize, format } from "rot/util";
+import { mod, clamp, capitalize, format } from "@vamp/rot/util";
 
 mod(-1, 4); // 3  (always-positive modulo)
 clamp(1.5, 0, 1); // 1
@@ -164,12 +164,12 @@ format("Hello %s!", "world"); // 'Hello world!'
 
 ---
 
-### `rot/noise/simplex` — Simplex Noise
+### `@vamp/rot/noise/simplex` — Simplex Noise
 
 2D simplex noise for terrain, cave thresholds, and procedural variation. Returns values in approximately `[-1, 1]`.
 
 ```ts
-import { Simplex } from "rot/noise/simplex";
+import { Simplex } from "@vamp/rot/noise/simplex";
 
 const noise = new Simplex(); // uses global RNG for permutation table
 const value = noise.get(x * 0.1, y * 0.1);
@@ -178,27 +178,27 @@ const value = noise.get(x * 0.1, y * 0.1);
 
 ---
 
-## Map Generation — `rot/map/*`
+## Map Generation — `@vamp/rot/map/*`
 
 All generators share the `create(callback)` interface where `callback(x, y, contents)` is called per cell with `contents`: `0` = floor, `1` = wall, `2` = door.
 
-### `rot/map/arena` — Open Room
+### `@vamp/rot/map/arena` — Open Room
 
 A single rectangular room with walls on the border. Useful for testing.
 
 ```ts
-import { Arena } from "rot/map/arena";
+import { Arena } from "@vamp/rot/map/arena";
 new Arena(40, 20).create((x, y, wall) => {
   /* ... */
 });
 ```
 
-### `rot/map/cellular` — Cellular Automaton (Caves)
+### `@vamp/rot/map/cellular` — Cellular Automaton (Caves)
 
 Conway's Game of Life variant. Call `create()` multiple times to evolve. Use `connect()` to guarantee full connectivity.
 
 ```ts
-import { Cellular } from "rot/map/cellular";
+import { Cellular } from "@vamp/rot/map/cellular";
 
 const map = new Cellular(80, 40, { topology: 8 });
 map.randomize(0.5); // 50% random fill
@@ -208,12 +208,12 @@ map.connect((x, y, wall) => {
 }, 0); // connect floors
 ```
 
-### `rot/map/digger` — Organic Dungeon
+### `@vamp/rot/map/digger` — Organic Dungeon
 
 Grows a dungeon outward from a center room by iteratively adding rooms and corridors. Stops when `dugPercentage` of the area is open.
 
 ```ts
-import { Digger } from "rot/map/digger";
+import { Digger } from "@vamp/rot/map/digger";
 
 const dungeon = new Digger(80, 25, {
   roomWidth: [4, 10],
@@ -228,23 +228,23 @@ dungeon.getRooms(); // Room[]
 dungeon.getCorridors(); // Corridor[]
 ```
 
-### `rot/map/uniform` — Uniform Density Dungeon
+### `@vamp/rot/map/uniform` — Uniform Density Dungeon
 
 Places rooms independently then connects them with I/L/S-shaped corridors.
 
 ```ts
-import { Uniform } from "rot/map/uniform";
+import { Uniform } from "@vamp/rot/map/uniform";
 
 const result = new Uniform(80, 25, { roomDugPercentage: 0.15 }).create(cb);
 // returns null on timeout, 'this' on success
 ```
 
-### `rot/map/rogue` — Classic Rogue Dungeon
+### `@vamp/rot/map/rogue` — Classic Rogue Dungeon
 
 Divides the map into a grid of cells, places one room per cell, then connects them.
 
 ```ts
-import { Rogue } from "rot/map/rogue";
+import { Rogue } from "@vamp/rot/map/rogue";
 new Rogue(80, 25, { cellWidth: 3, cellHeight: 3 }).create(cb);
 ```
 
@@ -253,20 +253,20 @@ new Rogue(80, 25, { cellWidth: 3, cellHeight: 3 }).create(cb);
 Three maze algorithms, all producing perfect mazes (no loops, fully connected):
 
 ```ts
-import { DividedMaze } from "rot/map/dividedmaze"; // recursive division
-import { EllerMaze } from "rot/map/ellermaze"; // Eller's row-by-row algorithm
-import { IceyMaze } from "rot/map/iceymaze"; // random walk; regularity=0–N
+import { DividedMaze } from "@vamp/rot/map/dividedmaze"; // recursive division
+import { EllerMaze } from "@vamp/rot/map/ellermaze"; // Eller's row-by-row algorithm
+import { IceyMaze } from "@vamp/rot/map/iceymaze"; // random walk; regularity=0–N
 
 new DividedMaze(40, 20).create(cb);
 new IceyMaze(40, 20, 3).create(cb); // regularity 3 = straighter corridors
 ```
 
-### `rot/map/features` — Rooms & Corridors
+### `@vamp/rot/map/features` — Rooms & Corridors
 
 Low-level building blocks used internally by dungeon generators. Useful when implementing custom generators.
 
 ```ts
-import { Room, Corridor } from "rot/map/features";
+import { Room, Corridor } from "@vamp/rot/map/features";
 
 const room = Room.createRandom(80, 25, { roomWidth: [4, 8] });
 room.create((x, y, contents) => {
@@ -279,16 +279,16 @@ room.addDoors(isWallCb); // auto-detect and add doors
 
 ---
 
-## Field of View — `rot/fov/*`
+## Field of View — `@vamp/rot/fov/*`
 
 All FOV algorithms take a `lightPassesCallback(x, y): boolean` at construction time and compute via `compute(x, y, radius, visibilityCallback)`.
 
-### `rot/fov/recursive-shadowcasting` — (Recommended)
+### `@vamp/rot/fov/recursive-shadowcasting` — (Recommended)
 
 Best general-purpose FOV for standard square-grid roguelikes. Supports full 360°, 180° (facing + flanks), and 90° (narrow cone) variants.
 
 ```ts
-import { RecursiveShadowcasting } from "rot/fov/recursive-shadowcasting";
+import { RecursiveShadowcasting } from "@vamp/rot/fov/recursive-shadowcasting";
 
 const fov = new RecursiveShadowcasting((x, y) => map[x][y] === 0);
 
@@ -301,12 +301,12 @@ fov.compute180(x, y, 8, dir, cb); // dir is index into DIRS[8]
 fov.compute90(x, y, 8, dir, cb);
 ```
 
-### `rot/fov/precise-shadowcasting`
+### `@vamp/rot/fov/precise-shadowcasting`
 
 Higher-precision shadowcasting using fractional arcs. The visibility callback receives values in `[0, 1]` for partial occlusion.
 
 ```ts
-import { PreciseShadowcasting } from "rot/fov/precise-shadowcasting";
+import { PreciseShadowcasting } from "@vamp/rot/fov/precise-shadowcasting";
 
 const fov = new PreciseShadowcasting((x, y) => isTransparent(x, y));
 fov.compute(x, y, 10, (x, y, r, visibility) => {
@@ -314,19 +314,19 @@ fov.compute(x, y, 10, (x, y, r, visibility) => {
 });
 ```
 
-### `rot/fov/discrete-shadowcasting`
+### `@vamp/rot/fov/discrete-shadowcasting`
 
 Simpler, older algorithm. Integer-degree precision. Prefer `RecursiveShadowcasting` unless compatibility is required.
 
 ---
 
-## `rot/lighting` — Multi-Source Lighting
+## `@vamp/rot/lighting` — Multi-Source Lighting
 
 Computes light contributions from multiple sources using FOV form factors. Supports optional radiosity-like light bouncing via multiple passes.
 
 ```ts
-import { Lighting } from "rot/lighting";
-import { PreciseShadowcasting } from "rot/fov/precise-shadowcasting";
+import { Lighting } from "@vamp/rot/lighting";
+import { PreciseShadowcasting } from "@vamp/rot/fov/precise-shadowcasting";
 
 const fov = new PreciseShadowcasting((x, y) => isTransparent(x, y));
 const lighting = new Lighting((x, y) => (map[x][y] === 0 ? 0.3 : 0), {
@@ -348,27 +348,27 @@ lighting.compute((x, y, color) => {
 
 ---
 
-## Pathfinding — `rot/path/*`
+## Pathfinding — `@vamp/rot/path/*`
 
 All pathfinders are constructed with a target (`toX, toY`) and a `passableCallback(x, y): boolean`, then compute paths from a given start.
 
-### `rot/path/astar` — A\*
+### `@vamp/rot/path/astar` — A\*
 
 Single-pair shortest path. Use when computing one path per query.
 
 ```ts
-import { AStar } from "rot/path/astar";
+import { AStar } from "@vamp/rot/path/astar";
 
 const astar = new AStar(targetX, targetY, (x, y) => isPassable(x, y), { topology: 8 });
 astar.compute(fromX, fromY, (x, y) => path.push([x, y]));
 ```
 
-### `rot/path/dijkstra` — Dijkstra
+### `@vamp/rot/path/dijkstra` — Dijkstra
 
 Builds a BFS tree from the target. Efficient when computing paths from many different start points to the same target (the tree is cached and extended lazily).
 
 ```ts
-import { Dijkstra } from "rot/path/dijkstra";
+import { Dijkstra } from "@vamp/rot/path/dijkstra";
 
 const dijkstra = new Dijkstra(targetX, targetY, (x, y) => isPassable(x, y));
 // Compute from multiple start points cheaply:
@@ -378,14 +378,14 @@ dijkstra.compute(x2, y2, cb2);
 
 ---
 
-## Turn Scheduling — `rot/scheduler/*` + `rot/engine`
+## Turn Scheduling — `@vamp/rot/scheduler/*` + `@vamp/rot/engine`
 
-### `rot/scheduler/simple` — Round-Robin
+### `@vamp/rot/scheduler/simple` — Round-Robin
 
 All actors take turns in equal rotation. Classic roguelike scheduling.
 
 ```ts
-import { Simple } from "rot/scheduler/simple";
+import { Simple } from "@vamp/rot/scheduler/simple";
 
 const scheduler = new Simple<Actor>();
 scheduler.add(player, true); // true = repeating
@@ -393,12 +393,12 @@ scheduler.add(monster, true);
 const next = scheduler.next(); // next actor
 ```
 
-### `rot/scheduler/speed` — Speed-Based
+### `@vamp/rot/scheduler/speed` — Speed-Based
 
 Actors must implement `getSpeed(): number`. Faster actors act more frequently.
 
 ```ts
-import { Speed } from "rot/scheduler/speed";
+import { Speed } from "@vamp/rot/scheduler/speed";
 
 // Actor must have getSpeed()
 class Monster {
@@ -412,12 +412,12 @@ const scheduler = new Speed<Monster>();
 scheduler.add(fastMonster, true);
 ```
 
-### `rot/scheduler/action` — Action Duration
+### `@vamp/rot/scheduler/action` — Action Duration
 
 Each actor declares its action cost during its turn via `scheduler.setDuration(n)`.
 
 ```ts
-import { Action } from "rot/scheduler/action";
+import { Action } from "@vamp/rot/scheduler/action";
 
 const scheduler = new Action<Actor>();
 scheduler.add(player, true, 1);
@@ -426,12 +426,12 @@ scheduler.add(player, true, 1);
 scheduler.setDuration(isRunning ? 0.5 : 1);
 ```
 
-### `rot/engine` — Game Loop
+### `@vamp/rot/engine` — Game Loop
 
 Drives actors through a scheduler. Supports asynchronous actors (return a Promise from `act()` to pause the loop, e.g. while waiting for player input).
 
 ```ts
-import { Engine } from "rot/engine";
+import { Engine } from "@vamp/rot/engine";
 
 class Player {
   async act() {
@@ -452,12 +452,12 @@ engine.unlock(); // resume
 
 ---
 
-## `rot/eventqueue` — Time-Based Event Queue
+## `@vamp/rot/eventqueue` — Time-Based Event Queue
 
 Schedules events at relative time offsets. Useful for implementing timers, cooldowns, and non-uniform-speed simulations directly.
 
 ```ts
-import { EventQueue } from "rot/eventqueue";
+import { EventQueue } from "@vamp/rot/eventqueue";
 
 const queue = new EventQueue<string>();
 queue.add("heal", 10); // schedule 'heal' 10 time units from now
@@ -470,12 +470,12 @@ queue.remove("spawn"); // cancel
 
 ---
 
-## `rot/stringgenerator` — Markov Name/Text Generator
+## `@vamp/rot/stringgenerator` — Markov Name/Text Generator
 
 Learns from a training corpus and generates statistically similar strings. Character-level (default) or word-level.
 
 ```ts
-import { StringGenerator } from "rot/stringgenerator";
+import { StringGenerator } from "@vamp/rot/stringgenerator";
 
 const gen = new StringGenerator({ order: 3, words: false });
 ["Aragorn", "Legolas", "Gimli", "Boromir"].forEach((n) => gen.observe(n));
@@ -490,12 +490,12 @@ wordGen.generate();
 
 ---
 
-## `rot/text` — Color-Markup Text & Word Wrap
+## `@vamp/rot/text` — Color-Markup Text & Word Wrap
 
 Tokenizes strings containing color markup (`%c{name}` for foreground, `%b{name}` for background) with word-wrap support. Used by display/rendering layers.
 
 ```ts
-import { tokenize, measure, TYPE_TEXT, TYPE_NEWLINE, TYPE_FG, TYPE_BG } from "rot/text";
+import { tokenize, measure, TYPE_TEXT, TYPE_NEWLINE, TYPE_FG, TYPE_BG } from "@vamp/rot/text";
 
 const tokens = tokenize("%c{red}Hello %c{}world", 40);
 // tokens: [TYPE_FG(red), TYPE_TEXT('Hello '), TYPE_FG(reset), TYPE_TEXT('world')]
@@ -503,16 +503,16 @@ const tokens = tokenize("%c{red}Hello %c{}world", 40);
 const { width, height } = measure("%c{red}Some text", 40);
 ```
 
-Color names are compatible with `rot/color`'s `fromString`.
+Color names are compatible with `@vamp/rot/color`'s `fromString`.
 
 ---
 
-## `rot/MinHeap` — Min-Heap Priority Queue
+## `@vamp/rot/MinHeap` — Min-Heap Priority Queue
 
 A generic min-heap used internally by `EventQueue`. Useful directly when you need an efficient priority queue.
 
 ```ts
-import { MinHeap } from "rot/MinHeap";
+import { MinHeap } from "@vamp/rot/MinHeap";
 
 const heap = new MinHeap<string>();
 heap.push("low priority task", 10);

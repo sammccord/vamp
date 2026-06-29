@@ -42,26 +42,27 @@ export function applyKeyChange(
 }
 
 /**
- * Whether an id should be pushed into the namespace CRDT array, guarding
- * against the authoritative array (not a lossy local mirror) so a
- * local-insert / remote-array race cannot push the same id twice.
+ * Doc-level Y.Map names for the shared, cross-namespace entity model.
+ *
+ * Entities are **global**: a given id maps to one nested `Y.Map` of components
+ * that any namespace (lobby) may read and mutate, so changes propagate across
+ * lobbies. Two side indexes track lobby membership for scoping and refcounted
+ * garbage collection (a numeric counter can't be used — Y.Map values are
+ * last-write-wins, so concurrent increments would be lost; membership is
+ * therefore modeled as a set of referencing namespaces, whose size is the
+ * refcount).
+ *
+ * All names are prefixed so they never collide with entity ids (used as keys
+ * inside these maps) or the legacy per-namespace `Y.Array` (named by the bare
+ * namespace), keeping migration free of same-name type conflicts.
  */
-export function shouldPushId(currentIds: readonly string[], id: string): boolean {
-  return !currentIds.includes(id);
-}
-
-/**
- * Indices of every occurrence of `id` in `ids`, in descending order so the
- * caller can delete them from a `Y.Array` without index shifting invalidating
- * later deletions. Deleting ALL occurrences (not just the first) guarantees a
- * double-written id cannot survive a delete and resurrect as a ghost.
- */
-export function occurrenceIndicesDescending(ids: readonly string[], id: string): number[] {
-  const out: number[] = [];
-  for (let i = ids.length - 1; i >= 0; i--) {
-    if (ids[i] === id) out.push(i);
-  }
-  return out;
+/** Global store: `id → Y.Map` of components. Shared by every namespace. */
+export const GLOBAL_ENTITIES_KEY = "__vamp:entities";
+/** Refcount index: `id → Y.Map<namespace, true>` (size = number of referencing lobbies). */
+export const ENTITY_REFS_KEY = "__vamp:refs";
+/** Per-namespace membership set: `id → true` for entities this lobby tracks. */
+export function membershipKey(namespace: string): string {
+  return `__vamp:members:${namespace}`;
 }
 
 /**

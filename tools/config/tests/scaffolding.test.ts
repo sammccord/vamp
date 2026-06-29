@@ -172,7 +172,10 @@ describe("pool.bop import resolution (Case C/D, 4c)", () => {
     const proj = mkdtempSync(join(tmpdir(), "vamp-noutils-"));
     const schemaDir = join(proj, "schema");
     mkdirSync(schemaDir, { recursive: true });
-    const importPath = resolvePoolImport(proj, schemaDir);
+    // Force resolution failure deterministically — relying on the temp dir being
+    // unable to resolve @vamp/utils is environment-dependent (an ancestor
+    // node_modules may still resolve it).
+    const importPath = resolvePoolImport(proj, schemaDir, () => null);
     expect(importPath).toBe("../node_modules/@vamp/utils/schema/pool.bop");
   });
 });

@@ -186,6 +186,12 @@ export function createBuilder(): QueryBuilder {
   };
 }
 
+/**
+ * Build a {@link Query} from a {@link QueryBuilder} callback, e.g.
+ * `query((q) => q.every(Position, Velocity).someTag(Hostile))`. Pass the result
+ * to {@link ECS.query} (or a system factory) to match entities by their
+ * component + tag set.
+ */
 export function query(callback: (builder: QueryBuilder) => QueryBuilder): Query {
   return callback(createBuilder()).toQuery();
 }

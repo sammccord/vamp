@@ -18,16 +18,23 @@ import { HookRegistry, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
 import { DurableObject } from "cloudflare:workers";
 import { YStreamClient } from "y-durablestream";
-import { Doc } from "yjs";
-import type { YArrayEvent, YMapEvent } from "yjs";
+import { Doc, type Map as YMap } from "yjs";
+import type { YMapEvent } from "yjs";
+import {
+  entitiesMap,
+  membersMap,
+  migrateLegacyNamespace,
+  reapOrphanedEntities,
+  writeDelete,
+  writeInsert,
+  writeUpdate,
+} from "./entity-doc";
 import {
   applyKeyChange,
   componentKeysToReconcile,
   nextAlarmTime,
-  occurrenceIndicesDescending,
   raceWithBoundedTimer,
   shouldCompactThisTick,
-  shouldPushId,
   shouldScheduleAlarm,
 } from "./reconcile-helpers";
 
@@ -243,8 +250,6 @@ export class ECSDurableObject<
 
   // Per-instance state synced from the Yjs doc (working copy)
   private _entityStore = new Map<string, Entity>();
-  // Mirror of entity ids in the namespace array for diff on observe
-  private _entityIdMirror = new Set<string>();
   // Remote changes pending reconciliation into the next scope. "update" entries
   // also carry the component keys added/removed by the remote change so the
   // reconcile path can route them through `addComponent`/`removeComponent` and
@@ -259,8 +264,8 @@ export class ECSDurableObject<
   private _reconcilingIds = new Set<string>();
   // Cleanup functions for per-entity Y.Map observers
   private _entityObserverCleanups = new Map<string, () => void>();
-  // Cleanup for the namespace array observer
-  private _arrayObserverCleanup: (() => void) | null = null;
+  // Cleanup for the per-namespace membership-map observer
+  private _membershipObserverCleanup: (() => void) | null = null;
   // Whether we have seeded the local ECS from the Yjs doc
   private _seeded = false;
   // The namespace (Y.Array key) for this instance's entity list
@@ -749,10 +754,10 @@ export class ECSDurableObject<
     // in the shim, so `get` returns a correctly-typed stub without a double cast.
     const stub = bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(docName));
     this.client = new YStreamClient(this.doc, { stub });
-    // Attach the namespace array observer BEFORE connect so the SyncStep2 burst
-    // is observed: remote additions that arrive during initial sync land in
+    // Attach the membership observer BEFORE connect so the SyncStep2 burst is
+    // observed: members that arrive during initial sync land in
     // `_pendingReconcile` instead of being silently dropped.
-    this._setupArrayObserver();
+    this._setupMembershipObserver();
     // Do NOT wrap in waitUntil: connect() resolves only when the sync stream
     // ends, so waitUntil would pin the isolate for the whole connection lifetime
     // and defeat hibernation. Fire-and-forget; connect() is documented never to
@@ -803,57 +808,57 @@ export class ECSDurableObject<
 
   /// ── Doc seeding ──────────────────────────────────────────────
 
+  /** The GLOBAL `id → components` store, shared across all namespaces. */
+  private _entities(): YMap<YMap<unknown>> {
+    return entitiesMap(this.doc);
+  }
+
+  /** This namespace's membership set: `id → true` for entities this lobby tracks. */
+  private _members(): YMap<boolean> {
+    return membersMap(this.doc, this._namespace);
+  }
+
   private _seedFromDoc() {
     if (this._seeded || !this.ecs || !this.client?.synced) return;
     this._seeded = true;
 
-    const entitiesList = this.doc.getArray<string>(this._namespace);
+    // Upgrade any document still in the legacy layout before reading.
+    migrateLegacyNamespace(this.doc, this._namespace, ECSDurableObject.LOCAL_ORIGIN);
 
-    // The array observer is already attached (connectToDoc), so additions that
-    // arrived during the sync burst are already captured. Diff the current doc
-    // ids against what we have mirrored and add any not yet seen; this is
-    // idempotent against the array observer's own diff (both guard on
-    // `_entityIdMirror`), so an id is never double-processed.
-    for (const id of entitiesList.toArray()) {
-      if (!this._entityIdMirror.has(id)) {
-        this._addEntityFromDoc(id);
-      }
+    // Seed every entity this lobby is a member of. The membership observer is
+    // already attached (connectToDoc), so members added during the sync burst
+    // are captured; `_addEntityFromDoc` is idempotent (guards on `hasEntity` and
+    // existing observers) so an id is never double-processed.
+    for (const id of this._members().keys()) {
+      this._addEntityFromDoc(id);
     }
 
     this.ecs.initialize();
     this._resolveReady();
   }
 
-  private _setupArrayObserver() {
-    const entitiesList = this.doc.getArray<string>(this._namespace);
-    const handler = (event: YArrayEvent<string>) => {
+  private _setupMembershipObserver() {
+    const members = this._members();
+    const handler = (event: YMapEvent<boolean>) => {
       if (event.transaction.origin === ECSDurableObject.LOCAL_ORIGIN) return;
-
-      const current = new Set(entitiesList.toArray());
-
-      // Removed ids
-      for (const id of this._entityIdMirror) {
-        if (!current.has(id)) {
+      for (const [id, change] of event.changes.keys) {
+        if (change.action === "delete") {
           this._removeEntityFromDoc(id);
-        }
-      }
-      // Added ids
-      for (const id of current) {
-        if (!this._entityIdMirror.has(id)) {
+        } else {
+          // add or re-add: pull the global entity into this lobby.
           this._addEntityFromDoc(id);
           this._pendingReconcile.set(id, { type: "insert" });
         }
       }
-
-      this._entityIdMirror = current;
     };
-    entitiesList.observe(handler);
-    this._arrayObserverCleanup = () => entitiesList.unobserve(handler);
+    members.observe(handler);
+    this._membershipObserverCleanup = () => members.unobserve(handler);
   }
 
   private _addEntityFromDoc(id: string) {
     if (!this.ecs) return;
-    const map = this.doc.getMap<unknown>(id);
+    const map = this._entities().get(id);
+    if (!map) return;
     const raw = map.toJSON() as Entity;
     // If entity doesn't exist locally, register it in the ECS archetype graph
     if (!this.ecs.hasEntity(id)) {
@@ -861,7 +866,6 @@ export class ECSDurableObject<
       if (!raw.id) (raw as Record<string, unknown>).id = id;
       this.ecs.insert(raw);
     }
-    this._entityIdMirror.add(id);
     this._observeEntity(id);
   }
 
@@ -873,14 +877,14 @@ export class ECSDurableObject<
       this._pendingReconcile.set(id, { type: "delete", entity });
     }
     this._unobserveEntity(id);
-    this._entityIdMirror.delete(id);
   }
 
   /// ── Per-entity Y.Map observers ───────────────────────────────
 
   private _observeEntity(id: string) {
     if (this._entityObserverCleanups.has(id)) return;
-    const map = this.doc.getMap<unknown>(id);
+    const map = this._entities().get(id);
+    if (!map) return;
     const handler = (event: YMapEvent<unknown>) => {
       if (event.transaction.origin === ECSDurableObject.LOCAL_ORIGIN) return;
       if (event.keysChanged.size === 0) return;
@@ -955,65 +959,39 @@ export class ECSDurableObject<
       cleanup();
     }
     this._entityObserverCleanups.clear();
-    if (this._arrayObserverCleanup) {
-      this._arrayObserverCleanup();
-      this._arrayObserverCleanup = null;
+    if (this._membershipObserverCleanup) {
+      this._membershipObserverCleanup();
+      this._membershipObserverCleanup = null;
     }
   }
 
   /// ── Writing local mutations back to the Yjs doc ──────────────
 
   private _writeMutationToDoc(id: string, mutation: MutationRecord<Entity, EntityDelta>) {
-    const map = this.doc.getMap<unknown>(id);
+    // Runs inside the flush handler's `doc.transact(LOCAL_ORIGIN)`, so the
+    // entity-doc `write*` helpers (which assume a surrounding transaction) batch
+    // into one update message.
     switch (mutation.tag) {
       case MutationType.Insert: {
-        // Insert: populate entity map
-        const entity = mutation.value.entity as Record<string, unknown>;
-        for (const key in entity) {
-          if (Object.prototype.hasOwnProperty.call(entity, key)) {
-            const val = entity[key];
-            if (val !== undefined) {
-              map.set(key, val);
-            }
-          }
-        }
-        // Ensure entity is in the namespace array. Guard the push against the
-        // authoritative CRDT array (not just the lossy local mirror) so a
-        // local-insert / remote-array race cannot push the same id twice.
-        const idArr = this.doc.getArray<string>(this._namespace);
-        if (shouldPushId(idArr.toArray(), id)) {
-          idArr.push([id]);
-        }
-        this._entityIdMirror.add(id);
+        writeInsert(
+          this.doc,
+          this._namespace,
+          id,
+          mutation.value.entity as Record<string, unknown>,
+        );
+        // Observe the global entity so cross-namespace mutations reconcile here
+        // even though this insert originated locally.
+        this._observeEntity(id);
         break;
       }
       case MutationType.Update: {
-        // Update: set changed component keys
-        const delta = mutation.value.delta as Record<string, unknown>;
-        for (const key in delta) {
-          if (Object.prototype.hasOwnProperty.call(delta, key)) {
-            const val = delta[key];
-            if (val === undefined) {
-              map.delete(key);
-            } else {
-              map.set(key, val);
-            }
-          }
-        }
+        writeUpdate(this.doc, id, mutation.value.delta as Record<string, unknown>);
         break;
       }
       case MutationType.Delete: {
-        // Delete: remove ALL occurrences from the namespace array (high index
-        // first) so a double-written id leaves no surviving occurrence that the
-        // array observer would re-add as a ghost. Then clear the entity map.
-        const arr = this.doc.getArray<string>(this._namespace);
-        for (const i of occurrenceIndicesDescending(arr.toArray(), id)) {
-          arr.delete(i, 1);
-        }
-        for (const key of map.keys()) {
-          map.delete(key);
-        }
-        this._entityIdMirror.delete(id);
+        // Drop this lobby's membership + reference; the global entity is GC'd
+        // only when no namespace references it anymore.
+        writeDelete(this.doc, this._namespace, id);
         this._unobserveEntity(id);
         break;
       }
@@ -1158,6 +1136,11 @@ export class ECSDurableObject<
     // the single-large-update row and quiet-but-large worlds. Run via waitUntil so
     // it does not block the tick or race the flush handler's doc.transact.
     if (shouldCompactThisTick(this._tickCount, this._compactEveryNTicks)) {
+      // GC any globally-orphaned entities (the concurrent last-reference race)
+      // before compacting, so the snapshot does not persist dead entities.
+      // Safe: an insert writes the entity and its refcount in one transaction,
+      // so an empty refcount set always means a genuine orphan, never sync lag.
+      reapOrphanedEntities(this.doc, ECSDurableObject.LOCAL_ORIGIN);
       this.ctx.waitUntil(this._commitDoc());
     }
 

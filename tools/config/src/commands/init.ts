@@ -16,9 +16,17 @@ import { resolveBebopImport } from "../generators/resolve-imports";
  * `@vamp/utils/schema/pool.bop` using Node module resolution, so the scaffolded
  * import is correct under hoisted or pnpm `node_modules` layouts. Falls back to
  * a literal path (with a warning) when resolution fails.
+ *
+ * `resolve` is injectable so the fallback branch can be tested deterministically
+ * (Node resolution from a temp dir is environment-dependent — it may still find
+ * a `@vamp/utils` in an ancestor `node_modules`).
  */
-export function resolvePoolImport(cwd: string, schemaDir: string): string {
-  const resolved = resolveBebopImport("@vamp/utils/schema/pool.bop", cwd);
+export function resolvePoolImport(
+  cwd: string,
+  schemaDir: string,
+  resolveImport: (specifier: string, fromDir: string) => string | null = resolveBebopImport,
+): string {
+  const resolved = resolveImport("@vamp/utils/schema/pool.bop", cwd);
   if (!resolved) {
     console.warn(
       "Warning: could not resolve '@vamp/utils/schema/pool.bop'. Scaffolding a literal " +

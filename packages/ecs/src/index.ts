@@ -29,7 +29,7 @@ export {
   type QueryMembershipWorld,
   type TrackedQuery,
 } from "./QueryMembership";
-export type { System } from "./System";
+export type { ArchetypeSystem, Behavior, EntitySystem, System } from "./System";
 export * from "./Actions";
 export {
   createArchetypeSystem,

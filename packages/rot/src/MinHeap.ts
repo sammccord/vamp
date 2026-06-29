@@ -123,7 +123,4 @@ export class MinHeap<T> {
       this.updateDown(m);
     }
   }
-  debugPrint() {
-    console.log(this.heap);
-  }
 }

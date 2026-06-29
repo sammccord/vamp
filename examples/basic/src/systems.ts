@@ -1,6 +1,12 @@
-import { createArchetypeSystem, createBehavior, createEntitySystem, type ECS } from "@vamp/ecs";
+import type { ECS } from "@vamp/ecs";
 import { type Actions, type Entity, Tags } from "./bebop";
-import { components, type EntityDelta } from "./game.generated";
+import {
+  components,
+  createGameArchetypeSystem,
+  createGameBehavior,
+  createGameEntitySystem,
+  type EntityDelta,
+} from "./game.generated";
 
 /**
  * The concrete ECS world the basic example runs. `UpdateArguments` is `[]`
@@ -47,7 +53,7 @@ export function registerGameSystems<
 >(ecs: World<Context>): void {
   // ── System 1 (simple): regenerate health toward max for entities with a rate.
   ecs.registerSystem(
-    createEntitySystem<Context, [], Actions, Tags, Entity, EntityDelta>(
+    createGameEntitySystem<Context, []>(
       (entities, world) => {
         for (let i = 0; i < entities.length; i++) {
           const id = entities[i];
@@ -67,7 +73,7 @@ export function registerGameSystems<
 
   // ── System 2 (medium): integrate position += velocity each frame.
   ecs.registerSystem(
-    createEntitySystem<Context, [], Actions, Tags, Entity, EntityDelta>(
+    createGameEntitySystem<Context, []>(
       (entities, world) => {
         for (let i = 0; i < entities.length; i++) {
           const id = entities[i];
@@ -88,7 +94,7 @@ export function registerGameSystems<
   // aggro range and chips its health. Archetype system so the player query runs
   // once per frame; the inner scan is O(hostiles × players).
   ecs.registerSystem(
-    createArchetypeSystem<Context, [], void, Actions, Tags, Entity, EntityDelta>(
+    createGameArchetypeSystem<Context, []>(
       (archetypes, world) => {
         const players = world.query((q) =>
           q.someTag(Tags.PlayerControlled).every(components.position),
@@ -139,7 +145,7 @@ export function registerGameSystems<
 function registerBehaviors<Context extends Record<string, unknown>>(ecs: World<Context>): void {
   // tag 1 — Attack: subtract damage from the struck entity's health.
   ecs.registerBehavior(
-    createBehavior<Context, [], Actions, Tags, Entity, EntityDelta>(
+    createGameBehavior<Context, []>(
       1,
       (world, entity, event) => {
         const damage = (event.detail.value as { damage?: number }).damage ?? 0;
@@ -153,7 +159,7 @@ function registerBehaviors<Context extends Record<string, unknown>>(ecs: World<C
   // tag 2 — TakeDamage: same effect, modelled as a separate event so it can be
   // dispatched independently of an attacker.
   ecs.registerBehavior(
-    createBehavior<Context, [], Actions, Tags, Entity, EntityDelta>(
+    createGameBehavior<Context, []>(
       2,
       (world, entity, event) => {
         const damage = (event.detail.value as { damage?: number }).damage ?? 0;
@@ -166,7 +172,7 @@ function registerBehaviors<Context extends Record<string, unknown>>(ecs: World<C
 
   // tag 3 — Heal: add to the entity's health pool.
   ecs.registerBehavior(
-    createBehavior<Context, [], Actions, Tags, Entity, EntityDelta>(
+    createGameBehavior<Context, []>(
       3,
       (world, entity, event) => {
         const amount = (event.detail.value as { amount?: number }).amount ?? 0;
@@ -180,7 +186,7 @@ function registerBehaviors<Context extends Record<string, unknown>>(ecs: World<C
   // tag 4 — AreaAttack: damage the entity and (via act's child propagation) every
   // descendant. Drains stamina too, so a single cascade touches two pools.
   ecs.registerBehavior(
-    createBehavior<Context, [], Actions, Tags, Entity, EntityDelta>(
+    createGameBehavior<Context, []>(
       4,
       (world, entity, event) => {
         const damage = (event.detail.value as { damage?: number }).damage ?? 0;

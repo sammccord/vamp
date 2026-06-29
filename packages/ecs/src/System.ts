@@ -160,11 +160,11 @@ export function createArchetypeSystem<
 }
 
 /**
- * An archetype system is a system that that will only execute once in each update with all the archetypes matching the query.
- * This is usefull when your query potentially matches 2 or more archetypes and you need to check for the presence of a componentId on entities.
- * The differing components can be checked for once for each archetype instead of for each entity.
+ * An event system runs reactively (via {@link ECS.subscribe}) whenever an entity
+ * matching `query` changes, rather than every update cycle. The executor receives
+ * the matching entity ids.
  * @param execute
- * @param queryParams
+ * @param query
  * @returns
  */
 export function createEventSystem(
@@ -179,6 +179,14 @@ export function createEventSystem(
   });
 }
 
+/**
+ * A lifecycle system runs once per entity when it is created ({@link ECS.onCreate})
+ * or deleted ({@link ECS.onDelete}) and matches `query`. The executor receives the
+ * single entity id.
+ * @param execute
+ * @param query
+ * @returns
+ */
 export function createLifecycleSystem(
   execute: (entity: string) => void,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
@@ -191,6 +199,16 @@ export function createLifecycleSystem(
   });
 }
 
+/**
+ * Create an event-driven {@link Behavior} for {@link ECS.registerBehavior}, keyed
+ * by an action `tag`. When {@link ECS.act} dispatches that tag to an entity
+ * matching `query`, `handler(world, entity, event)` runs. An optional `priority`
+ * orders behaviors sharing a tag.
+ * @param tag action tag this behavior responds to
+ * @param handler runs against the world + struck entity + action payload
+ * @param query which entities this behavior applies to
+ * @param priority higher runs first among behaviors for the same tag
+ */
 export function createBehavior<
   State extends Record<string, unknown>,
   UpdateArguments extends unknown[],

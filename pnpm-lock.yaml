@@ -82,8 +82,8 @@ catalogs:
       specifier: ^4.74.0
       version: 4.74.0
     y-durablestream:
-      specifier: ^0.3.0
-      version: 0.3.0
+      specifier: ^0.4.0
+      version: 0.4.0
     yjs:
       specifier: ^13.6.30
       version: 13.6.30
@@ -183,6 +183,12 @@ importers:
       ws:
         specifier: ^8.18.0
         version: 8.21.0
+      y-durablestream:
+        specifier: 'catalog:'
+        version: 0.4.0
+      yjs:
+        specifier: 'catalog:'
+        version: 13.6.30
 
   packages/ecs:
     dependencies:
@@ -347,7 +353,7 @@ importers:
         version: 1.3.1
       y-durablestream:
         specifier: 'catalog:'
-        version: 0.3.0
+        version: 0.4.0
       yjs:
         specifier: 'catalog:'
         version: 13.6.30
@@ -3651,8 +3657,8 @@ packages:
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
 
-  y-durablestream@0.3.0:
-    resolution: {integrity: sha512-EZ/o23cDWzW8HlUUiwE5hiCbw2/mOiiGIrEpxPOi8iB7Whqo2dDjGO92mhWG95K5GLb5AepzjVHoOmXjt+WdyQ==}
+  y-durablestream@0.4.0:
+    resolution: {integrity: sha512-51k/+L44EU7nDkOkYGSafFr0kgeZKJkRpTERYcehF0Nk3Ntf1oksaWV9Cvy7FJDS6RJzwmQZPHaLe3kvIskkOg==}
 
   y-protocols@1.0.7:
     resolution: {integrity: sha512-YSVsLoXxO67J6eE/nV4AtFtT3QEotZf5sK5BHxFBXso7VDUT3Tx07IfA6hsu5Q5OmBdMkQVmFZ9QOA7fikWvnw==}
@@ -6352,7 +6358,7 @@ snapshots:
 
   xmlchars@2.2.0: {}
 
-  y-durablestream@0.3.0:
+  y-durablestream@0.4.0:
     dependencies:
       lib0: 0.2.117
       y-protocols: 1.0.7(yjs@13.6.30)

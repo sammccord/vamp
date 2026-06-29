@@ -1,6 +1,6 @@
 {
   "name": "@vamp/ecs",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Entity-Component-System runtime for @vamp game state.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/ecs#readme",
   "bugs": {
@@ -20,6 +20,9 @@
   "exports": {
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "vp pack",

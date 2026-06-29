@@ -1,0 +1,57 @@
+name: release
+
+# Publishes every public @vamp/* package to npm on a version tag.
+#
+# Flow:
+#   1. bump a package version (`pnpm --filter @vamp/<pkg> run release`, which runs
+#      `bumpp` — it edits package.json, commits, and creates a `v<version>` tag),
+#   2. `git push --follow-tags`,
+#   3. this workflow builds the whole workspace and publishes anything whose
+#      version is not already on the registry.
+#
+# Requires an `NPM_TOKEN` repo secret (an npm automation token with publish
+# rights to the @vamp scope). Provenance is attached via OIDC.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Gate the release on the same checks CI runs.
+      - name: Check (fmt + lint + typecheck)
+        run: pnpm vp check
+
+      - name: Test
+        run: pnpm vp run -r test
+
+      - name: Build
+        run: pnpm vp run -r build
+
+      # `pnpm -r publish` skips any package whose version already exists on the
+      # registry, so re-running the workflow is safe. `publishConfig.access` in
+      # each package.json makes the scoped packages public.
+      - name: Publish
+        run: pnpm -r publish --access public --provenance --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
