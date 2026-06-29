@@ -16,82 +16,121 @@
 // </auto-generated>
 import { BebopView, BebopRuntimeError, BebopRecord } from "bebop";
 import { Metadata, MethodType } from "@tempojs/common";
-import { BaseClient, MethodInfo, CallOptions } from "@tempojs/client";
-import {
-  ServiceRegistry,
-  BaseService,
-  ServerContext,
-  BebopMethodAny,
-  BebopMethod,
-} from "@tempojs/server";
+import {  BaseClient, MethodInfo, CallOptions } from "@tempojs/client";
+import { ServiceRegistry, BaseService, ServerContext, BebopMethodAny, BebopMethod } from "@tempojs/server";
 
-export const BEBOP_SCHEMA = new Uint8Array([
-  3, 22, 0, 0, 0, 71, 117, 105, 100, 65, 114, 114, 97, 121, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0,
-  0, 3, 115, 101, 116, 0, 242, 255, 255, 255, 0, 244, 255, 255, 255, 0, 1, 97, 100, 100, 0, 242,
-  255, 255, 255, 0, 244, 255, 255, 255, 0, 2, 114, 101, 109, 111, 118, 101, 0, 242, 255, 255, 255,
-  0, 244, 255, 255, 255, 0, 3, 86, 101, 99, 50, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 2, 120,
-  0, 250, 255, 255, 255, 0, 1, 121, 0, 250, 255, 255, 255, 0, 2, 69, 110, 116, 105, 116, 121, 68,
-  101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 13, 105, 100, 0, 244, 255, 255, 255, 0, 1, 114, 111, 111,
-  116, 0, 244, 255, 255, 255, 0, 2, 116, 97, 103, 115, 0, 242, 255, 255, 255, 0, 19, 0, 0, 0, 0, 3,
-  112, 97, 114, 101, 110, 116, 0, 244, 255, 255, 255, 0, 4, 99, 104, 105, 108, 100, 114, 101, 110,
-  0, 0, 0, 0, 0, 0, 5, 104, 101, 97, 108, 116, 104, 0, 21, 0, 0, 0, 0, 6, 112, 111, 115, 105, 116,
-  105, 111, 110, 0, 1, 0, 0, 0, 0, 7, 118, 101, 108, 111, 99, 105, 116, 121, 0, 1, 0, 0, 0, 0, 8,
-  109, 97, 110, 97, 0, 21, 0, 0, 0, 0, 9, 115, 116, 97, 109, 105, 110, 97, 0, 21, 0, 0, 0, 0, 10,
-  108, 101, 118, 101, 108, 0, 251, 255, 255, 255, 0, 11, 120, 112, 0, 251, 255, 255, 255, 0, 12,
-  102, 97, 99, 116, 105, 111, 110, 0, 251, 255, 255, 255, 0, 13, 77, 117, 116, 97, 116, 105, 111,
-  110, 84, 121, 112, 101, 0, 4, 0, 251, 255, 255, 255, 0, 4, 0, 0, 0, 3, 73, 110, 115, 101, 114,
-  116, 0, 0, 1, 0, 0, 0, 85, 112, 100, 97, 116, 101, 0, 0, 2, 0, 0, 0, 68, 101, 108, 101, 116, 101,
-  0, 0, 3, 0, 0, 0, 73, 110, 115, 101, 114, 116, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 101, 110, 116, 105,
-  116, 121, 0, 17, 0, 0, 0, 0, 85, 112, 100, 97, 116, 101, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 100, 101,
-  108, 116, 97, 0, 2, 0, 0, 0, 0, 68, 101, 108, 101, 116, 101, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 101,
-  110, 116, 105, 116, 121, 0, 17, 0, 0, 0, 0, 77, 117, 116, 97, 116, 105, 111, 110, 82, 101, 99,
-  111, 114, 100, 0, 3, 0, 10, 0, 0, 0, 3, 1, 4, 0, 0, 0, 2, 5, 0, 0, 0, 3, 6, 0, 0, 0, 77, 117, 116,
-  97, 116, 105, 111, 110, 83, 99, 111, 112, 101, 0, 2, 0, 5, 0, 0, 0, 1, 109, 117, 116, 97, 116,
-  105, 111, 110, 115, 0, 241, 255, 255, 255, 244, 255, 255, 255, 7, 0, 0, 0, 0, 1, 65, 116, 116, 97,
-  99, 107, 0, 2, 0, 5, 0, 0, 0, 3, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116,
-  97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255,
-  255, 0, 3, 84, 97, 107, 101, 68, 97, 109, 97, 103, 101, 0, 2, 0, 5, 0, 0, 0, 3, 115, 111, 117,
-  114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0,
-  2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255, 255, 0, 3, 72, 101, 97, 108, 0, 2, 0, 5, 0, 0, 0,
-  3, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116, 97, 114, 103, 101, 116, 0, 244,
-  255, 255, 255, 0, 2, 97, 109, 111, 117, 110, 116, 0, 251, 255, 255, 255, 0, 3, 65, 114, 101, 97,
-  65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0, 0, 0, 4, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255,
-  255, 0, 1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 100, 97, 109, 97, 103, 101,
-  0, 251, 255, 255, 255, 0, 3, 114, 97, 100, 105, 117, 115, 0, 251, 255, 255, 255, 0, 4, 65, 99,
-  116, 105, 111, 110, 115, 0, 3, 0, 10, 0, 0, 0, 4, 1, 9, 0, 0, 0, 2, 10, 0, 0, 0, 3, 11, 0, 0, 0,
-  4, 12, 0, 0, 0, 84, 105, 99, 107, 82, 101, 113, 117, 101, 115, 116, 0, 2, 0, 5, 0, 0, 0, 2, 115,
-  116, 101, 112, 115, 0, 251, 255, 255, 255, 0, 1, 100, 116, 77, 115, 0, 251, 255, 255, 255, 0, 2,
-  84, 105, 99, 107, 82, 101, 115, 117, 108, 116, 0, 2, 0, 5, 0, 0, 0, 3, 102, 114, 97, 109, 101,
-  115, 0, 251, 255, 255, 255, 0, 1, 101, 110, 116, 105, 116, 105, 101, 115, 0, 251, 255, 255, 255,
-  0, 2, 109, 105, 99, 114, 111, 115, 0, 251, 255, 255, 255, 0, 3, 86, 101, 99, 50, 0, 2, 0, 5, 0, 0,
-  0, 2, 120, 0, 247, 255, 255, 255, 0, 1, 121, 0, 247, 255, 255, 255, 0, 2, 69, 110, 116, 105, 116,
-  121, 0, 2, 0, 5, 0, 0, 0, 13, 105, 100, 0, 244, 255, 255, 255, 0, 1, 114, 111, 111, 116, 0, 244,
-  255, 255, 255, 0, 2, 116, 97, 103, 115, 0, 242, 255, 255, 255, 0, 19, 0, 0, 0, 0, 3, 112, 97, 114,
-  101, 110, 116, 0, 244, 255, 255, 255, 0, 4, 99, 104, 105, 108, 100, 114, 101, 110, 0, 242, 255,
-  255, 255, 0, 244, 255, 255, 255, 0, 5, 104, 101, 97, 108, 116, 104, 0, 20, 0, 0, 0, 0, 6, 112,
-  111, 115, 105, 116, 105, 111, 110, 0, 16, 0, 0, 0, 0, 7, 118, 101, 108, 111, 99, 105, 116, 121, 0,
-  16, 0, 0, 0, 0, 8, 109, 97, 110, 97, 0, 20, 0, 0, 0, 0, 9, 115, 116, 97, 109, 105, 110, 97, 0, 20,
-  0, 0, 0, 0, 10, 108, 101, 118, 101, 108, 0, 251, 255, 255, 255, 0, 11, 120, 112, 0, 251, 255, 255,
-  255, 0, 12, 102, 97, 99, 116, 105, 111, 110, 0, 251, 255, 255, 255, 0, 13, 83, 116, 97, 116, 101,
-  0, 2, 0, 5, 0, 0, 0, 1, 110, 115, 0, 245, 255, 255, 255, 0, 1, 84, 97, 103, 115, 0, 4, 0, 251,
-  255, 255, 255, 0, 4, 0, 0, 0, 8, 72, 117, 109, 97, 110, 0, 0, 1, 0, 0, 0, 80, 108, 97, 121, 101,
-  114, 67, 111, 110, 116, 114, 111, 108, 108, 101, 100, 0, 0, 2, 0, 0, 0, 72, 111, 115, 116, 105,
-  108, 101, 0, 0, 3, 0, 0, 0, 85, 110, 100, 101, 97, 100, 0, 0, 4, 0, 0, 0, 70, 108, 121, 105, 110,
-  103, 0, 0, 5, 0, 0, 0, 66, 111, 115, 115, 0, 0, 6, 0, 0, 0, 73, 110, 118, 117, 108, 110, 101, 114,
-  97, 98, 108, 101, 0, 0, 7, 0, 0, 0, 83, 116, 117, 110, 110, 101, 100, 0, 0, 8, 0, 0, 0, 80, 111,
-  111, 108, 0, 2, 0, 5, 0, 0, 0, 5, 112, 111, 105, 110, 116, 115, 0, 251, 255, 255, 255, 0, 1, 109,
-  105, 110, 0, 251, 255, 255, 255, 0, 2, 109, 97, 120, 0, 251, 255, 255, 255, 0, 3, 114, 97, 116,
-  101, 0, 250, 255, 255, 255, 0, 4, 105, 110, 116, 101, 114, 118, 97, 108, 0, 251, 255, 255, 255, 0,
-  5, 80, 111, 111, 108, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 5, 112, 111, 105, 110, 116, 115,
-  0, 250, 255, 255, 255, 0, 1, 109, 105, 110, 0, 250, 255, 255, 255, 0, 2, 109, 97, 120, 0, 250,
-  255, 255, 255, 0, 3, 114, 97, 116, 101, 0, 250, 255, 255, 255, 0, 4, 105, 110, 116, 101, 114, 118,
-  97, 108, 0, 250, 255, 255, 255, 0, 5, 1, 0, 0, 0, 82, 112, 99, 0, 0, 4, 0, 0, 0, 115, 112, 97,
-  119, 110, 0, 0, 0, 17, 0, 0, 0, 17, 0, 0, 0, 62, 226, 118, 138, 97, 99, 116, 0, 0, 0, 13, 0, 0, 0,
-  13, 0, 0, 0, 48, 15, 87, 211, 116, 105, 99, 107, 0, 0, 0, 14, 0, 0, 0, 15, 0, 0, 0, 202, 1, 167,
-  146, 111, 98, 115, 101, 114, 118, 101, 0, 0, 1, 8, 0, 0, 0, 8, 0, 0, 0, 214, 29, 17, 28,
+export const BEBOP_SCHEMA = new Uint8Array ([
+3, 22, 0, 0, 0, 71, 117, 105, 100, 65, 114, 114, 97, 121,
+68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 3, 115, 101,
+116, 0, 242, 255, 255, 255, 0, 244, 255, 255, 255, 0, 1,
+97, 100, 100, 0, 242, 255, 255, 255, 0, 244, 255, 255,
+255, 0, 2, 114, 101, 109, 111, 118, 101, 0, 242, 255, 255,
+255, 0, 244, 255, 255, 255, 0, 3, 86, 101, 99, 50, 68,
+101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 2, 120, 0, 250,
+255, 255, 255, 0, 1, 121, 0, 250, 255, 255, 255, 0, 2, 69,
+110, 116, 105, 116, 121, 68, 101, 108, 116, 97, 0, 2, 0,
+5, 0, 0, 0, 13, 105, 100, 0, 244, 255, 255, 255, 0, 1,
+114, 111, 111, 116, 0, 244, 255, 255, 255, 0, 2, 116, 97,
+103, 115, 0, 242, 255, 255, 255, 0, 19, 0, 0, 0, 0, 3,
+112, 97, 114, 101, 110, 116, 0, 244, 255, 255, 255, 0, 4,
+99, 104, 105, 108, 100, 114, 101, 110, 0, 0, 0, 0, 0, 0,
+5, 104, 101, 97, 108, 116, 104, 0, 21, 0, 0, 0, 0, 6, 112,
+111, 115, 105, 116, 105, 111, 110, 0, 1, 0, 0, 0, 0, 7,
+118, 101, 108, 111, 99, 105, 116, 121, 0, 1, 0, 0, 0, 0,
+8, 109, 97, 110, 97, 0, 21, 0, 0, 0, 0, 9, 115, 116, 97,
+109, 105, 110, 97, 0, 21, 0, 0, 0, 0, 10, 108, 101, 118,
+101, 108, 0, 251, 255, 255, 255, 0, 11, 120, 112, 0, 251,
+255, 255, 255, 0, 12, 102, 97, 99, 116, 105, 111, 110, 0,
+251, 255, 255, 255, 0, 13, 77, 117, 116, 97, 116, 105,
+111, 110, 84, 121, 112, 101, 0, 4, 0, 251, 255, 255, 255,
+0, 4, 0, 0, 0, 3, 73, 110, 115, 101, 114, 116, 0, 0, 1, 0,
+0, 0, 85, 112, 100, 97, 116, 101, 0, 0, 2, 0, 0, 0, 68,
+101, 108, 101, 116, 101, 0, 0, 3, 0, 0, 0, 73, 110, 115,
+101, 114, 116, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 101, 110,
+116, 105, 116, 121, 0, 17, 0, 0, 0, 0, 85, 112, 100, 97,
+116, 101, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 100, 101, 108,
+116, 97, 0, 2, 0, 0, 0, 0, 68, 101, 108, 101, 116, 101, 0,
+1, 0, 0, 5, 0, 0, 0, 0, 1, 101, 110, 116, 105, 116, 121,
+0, 17, 0, 0, 0, 0, 77, 117, 116, 97, 116, 105, 111, 110,
+82, 101, 99, 111, 114, 100, 0, 3, 0, 10, 0, 0, 0, 3, 1, 4,
+0, 0, 0, 2, 5, 0, 0, 0, 3, 6, 0, 0, 0, 77, 117, 116, 97,
+116, 105, 111, 110, 83, 99, 111, 112, 101, 0, 2, 0, 5, 0,
+0, 0, 1, 109, 117, 116, 97, 116, 105, 111, 110, 115, 0,
+241, 255, 255, 255, 244, 255, 255, 255, 7, 0, 0, 0, 0, 1,
+65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0, 0, 0, 3, 115,
+111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116,
+97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 100,
+97, 109, 97, 103, 101, 0, 251, 255, 255, 255, 0, 3, 84,
+97, 107, 101, 68, 97, 109, 97, 103, 101, 0, 2, 0, 5, 0, 0,
+0, 3, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255,
+0, 1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255,
+0, 2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255, 255,
+0, 3, 72, 101, 97, 108, 0, 2, 0, 5, 0, 0, 0, 3, 115, 111,
+117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116, 97,
+114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 97, 109,
+111, 117, 110, 116, 0, 251, 255, 255, 255, 0, 3, 65, 114,
+101, 97, 65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0, 0, 0,
+4, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0,
+1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0,
+2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255, 255, 0,
+3, 114, 97, 100, 105, 117, 115, 0, 251, 255, 255, 255, 0,
+4, 65, 99, 116, 105, 111, 110, 115, 0, 3, 0, 10, 0, 0, 0,
+4, 1, 9, 0, 0, 0, 2, 10, 0, 0, 0, 3, 11, 0, 0, 0, 4, 12,
+0, 0, 0, 84, 105, 99, 107, 82, 101, 113, 117, 101, 115,
+116, 0, 2, 0, 5, 0, 0, 0, 2, 115, 116, 101, 112, 115, 0,
+251, 255, 255, 255, 0, 1, 100, 116, 77, 115, 0, 251, 255,
+255, 255, 0, 2, 84, 105, 99, 107, 82, 101, 115, 117, 108,
+116, 0, 2, 0, 5, 0, 0, 0, 3, 102, 114, 97, 109, 101, 115,
+0, 251, 255, 255, 255, 0, 1, 101, 110, 116, 105, 116, 105,
+101, 115, 0, 251, 255, 255, 255, 0, 2, 109, 105, 99, 114,
+111, 115, 0, 251, 255, 255, 255, 0, 3, 86, 101, 99, 50, 0,
+2, 0, 5, 0, 0, 0, 2, 120, 0, 247, 255, 255, 255, 0, 1,
+121, 0, 247, 255, 255, 255, 0, 2, 69, 110, 116, 105, 116,
+121, 0, 2, 0, 5, 0, 0, 0, 13, 105, 100, 0, 244, 255, 255,
+255, 0, 1, 114, 111, 111, 116, 0, 244, 255, 255, 255, 0,
+2, 116, 97, 103, 115, 0, 242, 255, 255, 255, 0, 19, 0, 0,
+0, 0, 3, 112, 97, 114, 101, 110, 116, 0, 244, 255, 255,
+255, 0, 4, 99, 104, 105, 108, 100, 114, 101, 110, 0, 242,
+255, 255, 255, 0, 244, 255, 255, 255, 0, 5, 104, 101, 97,
+108, 116, 104, 0, 20, 0, 0, 0, 0, 6, 112, 111, 115, 105,
+116, 105, 111, 110, 0, 16, 0, 0, 0, 0, 7, 118, 101, 108,
+111, 99, 105, 116, 121, 0, 16, 0, 0, 0, 0, 8, 109, 97,
+110, 97, 0, 20, 0, 0, 0, 0, 9, 115, 116, 97, 109, 105,
+110, 97, 0, 20, 0, 0, 0, 0, 10, 108, 101, 118, 101, 108,
+0, 251, 255, 255, 255, 0, 11, 120, 112, 0, 251, 255, 255,
+255, 0, 12, 102, 97, 99, 116, 105, 111, 110, 0, 251, 255,
+255, 255, 0, 13, 83, 116, 97, 116, 101, 0, 2, 0, 5, 0, 0,
+0, 1, 110, 115, 0, 245, 255, 255, 255, 0, 1, 84, 97, 103,
+115, 0, 4, 0, 251, 255, 255, 255, 0, 4, 0, 0, 0, 8, 72,
+117, 109, 97, 110, 0, 0, 1, 0, 0, 0, 80, 108, 97, 121,
+101, 114, 67, 111, 110, 116, 114, 111, 108, 108, 101, 100,
+0, 0, 2, 0, 0, 0, 72, 111, 115, 116, 105, 108, 101, 0, 0,
+3, 0, 0, 0, 85, 110, 100, 101, 97, 100, 0, 0, 4, 0, 0, 0,
+70, 108, 121, 105, 110, 103, 0, 0, 5, 0, 0, 0, 66, 111,
+115, 115, 0, 0, 6, 0, 0, 0, 73, 110, 118, 117, 108, 110,
+101, 114, 97, 98, 108, 101, 0, 0, 7, 0, 0, 0, 83, 116,
+117, 110, 110, 101, 100, 0, 0, 8, 0, 0, 0, 80, 111, 111,
+108, 0, 2, 0, 5, 0, 0, 0, 5, 112, 111, 105, 110, 116, 115,
+0, 251, 255, 255, 255, 0, 1, 109, 105, 110, 0, 251, 255,
+255, 255, 0, 2, 109, 97, 120, 0, 251, 255, 255, 255, 0, 3,
+114, 97, 116, 101, 0, 250, 255, 255, 255, 0, 4, 105, 110,
+116, 101, 114, 118, 97, 108, 0, 251, 255, 255, 255, 0, 5,
+80, 111, 111, 108, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0,
+0, 0, 5, 112, 111, 105, 110, 116, 115, 0, 250, 255, 255,
+255, 0, 1, 109, 105, 110, 0, 250, 255, 255, 255, 0, 2,
+109, 97, 120, 0, 250, 255, 255, 255, 0, 3, 114, 97, 116,
+101, 0, 250, 255, 255, 255, 0, 4, 105, 110, 116, 101, 114,
+118, 97, 108, 0, 250, 255, 255, 255, 0, 5, 1, 0, 0, 0, 82,
+112, 99, 0, 0, 4, 0, 0, 0, 115, 112, 97, 119, 110, 0, 0,
+0, 17, 0, 0, 0, 17, 0, 0, 0, 62, 226, 118, 138, 97, 99,
+116, 0, 0, 0, 13, 0, 0, 0, 13, 0, 0, 0, 48, 15, 87, 211,
+116, 105, 99, 107, 0, 0, 0, 14, 0, 0, 0, 15, 0, 0, 0, 202,
+1, 167, 146, 111, 98, 115, 101, 114, 118, 101, 0, 0, 1, 8,
+0, 0, 0, 8, 0, 0, 0, 214, 29, 17, 28
 ]);
 
 export interface GuidArrayDelta {
+
   set?: string[];
 
   add?: string[];
@@ -99,203 +138,203 @@ export interface GuidArrayDelta {
   remove?: string[];
 }
 
-export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: GuidArrayDelta): GuidArrayDelta & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return GuidArrayDelta.encode(this);
-        },
-      };
+export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: GuidArrayDelta): GuidArrayDelta & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return GuidArrayDelta.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: GuidArrayDelta): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      GuidArrayDelta.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: GuidArrayDelta): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        GuidArrayDelta.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: GuidArrayDelta, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.set !== undefined) {
-          view.writeByte(1);
-          {
-            const length0 = record.set.length;
-            view.writeUint32(length0);
-            for (let i0 = 0; i0 < length0; i0++) {
-              view.writeGuid(record.set[i0]);
-            }
-          }
+    encodeInto(record: GuidArrayDelta, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.set !== undefined) {
+        view.writeByte(1);
+        {
+        const length0 = record.set.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeGuid(record.set[i0]);
         }
-        if (record.add !== undefined) {
-          view.writeByte(2);
-          {
-            const length0 = record.add.length;
-            view.writeUint32(length0);
-            for (let i0 = 0; i0 < length0; i0++) {
-              view.writeGuid(record.add[i0]);
-            }
-          }
+      }
+      }
+      if (record.add !== undefined) {
+        view.writeByte(2);
+        {
+        const length0 = record.add.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeGuid(record.add[i0]);
         }
-        if (record.remove !== undefined) {
-          view.writeByte(3);
-          {
-            const length0 = record.remove.length;
-            view.writeUint32(length0);
-            for (let i0 = 0; i0 < length0; i0++) {
-              view.writeGuid(record.remove[i0]);
-            }
-          }
+      }
+      }
+      if (record.remove !== undefined) {
+        view.writeByte(3);
+        {
+        const length0 = record.remove.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeGuid(record.remove[i0]);
         }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): GuidArrayDelta & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = GuidArrayDelta.readFrom(view);
-        return GuidArrayDelta(decoded);
-      },
-
-      readFrom(view: BebopView): GuidArrayDelta {
-        const message: GuidArrayDelta = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              {
-                const length0 = view.readUint32();
-                message.set = [];
-                for (let i0 = 0; i0 < length0; i0++) {
-                  let x0: string;
-                  x0 = view.readGuid();
-                  message.set[i0] = x0;
-                }
-              }
-              break;
-
-            case 2:
-              {
-                const length0 = view.readUint32();
-                message.add = [];
-                for (let i0 = 0; i0 < length0; i0++) {
-                  let x0: string;
-                  x0 = view.readGuid();
-                  message.add[i0] = x0;
-                }
-              }
-              break;
-
-            case 3:
-              {
-                const length0 = view.readUint32();
-                message.remove = [];
-                for (let i0 = 0; i0 < length0; i0++) {
-                  let x0: string;
-                  x0 = view.readGuid();
-                  message.remove[i0] = x0;
-                }
-              }
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+      }
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): GuidArrayDelta & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = GuidArrayDelta.readFrom(view);
+      return GuidArrayDelta(decoded);
+    },
+
+    readFrom(view: BebopView): GuidArrayDelta {
+      const message: GuidArrayDelta = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            {
+          const length0 = view.readUint32();
+          message.set = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: string;
+            x0 = view.readGuid();
+            message.set[i0] = x0;
+          }
+        }
+            break;
+
+          case 2:
+            {
+          const length0 = view.readUint32();
+          message.add = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: string;
+            x0 = view.readGuid();
+            message.add[i0] = x0;
+          }
+        }
+            break;
+
+          case 3:
+            {
+          const length0 = view.readUint32();
+          message.remove = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: string;
+            x0 = view.readGuid();
+            message.remove[i0] = x0;
+          }
+        }
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface Vec2Delta {
+
   x?: number;
 
   y?: number;
 }
 
-export const Vec2Delta = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Vec2Delta): Vec2Delta & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Vec2Delta.encode(this);
-        },
-      };
+export const Vec2Delta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Vec2Delta): Vec2Delta & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Vec2Delta.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Vec2Delta): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Vec2Delta.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Vec2Delta): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Vec2Delta.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Vec2Delta, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.x !== undefined) {
-          view.writeByte(1);
-          view.writeInt32(record.x);
-        }
-        if (record.y !== undefined) {
-          view.writeByte(2);
-          view.writeInt32(record.y);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): Vec2Delta & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Vec2Delta.readFrom(view);
-        return Vec2Delta(decoded);
-      },
-
-      readFrom(view: BebopView): Vec2Delta {
-        const message: Vec2Delta = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.x = view.readInt32();
-              break;
-
-            case 2:
-              message.y = view.readInt32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: Vec2Delta, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.x !== undefined) {
+        view.writeByte(1);
+        view.writeInt32(record.x);
+      }
+      if (record.y !== undefined) {
+        view.writeByte(2);
+        view.writeInt32(record.y);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): Vec2Delta & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Vec2Delta.readFrom(view);
+      return Vec2Delta(decoded);
+    },
+
+    readFrom(view: BebopView): Vec2Delta {
+      const message: Vec2Delta = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.x = view.readInt32();
+            break;
+
+          case 2:
+            message.y = view.readInt32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface EntityDelta {
+
   id?: string;
 
   root?: string;
@@ -323,179 +362,179 @@ export interface EntityDelta {
   faction?: number;
 }
 
-export const EntityDelta = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: EntityDelta): EntityDelta & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return EntityDelta.encode(this);
-        },
-      };
+export const EntityDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: EntityDelta): EntityDelta & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return EntityDelta.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: EntityDelta): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      EntityDelta.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: EntityDelta): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        EntityDelta.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: EntityDelta, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.id !== undefined) {
-          view.writeByte(1);
-          view.writeGuid(record.id);
+    encodeInto(record: EntityDelta, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.id !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.id);
+      }
+      if (record.root !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.root);
+      }
+      if (record.tags !== undefined) {
+        view.writeByte(3);
+        {
+        const length0 = record.tags.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeUint32(record.tags[i0]);
         }
-        if (record.root !== undefined) {
-          view.writeByte(2);
-          view.writeGuid(record.root);
-        }
-        if (record.tags !== undefined) {
-          view.writeByte(3);
-          {
-            const length0 = record.tags.length;
-            view.writeUint32(length0);
-            for (let i0 = 0; i0 < length0; i0++) {
-              view.writeUint32(record.tags[i0]);
-            }
+      }
+      }
+      if (record.parent !== undefined) {
+        view.writeByte(4);
+        view.writeGuid(record.parent);
+      }
+      if (record.children !== undefined) {
+        view.writeByte(5);
+        GuidArrayDelta.encodeInto(record.children, view);
+      }
+      if (record.health !== undefined) {
+        view.writeByte(6);
+        PoolDelta.encodeInto(record.health, view);
+      }
+      if (record.position !== undefined) {
+        view.writeByte(7);
+        Vec2Delta.encodeInto(record.position, view);
+      }
+      if (record.velocity !== undefined) {
+        view.writeByte(8);
+        Vec2Delta.encodeInto(record.velocity, view);
+      }
+      if (record.mana !== undefined) {
+        view.writeByte(9);
+        PoolDelta.encodeInto(record.mana, view);
+      }
+      if (record.stamina !== undefined) {
+        view.writeByte(10);
+        PoolDelta.encodeInto(record.stamina, view);
+      }
+      if (record.level !== undefined) {
+        view.writeByte(11);
+        view.writeUint32(record.level);
+      }
+      if (record.xp !== undefined) {
+        view.writeByte(12);
+        view.writeUint32(record.xp);
+      }
+      if (record.faction !== undefined) {
+        view.writeByte(13);
+        view.writeUint32(record.faction);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): EntityDelta & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = EntityDelta.readFrom(view);
+      return EntityDelta(decoded);
+    },
+
+    readFrom(view: BebopView): EntityDelta {
+      const message: EntityDelta = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.id = view.readGuid();
+            break;
+
+          case 2:
+            message.root = view.readGuid();
+            break;
+
+          case 3:
+            {
+          const length0 = view.readUint32();
+          message.tags = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: Tags;
+            x0 = view.readUint32();
+            message.tags[i0] = x0;
           }
         }
-        if (record.parent !== undefined) {
-          view.writeByte(4);
-          view.writeGuid(record.parent);
+            break;
+
+          case 4:
+            message.parent = view.readGuid();
+            break;
+
+          case 5:
+            message.children = GuidArrayDelta.readFrom(view);
+            break;
+
+          case 6:
+            message.health = PoolDelta.readFrom(view);
+            break;
+
+          case 7:
+            message.position = Vec2Delta.readFrom(view);
+            break;
+
+          case 8:
+            message.velocity = Vec2Delta.readFrom(view);
+            break;
+
+          case 9:
+            message.mana = PoolDelta.readFrom(view);
+            break;
+
+          case 10:
+            message.stamina = PoolDelta.readFrom(view);
+            break;
+
+          case 11:
+            message.level = view.readUint32();
+            break;
+
+          case 12:
+            message.xp = view.readUint32();
+            break;
+
+          case 13:
+            message.faction = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
         }
-        if (record.children !== undefined) {
-          view.writeByte(5);
-          GuidArrayDelta.encodeInto(record.children, view);
-        }
-        if (record.health !== undefined) {
-          view.writeByte(6);
-          PoolDelta.encodeInto(record.health, view);
-        }
-        if (record.position !== undefined) {
-          view.writeByte(7);
-          Vec2Delta.encodeInto(record.position, view);
-        }
-        if (record.velocity !== undefined) {
-          view.writeByte(8);
-          Vec2Delta.encodeInto(record.velocity, view);
-        }
-        if (record.mana !== undefined) {
-          view.writeByte(9);
-          PoolDelta.encodeInto(record.mana, view);
-        }
-        if (record.stamina !== undefined) {
-          view.writeByte(10);
-          PoolDelta.encodeInto(record.stamina, view);
-        }
-        if (record.level !== undefined) {
-          view.writeByte(11);
-          view.writeUint32(record.level);
-        }
-        if (record.xp !== undefined) {
-          view.writeByte(12);
-          view.writeUint32(record.xp);
-        }
-        if (record.faction !== undefined) {
-          view.writeByte(13);
-          view.writeUint32(record.faction);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): EntityDelta & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = EntityDelta.readFrom(view);
-        return EntityDelta(decoded);
-      },
-
-      readFrom(view: BebopView): EntityDelta {
-        const message: EntityDelta = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.id = view.readGuid();
-              break;
-
-            case 2:
-              message.root = view.readGuid();
-              break;
-
-            case 3:
-              {
-                const length0 = view.readUint32();
-                message.tags = [];
-                for (let i0 = 0; i0 < length0; i0++) {
-                  let x0: Tags;
-                  x0 = view.readUint32();
-                  message.tags[i0] = x0;
-                }
-              }
-              break;
-
-            case 4:
-              message.parent = view.readGuid();
-              break;
-
-            case 5:
-              message.children = GuidArrayDelta.readFrom(view);
-              break;
-
-            case 6:
-              message.health = PoolDelta.readFrom(view);
-              break;
-
-            case 7:
-              message.position = Vec2Delta.readFrom(view);
-              break;
-
-            case 8:
-              message.velocity = Vec2Delta.readFrom(view);
-              break;
-
-            case 9:
-              message.mana = PoolDelta.readFrom(view);
-              break;
-
-            case 10:
-              message.stamina = PoolDelta.readFrom(view);
-              break;
-
-            case 11:
-              message.level = view.readUint32();
-              break;
-
-            case 12:
-              message.xp = view.readUint32();
-              break;
-
-            case 13:
-              message.faction = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+      }
     },
-  ),
-);
+  }
+));
+
 
 export enum MutationType {
+
   Insert = 1,
 
   Update = 2,
@@ -503,308 +542,306 @@ export enum MutationType {
   Delete = 3,
 }
 
+
 export interface Insert {
+
   readonly entity: Entity;
 }
 
-export const Insert = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Insert): Insert & BebopRecord => {
-      return Object.freeze({
-        ...data,
-        encode(): Uint8Array {
-          return Insert.encode(this);
-        },
-      });
+export const Insert = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Insert): Insert & BebopRecord => {
+    return Object.freeze({
+      ...data,
+      encode(): Uint8Array {
+        return Insert.encode(this);
+      }
+    });
+  },
+  // Static methods
+  {
+    encode(record: Insert): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Insert.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Insert): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Insert.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Insert, view: BebopView): void {
-        Entity.encodeInto(record.entity, view);
-      },
-
-      decode(buffer: Uint8Array): Insert & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Insert.readFrom(view);
-        return Insert(decoded);
-      },
-
-      readFrom(view: BebopView): Insert {
-        let field0: Entity;
-        field0 = Entity.readFrom(view);
-        return {
-          entity: field0,
-        };
-      },
+    encodeInto(record: Insert, view: BebopView): void {
+      Entity.encodeInto(record.entity, view);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): Insert & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Insert.readFrom(view);
+      return Insert(decoded);
+    },
+
+    readFrom(view: BebopView): Insert {
+      let field0: Entity;
+      field0 = Entity.readFrom(view);
+      return {
+        entity: field0,
+      };
+    },
+  }
+));
+
 
 export interface Update {
+
   readonly delta: EntityDelta;
 }
 
-export const Update = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Update): Update & BebopRecord => {
-      return Object.freeze({
-        ...data,
-        encode(): Uint8Array {
-          return Update.encode(this);
-        },
-      });
+export const Update = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Update): Update & BebopRecord => {
+    return Object.freeze({
+      ...data,
+      encode(): Uint8Array {
+        return Update.encode(this);
+      }
+    });
+  },
+  // Static methods
+  {
+    encode(record: Update): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Update.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Update): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Update.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Update, view: BebopView): void {
-        EntityDelta.encodeInto(record.delta, view);
-      },
-
-      decode(buffer: Uint8Array): Update & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Update.readFrom(view);
-        return Update(decoded);
-      },
-
-      readFrom(view: BebopView): Update {
-        let field0: EntityDelta;
-        field0 = EntityDelta.readFrom(view);
-        return {
-          delta: field0,
-        };
-      },
+    encodeInto(record: Update, view: BebopView): void {
+      EntityDelta.encodeInto(record.delta, view);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): Update & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Update.readFrom(view);
+      return Update(decoded);
+    },
+
+    readFrom(view: BebopView): Update {
+      let field0: EntityDelta;
+      field0 = EntityDelta.readFrom(view);
+      return {
+        delta: field0,
+      };
+    },
+  }
+));
+
 
 export interface Delete {
+
   readonly entity: Entity;
 }
 
-export const Delete = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Delete): Delete & BebopRecord => {
-      return Object.freeze({
-        ...data,
-        encode(): Uint8Array {
-          return Delete.encode(this);
-        },
-      });
+export const Delete = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Delete): Delete & BebopRecord => {
+    return Object.freeze({
+      ...data,
+      encode(): Uint8Array {
+        return Delete.encode(this);
+      }
+    });
+  },
+  // Static methods
+  {
+    encode(record: Delete): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Delete.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Delete): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Delete.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Delete, view: BebopView): void {
-        Entity.encodeInto(record.entity, view);
-      },
-
-      decode(buffer: Uint8Array): Delete & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Delete.readFrom(view);
-        return Delete(decoded);
-      },
-
-      readFrom(view: BebopView): Delete {
-        let field0: Entity;
-        field0 = Entity.readFrom(view);
-        return {
-          entity: field0,
-        };
-      },
+    encodeInto(record: Delete, view: BebopView): void {
+      Entity.encodeInto(record.entity, view);
     },
-  ),
-);
 
-export type MutationRecord =
-  | { tag: 1; value: Insert }
-  | { tag: 2; value: Update }
-  | { tag: 3; value: Delete };
+    decode(buffer: Uint8Array): Delete & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Delete.readFrom(view);
+      return Delete(decoded);
+    },
 
-export const MutationRecord = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: MutationRecord): MutationRecord & BebopRecord => {
+    readFrom(view: BebopView): Delete {
+      let field0: Entity;
+      field0 = Entity.readFrom(view);
       return {
-        ...data,
-        encode(): Uint8Array {
-          return MutationRecord.encode(this);
-        },
+        entity: field0,
       };
     },
-    // Static methods
-    {
-      fromInsert(value: Insert): MutationRecord & BebopRecord {
-        return MutationRecord({ tag: 1, value });
-      },
+  }
+));
 
-      fromUpdate(value: Update): MutationRecord & BebopRecord {
-        return MutationRecord({ tag: 2, value });
-      },
 
-      fromDelete(value: Delete): MutationRecord & BebopRecord {
-        return MutationRecord({ tag: 3, value });
-      },
+export type MutationRecord = { tag: 1, value: Insert } | { tag: 2, value: Update } | { tag: 3, value: Delete };
 
-      encode(record: MutationRecord): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        MutationRecord.encodeInto(record, view);
-        return view.toArray();
-      },
-
-      encodeInto(record: MutationRecord, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length + 1;
-        view.writeByte(record.tag);
-        switch (record.tag) {
-          case 1:
-            Insert.encodeInto(record.value, view);
-            break;
-          case 2:
-            Update.encodeInto(record.value, view);
-            break;
-          case 3:
-            Delete.encodeInto(record.value, view);
-            break;
-        }
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): MutationRecord & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = MutationRecord.readFrom(view);
-        return MutationRecord(decoded);
-      },
-
-      readFrom(view: BebopView): MutationRecord {
-        const length = view.readMessageLength();
-        const end = view.index + 1 + length;
-        const tag = view.readByte();
-        switch (tag) {
-          case 1:
-            return { tag: 1, value: Insert.readFrom(view) };
-          case 2:
-            return { tag: 2, value: Update.readFrom(view) };
-          case 3:
-            return { tag: 3, value: Delete.readFrom(view) };
-          default:
-            view.index = end;
-            throw new BebopRuntimeError(`Unknown union discriminator: ${tag}`);
-        }
-      },
+export const MutationRecord = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: MutationRecord): MutationRecord & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return MutationRecord.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    fromInsert(value: Insert): MutationRecord & BebopRecord {
+      return MutationRecord({ tag: 1, value });
     },
-  ),
-);
+
+    fromUpdate(value: Update): MutationRecord & BebopRecord {
+      return MutationRecord({ tag: 2, value });
+    },
+
+    fromDelete(value: Delete): MutationRecord & BebopRecord {
+      return MutationRecord({ tag: 3, value });
+    },
+
+    encode(record: MutationRecord): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      MutationRecord.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: MutationRecord, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length + 1;
+      view.writeByte(record.tag);
+      switch (record.tag) {
+        case 1:
+          Insert.encodeInto(record.value, view);
+          break;
+        case 2:
+          Update.encodeInto(record.value, view);
+          break;
+        case 3:
+          Delete.encodeInto(record.value, view);
+          break;
+      }
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): MutationRecord & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = MutationRecord.readFrom(view);
+      return MutationRecord(decoded);
+    },
+
+    readFrom(view: BebopView): MutationRecord {
+      const length = view.readMessageLength();
+      const end = view.index + 1 + length;
+      const tag = view.readByte();
+      switch (tag) {
+        case 1:
+          return { tag: 1, value: Insert.readFrom(view) };
+        case 2:
+          return { tag: 2, value: Update.readFrom(view) };
+        case 3:
+          return { tag: 3, value: Delete.readFrom(view) };
+        default:
+          view.index = end;
+          throw new BebopRuntimeError(`Unknown union discriminator: ${tag}`);
+      }
+    },
+  }
+));
+
 
 export interface MutationScope {
+
   mutations?: Map<string, MutationRecord>;
 }
 
-export const MutationScope = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: MutationScope): MutationScope & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return MutationScope.encode(this);
-        },
-      };
+export const MutationScope = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: MutationScope): MutationScope & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return MutationScope.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: MutationScope): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      MutationScope.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: MutationScope): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        MutationScope.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: MutationScope, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.mutations !== undefined) {
-          view.writeByte(1);
-          view.writeUint32(record.mutations.size);
-          for (const [k0, v0] of record.mutations) {
-            view.writeGuid(k0);
-            MutationRecord.encodeInto(v0, view);
+    encodeInto(record: MutationScope, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.mutations !== undefined) {
+        view.writeByte(1);
+        view.writeUint32(record.mutations.size);
+      for (const [k0, v0] of record.mutations) {
+        view.writeGuid(k0);
+        MutationRecord.encodeInto(v0, view);
+      }
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): MutationScope & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = MutationScope.readFrom(view);
+      return MutationScope(decoded);
+    },
+
+    readFrom(view: BebopView): MutationScope {
+      const message: MutationScope = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            {
+          const length0 = view.readUint32();
+          message.mutations = new Map();
+          for (let i0 = 0; i0 < length0; i0++) {
+            let k0: string;
+            let v0: MutationRecord;
+            k0 = view.readGuid();
+            v0 = MutationRecord.readFrom(view);
+            message.mutations.set(k0, v0);
           }
         }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
+            break;
 
-      decode(buffer: Uint8Array): MutationScope & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = MutationScope.readFrom(view);
-        return MutationScope(decoded);
-      },
-
-      readFrom(view: BebopView): MutationScope {
-        const message: MutationScope = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              {
-                const length0 = view.readUint32();
-                message.mutations = new Map();
-                for (let i0 = 0; i0 < length0; i0++) {
-                  let k0: string;
-                  let v0: MutationRecord;
-                  k0 = view.readGuid();
-                  v0 = MutationRecord.readFrom(view);
-                  message.mutations.set(k0, v0);
-                }
-              }
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
+          default:
+            view.index = end;
+            return message;
         }
-      },
+      }
     },
-  ),
-);
+  }
+));
+
 
 export interface Attack {
+
   source?: string;
 
   target?: string;
@@ -812,85 +849,85 @@ export interface Attack {
   damage?: number;
 }
 
-export const Attack = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Attack): Attack & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Attack.encode(this);
-        },
-      };
+export const Attack = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Attack): Attack & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Attack.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Attack): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Attack.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Attack): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Attack.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Attack, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.source !== undefined) {
-          view.writeByte(1);
-          view.writeGuid(record.source);
-        }
-        if (record.target !== undefined) {
-          view.writeByte(2);
-          view.writeGuid(record.target);
-        }
-        if (record.damage !== undefined) {
-          view.writeByte(3);
-          view.writeUint32(record.damage);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): Attack & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Attack.readFrom(view);
-        return Attack(decoded);
-      },
-
-      readFrom(view: BebopView): Attack {
-        const message: Attack = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.source = view.readGuid();
-              break;
-
-            case 2:
-              message.target = view.readGuid();
-              break;
-
-            case 3:
-              message.damage = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: Attack, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.source !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.source);
+      }
+      if (record.target !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.target);
+      }
+      if (record.damage !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.damage);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): Attack & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Attack.readFrom(view);
+      return Attack(decoded);
+    },
+
+    readFrom(view: BebopView): Attack {
+      const message: Attack = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.source = view.readGuid();
+            break;
+
+          case 2:
+            message.target = view.readGuid();
+            break;
+
+          case 3:
+            message.damage = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface TakeDamage {
+
   source?: string;
 
   target?: string;
@@ -898,85 +935,85 @@ export interface TakeDamage {
   damage?: number;
 }
 
-export const TakeDamage = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: TakeDamage): TakeDamage & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return TakeDamage.encode(this);
-        },
-      };
+export const TakeDamage = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: TakeDamage): TakeDamage & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return TakeDamage.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: TakeDamage): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      TakeDamage.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: TakeDamage): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        TakeDamage.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: TakeDamage, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.source !== undefined) {
-          view.writeByte(1);
-          view.writeGuid(record.source);
-        }
-        if (record.target !== undefined) {
-          view.writeByte(2);
-          view.writeGuid(record.target);
-        }
-        if (record.damage !== undefined) {
-          view.writeByte(3);
-          view.writeUint32(record.damage);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): TakeDamage & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = TakeDamage.readFrom(view);
-        return TakeDamage(decoded);
-      },
-
-      readFrom(view: BebopView): TakeDamage {
-        const message: TakeDamage = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.source = view.readGuid();
-              break;
-
-            case 2:
-              message.target = view.readGuid();
-              break;
-
-            case 3:
-              message.damage = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: TakeDamage, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.source !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.source);
+      }
+      if (record.target !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.target);
+      }
+      if (record.damage !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.damage);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): TakeDamage & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = TakeDamage.readFrom(view);
+      return TakeDamage(decoded);
+    },
+
+    readFrom(view: BebopView): TakeDamage {
+      const message: TakeDamage = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.source = view.readGuid();
+            break;
+
+          case 2:
+            message.target = view.readGuid();
+            break;
+
+          case 3:
+            message.damage = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface Heal {
+
   source?: string;
 
   target?: string;
@@ -984,85 +1021,85 @@ export interface Heal {
   amount?: number;
 }
 
-export const Heal = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Heal): Heal & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Heal.encode(this);
-        },
-      };
+export const Heal = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Heal): Heal & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Heal.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Heal): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Heal.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Heal): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Heal.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Heal, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.source !== undefined) {
-          view.writeByte(1);
-          view.writeGuid(record.source);
-        }
-        if (record.target !== undefined) {
-          view.writeByte(2);
-          view.writeGuid(record.target);
-        }
-        if (record.amount !== undefined) {
-          view.writeByte(3);
-          view.writeUint32(record.amount);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): Heal & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Heal.readFrom(view);
-        return Heal(decoded);
-      },
-
-      readFrom(view: BebopView): Heal {
-        const message: Heal = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.source = view.readGuid();
-              break;
-
-            case 2:
-              message.target = view.readGuid();
-              break;
-
-            case 3:
-              message.amount = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: Heal, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.source !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.source);
+      }
+      if (record.target !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.target);
+      }
+      if (record.amount !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.amount);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): Heal & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Heal.readFrom(view);
+      return Heal(decoded);
+    },
+
+    readFrom(view: BebopView): Heal {
+      const message: Heal = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.source = view.readGuid();
+            break;
+
+          case 2:
+            message.target = view.readGuid();
+            break;
+
+          case 3:
+            message.amount = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface AreaAttack {
+
   source?: string;
 
   target?: string;
@@ -1072,262 +1109,257 @@ export interface AreaAttack {
   radius?: number;
 }
 
-export const AreaAttack = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: AreaAttack): AreaAttack & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return AreaAttack.encode(this);
-        },
-      };
+export const AreaAttack = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: AreaAttack): AreaAttack & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return AreaAttack.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: AreaAttack): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      AreaAttack.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: AreaAttack): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        AreaAttack.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: AreaAttack, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.source !== undefined) {
-          view.writeByte(1);
-          view.writeGuid(record.source);
-        }
-        if (record.target !== undefined) {
-          view.writeByte(2);
-          view.writeGuid(record.target);
-        }
-        if (record.damage !== undefined) {
-          view.writeByte(3);
-          view.writeUint32(record.damage);
-        }
-        if (record.radius !== undefined) {
-          view.writeByte(4);
-          view.writeUint32(record.radius);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): AreaAttack & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = AreaAttack.readFrom(view);
-        return AreaAttack(decoded);
-      },
-
-      readFrom(view: BebopView): AreaAttack {
-        const message: AreaAttack = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.source = view.readGuid();
-              break;
-
-            case 2:
-              message.target = view.readGuid();
-              break;
-
-            case 3:
-              message.damage = view.readUint32();
-              break;
-
-            case 4:
-              message.radius = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: AreaAttack, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.source !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.source);
+      }
+      if (record.target !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.target);
+      }
+      if (record.damage !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.damage);
+      }
+      if (record.radius !== undefined) {
+        view.writeByte(4);
+        view.writeUint32(record.radius);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
 
-export type Actions =
-  | { tag: 1; value: Attack }
-  | { tag: 2; value: TakeDamage }
-  | { tag: 3; value: Heal }
-  | { tag: 4; value: AreaAttack };
-
-export const Actions = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Actions): Actions & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Actions.encode(this);
-        },
-      };
+    decode(buffer: Uint8Array): AreaAttack & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = AreaAttack.readFrom(view);
+      return AreaAttack(decoded);
     },
-    // Static methods
-    {
-      fromAttack(value: Attack): Actions & BebopRecord {
-        return Actions({ tag: 1, value });
-      },
 
-      fromTakeDamage(value: TakeDamage): Actions & BebopRecord {
-        return Actions({ tag: 2, value });
-      },
+    readFrom(view: BebopView): AreaAttack {
+      const message: AreaAttack = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
 
-      fromHeal(value: Heal): Actions & BebopRecord {
-        return Actions({ tag: 3, value });
-      },
-
-      fromAreaAttack(value: AreaAttack): Actions & BebopRecord {
-        return Actions({ tag: 4, value });
-      },
-
-      encode(record: Actions): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Actions.encodeInto(record, view);
-        return view.toArray();
-      },
-
-      encodeInto(record: Actions, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length + 1;
-        view.writeByte(record.tag);
-        switch (record.tag) {
           case 1:
-            Attack.encodeInto(record.value, view);
+            message.source = view.readGuid();
             break;
-          case 2:
-            TakeDamage.encodeInto(record.value, view);
-            break;
-          case 3:
-            Heal.encodeInto(record.value, view);
-            break;
-          case 4:
-            AreaAttack.encodeInto(record.value, view);
-            break;
-        }
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
 
-      decode(buffer: Uint8Array): Actions & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Actions.readFrom(view);
-        return Actions(decoded);
-      },
-
-      readFrom(view: BebopView): Actions {
-        const length = view.readMessageLength();
-        const end = view.index + 1 + length;
-        const tag = view.readByte();
-        switch (tag) {
-          case 1:
-            return { tag: 1, value: Attack.readFrom(view) };
           case 2:
-            return { tag: 2, value: TakeDamage.readFrom(view) };
+            message.target = view.readGuid();
+            break;
+
           case 3:
-            return { tag: 3, value: Heal.readFrom(view) };
+            message.damage = view.readUint32();
+            break;
+
           case 4:
-            return { tag: 4, value: AreaAttack.readFrom(view) };
+            message.radius = view.readUint32();
+            break;
+
           default:
             view.index = end;
-            throw new BebopRuntimeError(`Unknown union discriminator: ${tag}`);
+            return message;
         }
-      },
+      }
     },
-  ),
-);
+  }
+));
+
+
+export type Actions = { tag: 1, value: Attack } | { tag: 2, value: TakeDamage } | { tag: 3, value: Heal } | { tag: 4, value: AreaAttack };
+
+export const Actions = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Actions): Actions & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Actions.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    fromAttack(value: Attack): Actions & BebopRecord {
+      return Actions({ tag: 1, value });
+    },
+
+    fromTakeDamage(value: TakeDamage): Actions & BebopRecord {
+      return Actions({ tag: 2, value });
+    },
+
+    fromHeal(value: Heal): Actions & BebopRecord {
+      return Actions({ tag: 3, value });
+    },
+
+    fromAreaAttack(value: AreaAttack): Actions & BebopRecord {
+      return Actions({ tag: 4, value });
+    },
+
+    encode(record: Actions): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Actions.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: Actions, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length + 1;
+      view.writeByte(record.tag);
+      switch (record.tag) {
+        case 1:
+          Attack.encodeInto(record.value, view);
+          break;
+        case 2:
+          TakeDamage.encodeInto(record.value, view);
+          break;
+        case 3:
+          Heal.encodeInto(record.value, view);
+          break;
+        case 4:
+          AreaAttack.encodeInto(record.value, view);
+          break;
+      }
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): Actions & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Actions.readFrom(view);
+      return Actions(decoded);
+    },
+
+    readFrom(view: BebopView): Actions {
+      const length = view.readMessageLength();
+      const end = view.index + 1 + length;
+      const tag = view.readByte();
+      switch (tag) {
+        case 1:
+          return { tag: 1, value: Attack.readFrom(view) };
+        case 2:
+          return { tag: 2, value: TakeDamage.readFrom(view) };
+        case 3:
+          return { tag: 3, value: Heal.readFrom(view) };
+        case 4:
+          return { tag: 4, value: AreaAttack.readFrom(view) };
+        default:
+          view.index = end;
+          throw new BebopRuntimeError(`Unknown union discriminator: ${tag}`);
+      }
+    },
+  }
+));
+
 
 export interface TickRequest {
+
   steps?: number;
 
   dtMs?: number;
 }
 
-export const TickRequest = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: TickRequest): TickRequest & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return TickRequest.encode(this);
-        },
-      };
+export const TickRequest = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: TickRequest): TickRequest & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return TickRequest.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: TickRequest): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      TickRequest.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: TickRequest): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        TickRequest.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: TickRequest, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.steps !== undefined) {
-          view.writeByte(1);
-          view.writeUint32(record.steps);
-        }
-        if (record.dtMs !== undefined) {
-          view.writeByte(2);
-          view.writeUint32(record.dtMs);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): TickRequest & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = TickRequest.readFrom(view);
-        return TickRequest(decoded);
-      },
-
-      readFrom(view: BebopView): TickRequest {
-        const message: TickRequest = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.steps = view.readUint32();
-              break;
-
-            case 2:
-              message.dtMs = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: TickRequest, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.steps !== undefined) {
+        view.writeByte(1);
+        view.writeUint32(record.steps);
+      }
+      if (record.dtMs !== undefined) {
+        view.writeByte(2);
+        view.writeUint32(record.dtMs);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): TickRequest & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = TickRequest.readFrom(view);
+      return TickRequest(decoded);
+    },
+
+    readFrom(view: BebopView): TickRequest {
+      const message: TickRequest = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.steps = view.readUint32();
+            break;
+
+          case 2:
+            message.dtMs = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface TickResult {
+
   frames?: number;
 
   entities?: number;
@@ -1335,161 +1367,162 @@ export interface TickResult {
   micros?: number;
 }
 
-export const TickResult = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: TickResult): TickResult & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return TickResult.encode(this);
-        },
-      };
+export const TickResult = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: TickResult): TickResult & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return TickResult.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: TickResult): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      TickResult.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: TickResult): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        TickResult.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: TickResult, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.frames !== undefined) {
-          view.writeByte(1);
-          view.writeUint32(record.frames);
-        }
-        if (record.entities !== undefined) {
-          view.writeByte(2);
-          view.writeUint32(record.entities);
-        }
-        if (record.micros !== undefined) {
-          view.writeByte(3);
-          view.writeUint32(record.micros);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): TickResult & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = TickResult.readFrom(view);
-        return TickResult(decoded);
-      },
-
-      readFrom(view: BebopView): TickResult {
-        const message: TickResult = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.frames = view.readUint32();
-              break;
-
-            case 2:
-              message.entities = view.readUint32();
-              break;
-
-            case 3:
-              message.micros = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: TickResult, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.frames !== undefined) {
+        view.writeByte(1);
+        view.writeUint32(record.frames);
+      }
+      if (record.entities !== undefined) {
+        view.writeByte(2);
+        view.writeUint32(record.entities);
+      }
+      if (record.micros !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.micros);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): TickResult & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = TickResult.readFrom(view);
+      return TickResult(decoded);
+    },
+
+    readFrom(view: BebopView): TickResult {
+      const message: TickResult = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.frames = view.readUint32();
+            break;
+
+          case 2:
+            message.entities = view.readUint32();
+            break;
+
+          case 3:
+            message.micros = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
 
 export interface Vec2 {
+
   x?: number;
 
   y?: number;
 }
 
-export const Vec2 = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Vec2): Vec2 & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Vec2.encode(this);
-        },
-      };
+export const Vec2 = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Vec2): Vec2 & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Vec2.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Vec2): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Vec2.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Vec2): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Vec2.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Vec2, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.x !== undefined) {
-          view.writeByte(1);
-          view.writeFloat32(record.x);
-        }
-        if (record.y !== undefined) {
-          view.writeByte(2);
-          view.writeFloat32(record.y);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): Vec2 & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Vec2.readFrom(view);
-        return Vec2(decoded);
-      },
-
-      readFrom(view: BebopView): Vec2 {
-        const message: Vec2 = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.x = view.readFloat32();
-              break;
-
-            case 2:
-              message.y = view.readFloat32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: Vec2, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.x !== undefined) {
+        view.writeByte(1);
+        view.writeFloat32(record.x);
+      }
+      if (record.y !== undefined) {
+        view.writeByte(2);
+        view.writeFloat32(record.y);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): Vec2 & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Vec2.readFrom(view);
+      return Vec2(decoded);
+    },
+
+    readFrom(view: BebopView): Vec2 {
+      const message: Vec2 = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.x = view.readFloat32();
+            break;
+
+          case 2:
+            message.y = view.readFloat32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface Entity {
+
   id?: string;
 
   root?: string;
@@ -1517,259 +1550,259 @@ export interface Entity {
   faction?: number;
 }
 
-export const Entity = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Entity): Entity & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Entity.encode(this);
-        },
-      };
+export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Entity): Entity & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Entity.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Entity): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Entity.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Entity): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Entity.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Entity, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.id !== undefined) {
-          view.writeByte(1);
-          view.writeGuid(record.id);
+    encodeInto(record: Entity, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.id !== undefined) {
+        view.writeByte(1);
+        view.writeGuid(record.id);
+      }
+      if (record.root !== undefined) {
+        view.writeByte(2);
+        view.writeGuid(record.root);
+      }
+      if (record.tags !== undefined) {
+        view.writeByte(3);
+        {
+        const length0 = record.tags.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeUint32(record.tags[i0]);
         }
-        if (record.root !== undefined) {
-          view.writeByte(2);
-          view.writeGuid(record.root);
+      }
+      }
+      if (record.parent !== undefined) {
+        view.writeByte(4);
+        view.writeGuid(record.parent);
+      }
+      if (record.children !== undefined) {
+        view.writeByte(5);
+        {
+        const length0 = record.children.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeGuid(record.children[i0]);
         }
-        if (record.tags !== undefined) {
-          view.writeByte(3);
-          {
-            const length0 = record.tags.length;
-            view.writeUint32(length0);
-            for (let i0 = 0; i0 < length0; i0++) {
-              view.writeUint32(record.tags[i0]);
-            }
-          }
-        }
-        if (record.parent !== undefined) {
-          view.writeByte(4);
-          view.writeGuid(record.parent);
-        }
-        if (record.children !== undefined) {
-          view.writeByte(5);
-          {
-            const length0 = record.children.length;
-            view.writeUint32(length0);
-            for (let i0 = 0; i0 < length0; i0++) {
-              view.writeGuid(record.children[i0]);
-            }
-          }
-        }
-        if (record.health !== undefined) {
-          view.writeByte(6);
-          Pool.encodeInto(record.health, view);
-        }
-        if (record.position !== undefined) {
-          view.writeByte(7);
-          Vec2.encodeInto(record.position, view);
-        }
-        if (record.velocity !== undefined) {
-          view.writeByte(8);
-          Vec2.encodeInto(record.velocity, view);
-        }
-        if (record.mana !== undefined) {
-          view.writeByte(9);
-          Pool.encodeInto(record.mana, view);
-        }
-        if (record.stamina !== undefined) {
-          view.writeByte(10);
-          Pool.encodeInto(record.stamina, view);
-        }
-        if (record.level !== undefined) {
-          view.writeByte(11);
-          view.writeUint32(record.level);
-        }
-        if (record.xp !== undefined) {
-          view.writeByte(12);
-          view.writeUint32(record.xp);
-        }
-        if (record.faction !== undefined) {
-          view.writeByte(13);
-          view.writeUint32(record.faction);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): Entity & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Entity.readFrom(view);
-        return Entity(decoded);
-      },
-
-      readFrom(view: BebopView): Entity {
-        const message: Entity = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.id = view.readGuid();
-              break;
-
-            case 2:
-              message.root = view.readGuid();
-              break;
-
-            case 3:
-              {
-                const length0 = view.readUint32();
-                message.tags = [];
-                for (let i0 = 0; i0 < length0; i0++) {
-                  let x0: Tags;
-                  x0 = view.readUint32();
-                  message.tags[i0] = x0;
-                }
-              }
-              break;
-
-            case 4:
-              message.parent = view.readGuid();
-              break;
-
-            case 5:
-              {
-                const length0 = view.readUint32();
-                message.children = [];
-                for (let i0 = 0; i0 < length0; i0++) {
-                  let x0: string;
-                  x0 = view.readGuid();
-                  message.children[i0] = x0;
-                }
-              }
-              break;
-
-            case 6:
-              message.health = Pool.readFrom(view);
-              break;
-
-            case 7:
-              message.position = Vec2.readFrom(view);
-              break;
-
-            case 8:
-              message.velocity = Vec2.readFrom(view);
-              break;
-
-            case 9:
-              message.mana = Pool.readFrom(view);
-              break;
-
-            case 10:
-              message.stamina = Pool.readFrom(view);
-              break;
-
-            case 11:
-              message.level = view.readUint32();
-              break;
-
-            case 12:
-              message.xp = view.readUint32();
-              break;
-
-            case 13:
-              message.faction = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+      }
+      }
+      if (record.health !== undefined) {
+        view.writeByte(6);
+        Pool.encodeInto(record.health, view);
+      }
+      if (record.position !== undefined) {
+        view.writeByte(7);
+        Vec2.encodeInto(record.position, view);
+      }
+      if (record.velocity !== undefined) {
+        view.writeByte(8);
+        Vec2.encodeInto(record.velocity, view);
+      }
+      if (record.mana !== undefined) {
+        view.writeByte(9);
+        Pool.encodeInto(record.mana, view);
+      }
+      if (record.stamina !== undefined) {
+        view.writeByte(10);
+        Pool.encodeInto(record.stamina, view);
+      }
+      if (record.level !== undefined) {
+        view.writeByte(11);
+        view.writeUint32(record.level);
+      }
+      if (record.xp !== undefined) {
+        view.writeByte(12);
+        view.writeUint32(record.xp);
+      }
+      if (record.faction !== undefined) {
+        view.writeByte(13);
+        view.writeUint32(record.faction);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): Entity & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Entity.readFrom(view);
+      return Entity(decoded);
+    },
+
+    readFrom(view: BebopView): Entity {
+      const message: Entity = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.id = view.readGuid();
+            break;
+
+          case 2:
+            message.root = view.readGuid();
+            break;
+
+          case 3:
+            {
+          const length0 = view.readUint32();
+          message.tags = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: Tags;
+            x0 = view.readUint32();
+            message.tags[i0] = x0;
+          }
+        }
+            break;
+
+          case 4:
+            message.parent = view.readGuid();
+            break;
+
+          case 5:
+            {
+          const length0 = view.readUint32();
+          message.children = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: string;
+            x0 = view.readGuid();
+            message.children[i0] = x0;
+          }
+        }
+            break;
+
+          case 6:
+            message.health = Pool.readFrom(view);
+            break;
+
+          case 7:
+            message.position = Vec2.readFrom(view);
+            break;
+
+          case 8:
+            message.velocity = Vec2.readFrom(view);
+            break;
+
+          case 9:
+            message.mana = Pool.readFrom(view);
+            break;
+
+          case 10:
+            message.stamina = Pool.readFrom(view);
+            break;
+
+          case 11:
+            message.level = view.readUint32();
+            break;
+
+          case 12:
+            message.xp = view.readUint32();
+            break;
+
+          case 13:
+            message.faction = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface State {
+
   ns?: string;
 }
 
-export const State = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: State): State & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return State.encode(this);
-        },
-      };
+export const State = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: State): State & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return State.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: State): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      State.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: State): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        State.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: State, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.ns !== undefined) {
-          view.writeByte(1);
-          view.writeString(record.ns);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): State & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = State.readFrom(view);
-        return State(decoded);
-      },
-
-      readFrom(view: BebopView): State {
-        const message: State = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.ns = view.readString();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: State, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.ns !== undefined) {
+        view.writeByte(1);
+        view.writeString(record.ns);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): State & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = State.readFrom(view);
+      return State(decoded);
+    },
+
+    readFrom(view: BebopView): State {
+      const message: State = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.ns = view.readString();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export enum Tags {
+
   Human = 1,
 
   PlayerControlled = 2,
@@ -1787,7 +1820,9 @@ export enum Tags {
   Stunned = 8,
 }
 
+
 export interface Pool {
+
   points?: number;
 
   min?: number;
@@ -1799,101 +1834,101 @@ export interface Pool {
   interval?: number;
 }
 
-export const Pool = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: Pool): Pool & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return Pool.encode(this);
-        },
-      };
+export const Pool = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Pool): Pool & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Pool.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Pool): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Pool.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: Pool): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        Pool.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: Pool, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.points !== undefined) {
-          view.writeByte(1);
-          view.writeUint32(record.points);
-        }
-        if (record.min !== undefined) {
-          view.writeByte(2);
-          view.writeUint32(record.min);
-        }
-        if (record.max !== undefined) {
-          view.writeByte(3);
-          view.writeUint32(record.max);
-        }
-        if (record.rate !== undefined) {
-          view.writeByte(4);
-          view.writeInt32(record.rate);
-        }
-        if (record.interval !== undefined) {
-          view.writeByte(5);
-          view.writeUint32(record.interval);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): Pool & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = Pool.readFrom(view);
-        return Pool(decoded);
-      },
-
-      readFrom(view: BebopView): Pool {
-        const message: Pool = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.points = view.readUint32();
-              break;
-
-            case 2:
-              message.min = view.readUint32();
-              break;
-
-            case 3:
-              message.max = view.readUint32();
-              break;
-
-            case 4:
-              message.rate = view.readInt32();
-              break;
-
-            case 5:
-              message.interval = view.readUint32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: Pool, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.points !== undefined) {
+        view.writeByte(1);
+        view.writeUint32(record.points);
+      }
+      if (record.min !== undefined) {
+        view.writeByte(2);
+        view.writeUint32(record.min);
+      }
+      if (record.max !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.max);
+      }
+      if (record.rate !== undefined) {
+        view.writeByte(4);
+        view.writeInt32(record.rate);
+      }
+      if (record.interval !== undefined) {
+        view.writeByte(5);
+        view.writeUint32(record.interval);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): Pool & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Pool.readFrom(view);
+      return Pool(decoded);
+    },
+
+    readFrom(view: BebopView): Pool {
+      const message: Pool = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.points = view.readUint32();
+            break;
+
+          case 2:
+            message.min = view.readUint32();
+            break;
+
+          case 3:
+            message.max = view.readUint32();
+            break;
+
+          case 4:
+            message.rate = view.readInt32();
+            break;
+
+          case 5:
+            message.interval = view.readUint32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
 
 export interface PoolDelta {
+
   points?: number;
 
   min?: number;
@@ -1905,116 +1940,108 @@ export interface PoolDelta {
   interval?: number;
 }
 
-export const PoolDelta = /*#__PURE__*/ Object.freeze(
-  /*#__PURE__*/ Object.assign(
-    // Factory function
-    (data: PoolDelta): PoolDelta & BebopRecord => {
-      return {
-        ...data,
-        encode(): Uint8Array {
-          return PoolDelta.encode(this);
-        },
-      };
+export const PoolDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: PoolDelta): PoolDelta & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return PoolDelta.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: PoolDelta): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      PoolDelta.encodeInto(record, view);
+      return view.toArray();
     },
-    // Static methods
-    {
-      encode(record: PoolDelta): Uint8Array {
-        const view = BebopView.getInstance();
-        view.startWriting();
-        PoolDelta.encodeInto(record, view);
-        return view.toArray();
-      },
 
-      encodeInto(record: PoolDelta, view: BebopView): void {
-        const pos = view.reserveMessageLength();
-        const start = view.length;
-        if (record.points !== undefined) {
-          view.writeByte(1);
-          view.writeInt32(record.points);
-        }
-        if (record.min !== undefined) {
-          view.writeByte(2);
-          view.writeInt32(record.min);
-        }
-        if (record.max !== undefined) {
-          view.writeByte(3);
-          view.writeInt32(record.max);
-        }
-        if (record.rate !== undefined) {
-          view.writeByte(4);
-          view.writeInt32(record.rate);
-        }
-        if (record.interval !== undefined) {
-          view.writeByte(5);
-          view.writeInt32(record.interval);
-        }
-        view.writeByte(0);
-        const end = view.length;
-        view.fillMessageLength(pos, end - start);
-      },
-
-      decode(buffer: Uint8Array): PoolDelta & BebopRecord {
-        const view = BebopView.getInstance();
-        view.startReading(buffer);
-        const decoded = PoolDelta.readFrom(view);
-        return PoolDelta(decoded);
-      },
-
-      readFrom(view: BebopView): PoolDelta {
-        const message: PoolDelta = {};
-        const length = view.readMessageLength();
-        const end = view.index + length;
-        while (true) {
-          switch (view.readByte()) {
-            case 0:
-              return message;
-
-            case 1:
-              message.points = view.readInt32();
-              break;
-
-            case 2:
-              message.min = view.readInt32();
-              break;
-
-            case 3:
-              message.max = view.readInt32();
-              break;
-
-            case 4:
-              message.rate = view.readInt32();
-              break;
-
-            case 5:
-              message.interval = view.readInt32();
-              break;
-
-            default:
-              view.index = end;
-              return message;
-          }
-        }
-      },
+    encodeInto(record: PoolDelta, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.points !== undefined) {
+        view.writeByte(1);
+        view.writeInt32(record.points);
+      }
+      if (record.min !== undefined) {
+        view.writeByte(2);
+        view.writeInt32(record.min);
+      }
+      if (record.max !== undefined) {
+        view.writeByte(3);
+        view.writeInt32(record.max);
+      }
+      if (record.rate !== undefined) {
+        view.writeByte(4);
+        view.writeInt32(record.rate);
+      }
+      if (record.interval !== undefined) {
+        view.writeByte(5);
+        view.writeInt32(record.interval);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
     },
-  ),
-);
+
+    decode(buffer: Uint8Array): PoolDelta & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = PoolDelta.readFrom(view);
+      return PoolDelta(decoded);
+    },
+
+    readFrom(view: BebopView): PoolDelta {
+      const message: PoolDelta = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.points = view.readInt32();
+            break;
+
+          case 2:
+            message.min = view.readInt32();
+            break;
+
+          case 3:
+            message.max = view.readInt32();
+            break;
+
+          case 4:
+            message.rate = view.readInt32();
+            break;
+
+          case 5:
+            message.interval = view.readInt32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
 
 export abstract class BaseRpcService extends BaseService {
-  public static readonly serviceName = "RpcService";
+  public static readonly serviceName = 'RpcService';
   public abstract spawn(record: Entity, context: ServerContext): Promise<Entity>;
   public abstract act(record: Actions, context: ServerContext): Promise<Actions>;
   public abstract tick(record: TickRequest, context: ServerContext): Promise<TickResult>;
-  public abstract observe(
-    record: MutationScope,
-    context: ServerContext,
-  ): AsyncGenerator<MutationScope, void, undefined>;
+  public abstract observe(record: MutationScope, context: ServerContext): AsyncGenerator<MutationScope, void, undefined>;
 }
 
 export class TempoServiceRegistry extends ServiceRegistry {
-  private static readonly staticServiceInstances: Map<string, BaseService> = new Map<
-    string,
-    BaseService
-  >();
+  private static readonly staticServiceInstances: Map<string, BaseService> = new Map<string, BaseService>();
   public static register(serviceName: string) {
     return (constructor: Function) => {
       const service = Reflect.construct(constructor, [undefined]);
@@ -2022,14 +2049,12 @@ export class TempoServiceRegistry extends ServiceRegistry {
         throw new BebopRuntimeError(`Duplicate service registered: ${serviceName}`);
       }
       TempoServiceRegistry.staticServiceInstances.set(serviceName, service);
-    };
+    }
   }
   public static tryGetService(serviceName: string): BaseService {
     const service = TempoServiceRegistry.staticServiceInstances.get(serviceName);
     if (service === undefined) {
-      throw new BebopRuntimeError(
-        `Unable to retreive service '${serviceName}' - it is not registered.`,
-      );
+      throw new BebopRuntimeError(`Unable to retreive service '${serviceName}' - it is not registered.`);
     }
     return service;
   }
@@ -2037,24 +2062,20 @@ export class TempoServiceRegistry extends ServiceRegistry {
   public init(): void {
     let service: BaseService;
     let serviceName: string;
-    serviceName = "RpcService";
+    serviceName = 'RpcService';
     service = TempoServiceRegistry.tryGetService(serviceName);
     if (!(service instanceof BaseRpcService)) {
-      throw new BebopRuntimeError(
-        `No service named '${serviceName}'was registered with the TempoServiceRegistry`,
-      );
+      throw new BebopRuntimeError(`No service named '${serviceName}'was registered with the TempoServiceRegistry`);
     }
     service.setLogger(this.logger.clone(serviceName));
     TempoServiceRegistry.staticServiceInstances.delete(serviceName);
     this.serviceInstances.push(service);
     if (this.methods.has(2323046974)) {
       const conflictService = this.methods.get(2323046974)!;
-      throw new BebopRuntimeError(
-        `RpcService.spawn collides with ${conflictService.service}.${conflictService.name}`,
-      );
+      throw new BebopRuntimeError(`RpcService.spawn collides with ${conflictService.service}.${conflictService.name}`)
     }
     this.methods.set(2323046974, {
-      name: "spawn",
+      name: 'spawn',
       service: serviceName,
       invoke: service.spawn,
       serialize: Entity.encode,
@@ -2063,12 +2084,10 @@ export class TempoServiceRegistry extends ServiceRegistry {
     } as BebopMethod<Entity, Entity>);
     if (this.methods.has(3545698096)) {
       const conflictService = this.methods.get(3545698096)!;
-      throw new BebopRuntimeError(
-        `RpcService.act collides with ${conflictService.service}.${conflictService.name}`,
-      );
+      throw new BebopRuntimeError(`RpcService.act collides with ${conflictService.service}.${conflictService.name}`)
     }
     this.methods.set(3545698096, {
-      name: "act",
+      name: 'act',
       service: serviceName,
       invoke: service.act,
       serialize: Actions.encode,
@@ -2077,12 +2096,10 @@ export class TempoServiceRegistry extends ServiceRegistry {
     } as BebopMethod<Actions, Actions>);
     if (this.methods.has(2460418506)) {
       const conflictService = this.methods.get(2460418506)!;
-      throw new BebopRuntimeError(
-        `RpcService.tick collides with ${conflictService.service}.${conflictService.name}`,
-      );
+      throw new BebopRuntimeError(`RpcService.tick collides with ${conflictService.service}.${conflictService.name}`)
     }
     this.methods.set(2460418506, {
-      name: "tick",
+      name: 'tick',
       service: serviceName,
       invoke: service.tick,
       serialize: TickResult.encode,
@@ -2091,12 +2108,10 @@ export class TempoServiceRegistry extends ServiceRegistry {
     } as BebopMethod<TickRequest, TickResult>);
     if (this.methods.has(470883798)) {
       const conflictService = this.methods.get(470883798)!;
-      throw new BebopRuntimeError(
-        `RpcService.observe collides with ${conflictService.service}.${conflictService.name}`,
-      );
+      throw new BebopRuntimeError(`RpcService.observe collides with ${conflictService.service}.${conflictService.name}`)
     }
     this.methods.set(470883798, {
-      name: "observe",
+      name: 'observe',
       service: serviceName,
       invoke: service.observe,
       serialize: MutationScope.encode,
@@ -2111,6 +2126,7 @@ export class TempoServiceRegistry extends ServiceRegistry {
 }
 
 export interface IRpcClient {
+
   spawn(request: Entity): Promise<Entity>;
   spawn(request: Entity, metadata: Metadata): Promise<Entity>;
 
@@ -2121,93 +2137,65 @@ export interface IRpcClient {
   tick(request: TickRequest, metadata: Metadata): Promise<TickResult>;
 
   observe(request: MutationScope): Promise<AsyncGenerator<MutationScope, void, undefined>>;
-  observe(
-    request: MutationScope,
-    metadata: Metadata,
-  ): Promise<AsyncGenerator<MutationScope, void, undefined>>;
+  observe(request: MutationScope, metadata: Metadata): Promise<AsyncGenerator<MutationScope, void, undefined>>;
 }
+
 
 export class RpcClient extends BaseClient implements IRpcClient {
   private static readonly spawnMethodInfo: MethodInfo<Entity, Entity> = {
-    name: "spawn",
-    service: "RpcService",
+    name: 'spawn',
+    service: 'RpcService',
     id: 2323046974,
     serialize: Entity.encode,
     deserialize: Entity.decode,
     type: MethodType.Unary,
-  };
+  }
 
   async spawn(request: Entity): Promise<Entity>;
   async spawn(request: Entity, options: CallOptions): Promise<Entity>;
   async spawn(request: Entity, options?: CallOptions): Promise<Entity> {
-    return await this.channel.startUnary(
-      request,
-      this.getContext(),
-      RpcClient.spawnMethodInfo,
-      options,
-    );
+    return await this.channel.startUnary(request, this.getContext(), RpcClient.spawnMethodInfo, options);
   }
   private static readonly actMethodInfo: MethodInfo<Actions, Actions> = {
-    name: "act",
-    service: "RpcService",
+    name: 'act',
+    service: 'RpcService',
     id: 3545698096,
     serialize: Actions.encode,
     deserialize: Actions.decode,
     type: MethodType.Unary,
-  };
+  }
 
   async act(request: Actions): Promise<Actions>;
   async act(request: Actions, options: CallOptions): Promise<Actions>;
   async act(request: Actions, options?: CallOptions): Promise<Actions> {
-    return await this.channel.startUnary(
-      request,
-      this.getContext(),
-      RpcClient.actMethodInfo,
-      options,
-    );
+    return await this.channel.startUnary(request, this.getContext(), RpcClient.actMethodInfo, options);
   }
   private static readonly tickMethodInfo: MethodInfo<TickRequest, TickResult> = {
-    name: "tick",
-    service: "RpcService",
+    name: 'tick',
+    service: 'RpcService',
     id: 2460418506,
     serialize: TickRequest.encode,
     deserialize: TickResult.decode,
     type: MethodType.Unary,
-  };
+  }
 
   async tick(request: TickRequest): Promise<TickResult>;
   async tick(request: TickRequest, options: CallOptions): Promise<TickResult>;
   async tick(request: TickRequest, options?: CallOptions): Promise<TickResult> {
-    return await this.channel.startUnary(
-      request,
-      this.getContext(),
-      RpcClient.tickMethodInfo,
-      options,
-    );
+    return await this.channel.startUnary(request, this.getContext(), RpcClient.tickMethodInfo, options);
   }
   private static readonly observeMethodInfo: MethodInfo<MutationScope, MutationScope> = {
-    name: "observe",
-    service: "RpcService",
+    name: 'observe',
+    service: 'RpcService',
     id: 470883798,
     serialize: MutationScope.encode,
     deserialize: MutationScope.decode,
     type: MethodType.ServerStream,
-  };
+  }
 
   async observe(request: MutationScope): Promise<AsyncGenerator<MutationScope, void, undefined>>;
-  async observe(
-    request: MutationScope,
-    options: CallOptions,
-  ): Promise<AsyncGenerator<MutationScope, void, undefined>>;
-  async observe(
-    request: MutationScope,
-    options?: CallOptions,
-  ): Promise<AsyncGenerator<MutationScope, void, undefined>> {
-    return await this.channel.startServerStream(
-      request,
-      this.getContext(),
-      RpcClient.observeMethodInfo,
-      options,
-    );
+  async observe(request: MutationScope, options: CallOptions): Promise<AsyncGenerator<MutationScope, void, undefined>>;
+  async observe(request: MutationScope, options?: CallOptions): Promise<AsyncGenerator<MutationScope, void, undefined>> {
+    return await this.channel.startServerStream(request, this.getContext(), RpcClient.observeMethodInfo, options);
   }
 }

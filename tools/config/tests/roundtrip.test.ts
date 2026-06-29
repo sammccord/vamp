@@ -41,6 +41,44 @@ export function applyArrayDelta<T>(base: T[], d?: ArrayDelta<T>): T[];
 export function applyPoolDelta<T>(base: T, delta: Record<string, number>): T;
 export function accumulateArrayDelta<T>(to: ArrayDelta<T> | undefined, from: ArrayDelta<T>): ArrayDelta<T>;
 export function accumulatePoolDelta(to: Record<string, number> | undefined, from: Record<string, number>): Record<string, number>;
+
+export type Query = { __query: true };
+export type QueryBuilder = { __builder: true };
+export type EntitySystem<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown> = {
+  type: 0;
+  query: Query;
+  execute(entities: Array<string>, world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, ...args: UpdateArguments): void;
+};
+export type ArchetypeSystem<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown> = {
+  type: 1;
+  query: Query;
+  execute(archetypes: Set<unknown>, world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, ...args: UpdateArguments): void;
+};
+export type Behavior<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown> = {
+  type: 4;
+  query: Query;
+  tag: number;
+  handler: (world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, entity: E, event: unknown) => void | Promise<void>;
+  priority: number | undefined;
+};
+export type System<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown> =
+  | EntitySystem<State, UpdateArguments, Actions, Tags, E, D>
+  | ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>
+  | Behavior<State, UpdateArguments, Actions, Tags, E, D>;
+export function createEntitySystem<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown>(
+  execute: EntitySystem<State, UpdateArguments, Actions, Tags, E, D>["execute"],
+  query: Query | ((b: QueryBuilder) => QueryBuilder),
+): EntitySystem<State, UpdateArguments, Actions, Tags, E, D>;
+export function createArchetypeSystem<State, UpdateArguments extends unknown[], ReturnArguments, Actions, Tags extends number = number, E = unknown, D = unknown>(
+  execute: (archetypes: Set<unknown>, world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, ...args: UpdateArguments) => ReturnArguments,
+  query: Query | ((b: QueryBuilder) => QueryBuilder),
+): ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>;
+export function createBehavior<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown>(
+  tag: number,
+  handler: Behavior<State, UpdateArguments, Actions, Tags, E, D>["handler"],
+  query: Query | ((b: QueryBuilder) => QueryBuilder),
+  priority?: number,
+): Behavior<State, UpdateArguments, Actions, Tags, E, D>;
 `;
 
 const WORKER_STUB = `

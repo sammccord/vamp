@@ -4,6 +4,7 @@ import { emitDelta } from "../src/generators/emit-delta.js";
 import { emitFactory } from "../src/generators/emit-factory.js";
 import { emitClasses } from "../src/generators/emit-classes.ts";
 import { emitGameContext } from "../src/generators/emit-game-context.ts";
+import { emitSystems } from "../src/generators/emit-systems.ts";
 import type { SchemaDefinition, ParsedSchema } from "../src/generators/parse-bop.js";
 
 const entityDef: SchemaDefinition = {
@@ -167,5 +168,37 @@ describe("emitGameContext", () => {
     expect(result).toContain(
       "RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>",
     );
+  });
+});
+
+describe("emitSystems", () => {
+  const result = emitSystems();
+
+  it("bakes concrete Actions/Tags/Entity/EntityDelta into each generic system alias", () => {
+    expect(result).toContain(
+      "export type GameEntitySystem<\n  State extends Record<string, unknown> = {},\n  UpdateArguments extends Array<unknown> = [],\n> = EntitySystem<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;",
+    );
+    expect(result).toContain(
+      "> = ArchetypeSystem<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;",
+    );
+    expect(result).toContain(
+      "> = Behavior<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;",
+    );
+    expect(result).toContain(
+      "> = System<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;",
+    );
+  });
+
+  it("emits create wrappers that keep State/UpdateArguments open and reuse the alias param types", () => {
+    expect(result).toContain("export function createGameEntitySystem<");
+    expect(result).toContain('execute: GameEntitySystem<State, UpdateArguments>["execute"],');
+    expect(result).toContain("return createEntitySystem(execute, query);");
+
+    expect(result).toContain("export function createGameArchetypeSystem<");
+    expect(result).toContain("return createArchetypeSystem(execute, query);");
+
+    expect(result).toContain("export function createGameBehavior<");
+    expect(result).toContain('handler: GameBehavior<State, UpdateArguments>["handler"],');
+    expect(result).toContain("return createBehavior(tag, handler, query, priority);");
   });
 });

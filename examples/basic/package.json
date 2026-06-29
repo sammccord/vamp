@@ -39,6 +39,8 @@
     "vitest": "catalog:",
     "websocket-ts": "catalog:",
     "wrangler": "^4.75.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "y-durablestream": "catalog:",
+    "yjs": "catalog:"
   }
 }
