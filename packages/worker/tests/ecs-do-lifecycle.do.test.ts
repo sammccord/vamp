@@ -39,10 +39,16 @@ vi.mock("y-durablestream", async () => {
         this._cb = undefined;
       };
     }
-    async connect(): Promise<void> {
+    /** One-shot initial sync: apply the provider's seed (stands in for the pull). */
+    async syncOnce(): Promise<void> {
       const seed = this.opts?.stub?.__seed;
       if (seed) Yjs.applyUpdate(this.doc, seed);
       this._synced = true;
+    }
+    /** Forward a local write upstream — no-op in this fake (no real provider). */
+    async pushLocalUpdate(_update: Uint8Array, _key?: string): Promise<void> {}
+    async connect(): Promise<void> {
+      await this.syncOnce();
       this._cb?.("synced");
     }
     disconnect(): void {}
@@ -174,6 +180,8 @@ function makeStub(seed?: Uint8Array) {
       return new Uint8Array();
     },
     async compact() {},
+    async register() {},
+    async deregister() {},
   };
 }
 

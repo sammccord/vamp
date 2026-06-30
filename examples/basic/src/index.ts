@@ -43,6 +43,10 @@ const serviceRegistry = new SharedServiceRegistry(new ConsoleLogger("rpc"));
 // constructed inside the DO rather than passed across the RPC boundary.
 defineGameECSRuntime<{}, GameWorldContext>(() => ({
   serviceRegistry,
+  // This lobby DO's own binding name, so a shard provider can RPC `onShardUpdate`
+  // back on it — enabling live cross-lobby propagation (notify-push). Without it,
+  // shards sync on connect only. Must match the GAME_ECS binding in wrangler.jsonc.
+  lobbyBinding: "GAME_ECS",
   // nanoid(16) ≈ 96 bits — ample collision headroom past 100k entities — and
   // far shorter than a 36-char uuid, which the doc encodes ~3× per entity
   // (entities/refs/membership keys). Shrinks per-entity bytes ⇒ higher ceiling.

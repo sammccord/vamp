@@ -18,6 +18,7 @@ import { HookRegistry, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
 import { DurableObject } from "cloudflare:workers";
 import { YStreamClient } from "y-durablestream";
+import { applyUpdate } from "yjs";
 import type { Doc, Map as YMap, YMapEvent } from "yjs";
 import { entitiesMap, removeEntity, writeEntityInsert, writeUpdate } from "./entity-doc";
 import { ShardManager } from "./shard-manager";
@@ -70,6 +71,11 @@ export interface ECSRuntimeConfiguration<
   logger?: ContextLogger;
   // The yjs document to connect to, defaults to 'global'.
   document?: string;
+  // This lobby DO's OWN namespace binding name (e.g. "GAME_ECS"). Required for
+  // live cross-lobby sync: a shard provider RPCs `onShardUpdate` back on this
+  // lobby through `env[lobbyBinding]`, so the lobby registers it as its address.
+  // Omit to disable notify-push registration (snapshot-on-connect only).
+  lobbyBinding?: string;
   // The tempo rpc service registry the generated game services are registered with.
   serviceRegistry: ServiceRegistry;
   // Optional hooks for tempo rpc middleware.
@@ -243,16 +249,28 @@ export class ECSDurableObject<
     | undefined;
 
   // Sync properties
+  // Transaction origin for THIS lobby's own writes (so observers + the write
+  // forwarder can tell local authorship from synced-in changes).
   private static LOCAL_ORIGIN = Symbol("ecs-local");
+  // Transaction origin for updates applied from a remote notify-push
+  // (`onShardUpdate`): distinct from LOCAL_ORIGIN so the entity-set/entity
+  // observers PROCESS it (reconcile) while the write forwarder SKIPS it (never
+  // re-forwards a synced-in change — that would echo-loop across co-subscribers).
+  private static REMOTE_ORIGIN = Symbol("ecs-remote");
 
-  // ── D1b: multi-provider sharding ─────────────────────────────
+  // ── D1b/E: multi-provider sharding + live cross-lobby sync ───
   // One `Y.Doc` + sync client per `root` (= shard = provider DO name), owned by
-  // the ShardManager. Replaces the former single `this.doc`/`this.client`/
-  // `this._document`. The ECS `_entityStore` is the union of entities across all
-  // subscribed shard docs (the ECS is doc-agnostic; this DO bridges N docs ↔ one
-  // world). WIP: this path needs workerd integration validation — vamp DO tests
-  // do not run in the dev sandbox (see the entity-scaling-effort memory).
+  // the ShardManager. The ECS `_entityStore` is the union of entities across all
+  // subscribed shard docs. Live cross-lobby delivery is notify-push: the lobby
+  // forwards its own writes to each shard provider and registers for the
+  // provider to RPC `onShardUpdate` back when a co-subscriber writes.
   private shards!: ShardManager;
+  // This lobby DO's own namespace binding name (e.g. "GAME_ECS"), so a shard
+  // provider can RPC this lobby back via `register({binding, name, root})`.
+  private _lobbyBinding = "";
+  // Roots currently registered for notify-push (gated by players || tick), to
+  // keep register/deregister idempotent.
+  private _registeredRoots = new Set<string>();
   // id → its home shard root. Update/Delete mutation records carry no `root`, so
   // we remember where each entity was inserted to route later writes and to drop
   // a shard's entities on teardown.
@@ -377,6 +395,9 @@ export class ECSDurableObject<
           // via the alarm reap once released (D2/D3 refines the release drivers).
           const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
           if (persistedShards && this.shards) this.shards.restore(persistedShards);
+          // Re-register restored shards for notify-push (the wake was triggered by
+          // a live socket, so we have players and should receive live updates).
+          this._syncRegistrations();
           // Rebuild per-connection ECS observers from each live socket's durable
           // attachment, so the generator-free interest-managed broadcast resumes
           // after wake WITHOUT the original `observe` generator (destroyed with
@@ -413,6 +434,8 @@ export class ECSDurableObject<
       logger?: ContextLogger;
       // The yjs document to connect to, defaults to 'global', can specify alternate to shard entity state across multiple documents
       document?: string;
+      // This lobby DO's own namespace binding name, for live cross-lobby sync.
+      lobbyBinding?: string;
       // Max decodable sync frame size (bytes); caps syncable world size. Default 8 MB.
       maxFrameSize?: number;
       // The tempo rpc service registry registered with the generated game services
@@ -472,6 +495,7 @@ export class ECSDurableObject<
     // The lobby's own shard. Locally-spawned entities default their `root` here;
     // the lobby owns + writes it, and also subscribes to participants' shards.
     this._defaultRoot = `game/${this._namespace}`;
+    this._lobbyBinding = configuration.lobbyBinding ?? "";
     if (configuration.maxFrameSize !== undefined) this._maxFrameSize = configuration.maxFrameSize;
     this._onConnectionClose = configuration.onConnectionClose;
     this._rehydrateConnection = configuration.rehydrateConnection;
@@ -537,7 +561,12 @@ export class ECSDurableObject<
       const byRoot = new Map<string, Array<[string, MutationRecord<Entity, EntityDelta>]>>();
       for (const [id, mutation] of mutations) {
         if (this._reconcilingIds.has(id)) {
-          // Reconciled from remote: copy shadow entity (avoids additive mergeDelta)
+          // Reconciled from remote: copy the shadow into the working store, but DO
+          // NOT write it back to the shard doc — it CAME FROM the doc, and
+          // re-writing it would forward an echo to every co-subscriber, an
+          // unbounded ping-pong. (Ownership model: a non-owner that also mutates a
+          // reconciled entity in the SAME scope will not propagate that local
+          // delta — an accepted edge; co-subscribers read, the owner writes.)
           const scope = this.ecs!.context.scope;
           if (scope) {
             const shadow = scope.shadowEntities.get(id);
@@ -547,12 +576,12 @@ export class ECSDurableObject<
               entities.delete(id);
             }
           }
-        } else {
-          // Locally-authored mutation: apply it to the working entity store so
-          // reads (`ecs.entities` / `ecs.entity`) reflect local changes. Remote
-          // changes instead arrive through the Yjs observers above.
-          applyMutation(entities, id, mutation, configuration.ecs);
+          continue;
         }
+        // Locally-authored mutation: apply it to the working entity store so reads
+        // (`ecs.entities` / `ecs.entity`) reflect local changes, and route it to
+        // its home shard doc (which forwards it to co-subscribers).
+        applyMutation(entities, id, mutation, configuration.ecs);
         const root = this._rootForMutation(id, mutation);
         let group = byRoot.get(root);
         if (!group) {
@@ -726,6 +755,7 @@ export class ECSDurableObject<
       this.initialize(namespace, {
         logger: config.logger,
         document: document ?? config.document,
+        lobbyBinding: config.lobbyBinding,
         serviceRegistry: config.serviceRegistry,
         hooks: config.hooks,
         ecs: config.ecs as ECSOptions<Entity, EntityDelta>,
@@ -824,25 +854,30 @@ export class ECSDurableObject<
         // `GAME_STORAGE` is typed as `DurableObjectNamespace<YStreamProviderStub>`
         // in the shim, so `get` returns a correctly-typed stub without a cast.
         const stub = bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(root));
-        const client = new YStreamClient(doc, { stub, maxFrameSize: this._maxFrameSize });
-        const unsub = client.onStatusChange((status) => {
-          if (status === "synced") this._onShardSynced(root, doc);
+        // clientId = this lobby's namespace, so the provider suppresses echoing
+        // our own writes back and matches us to our `register()` entry.
+        const client = new YStreamClient(doc, {
+          stub,
+          clientId: this._namespace,
+          maxFrameSize: this._maxFrameSize,
         });
-        // Fire-and-forget: connect() resolves only when the sync stream ends, so
-        // waitUntil would pin the isolate for the connection lifetime and defeat
-        // hibernation. The initial sync completes within the opening request (the
-        // read loop runs until `synced`), which is what gates ready()/seeding.
-        // NOTE: a DO subscriber's read loop does not survive past the request that
-        // opened it, so this shard receives the provider's snapshot on connect but
-        // not live pushes from OTHER subscribers afterward — see the cross-lobby
-        // limitation documented in examples/basic/tests/rpc.test.ts.
-        void client.connect();
-        // onStatusChange does not replay, so re-check synchronously in case the
-        // shard reached `synced` between wiring and now (a fast/local sync).
-        if (client.synced) this._onShardSynced(root, doc);
+        // Persistent write-forwarder: forward THIS lobby's own writes
+        // (LOCAL_ORIGIN) to the provider so co-subscribers receive them. Synced-in
+        // changes carry REMOTE_ORIGIN and are deliberately not re-forwarded (no
+        // echo loop). Survives across requests because it is a plain doc observer,
+        // not a stream read-loop (which a DO cannot keep alive past its request).
+        const forwarder = (update: Uint8Array, origin: unknown) => {
+          if (origin !== ECSDurableObject.LOCAL_ORIGIN) return;
+          this.ctx.waitUntil(client.pushLocalUpdate(update));
+        };
+        doc.on("update", forwarder);
+        // One-shot initial bidirectional sync (no persistent read-loop): pulls the
+        // shard's current state + pushes ours, then seeds the ECS + gates ready().
+        // Live updates afterward arrive via notify-push (`onShardUpdate`).
+        this.ctx.waitUntil(client.syncOnce().then(() => this._onShardSynced(root, doc)));
         return {
           disconnect() {
-            unsub?.();
+            doc.off("update", forwarder);
             client.disconnect();
           },
         };
@@ -854,9 +889,11 @@ export class ECSDurableObject<
     });
   }
 
-  /** Open (pin) `root`, returning its shard doc. */
+  /** Open (pin) `root`, returning its shard doc, and (de)register for notify-push. */
   private _acquireShard(root: string): Doc {
-    return this.shards.acquire(root);
+    const doc = this.shards.acquire(root);
+    this._syncRegistrations();
+    return doc;
   }
 
   /**
@@ -866,6 +903,99 @@ export class ECSDurableObject<
    */
   private _persistActiveShards() {
     this.ctx.waitUntil(this.ctx.storage.put("__vamp:shards", this.shards.activeRoots()));
+  }
+
+  /// ── E: live cross-lobby notify-push ──────────────────────────
+
+  /**
+   * Whether this lobby should receive live shard updates right now. Gated so an
+   * idle lobby (no players, no tick) registers for nothing and can hibernate:
+   * receive iff a player is connected OR a server tick is configured.
+   */
+  private _shouldReceive(excludeWs?: WebSocket): boolean {
+    if (this._tickIntervalMs > 0) return true;
+    const sockets = this.ctx.getWebSockets();
+    // On the close path the closing socket may still be listed; exclude it so the
+    // last player leaving correctly gates the lobby off.
+    const count = excludeWs ? sockets.filter((s) => s !== excludeWs).length : sockets.length;
+    return count > 0;
+  }
+
+  /**
+   * Reconcile the set of shards registered for notify-push with the gating rule
+   * ({@link _shouldReceive}) and the set of active shards. Registering tells a
+   * shard provider to RPC `onShardUpdate` on this lobby when a co-subscriber
+   * writes. Idempotent — only RPCs on an actual change. Call on shard acquire,
+   * player connect/disconnect, and hibernation wake.
+   */
+  private _syncRegistrations(excludeWs?: WebSocket): void {
+    if (!this.shards) return;
+    const want = this._shouldReceive(excludeWs);
+    const active = new Set(this.shards.activeRoots());
+    if (want) {
+      for (const root of active) {
+        if (!this._registeredRoots.has(root)) {
+          this._registeredRoots.add(root);
+          this.ctx.waitUntil(this._registerShard(root));
+        }
+      }
+    }
+    // Deregister anything no longer wanted: gated off, or no longer active.
+    for (const root of [...this._registeredRoots]) {
+      if (!want || !active.has(root)) {
+        this._registeredRoots.delete(root);
+        this.ctx.waitUntil(this._deregisterShard(root));
+      }
+    }
+  }
+
+  private _shardStub(root: string) {
+    const bindings = this.env as CloudflareBindings;
+    return bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(root));
+  }
+
+  private async _registerShard(root: string): Promise<void> {
+    try {
+      await this._shardStub(root).register(this._namespace, {
+        binding: this._lobbyBinding,
+        name: this._namespace,
+        root,
+      });
+    } catch (err) {
+      this.log.error("Failed to register shard for notify-push", { root }, err as Error);
+    }
+  }
+
+  private async _deregisterShard(root: string): Promise<void> {
+    try {
+      await this._shardStub(root).deregister(this._namespace);
+    } catch (err) {
+      this.log.error("Failed to deregister shard", { root }, err as Error);
+    }
+  }
+
+  /**
+   * RPC entrypoint: a shard provider delivers a co-subscriber's update here (the
+   * notify-push live-delivery path). Wakes this lobby from hibernation if needed
+   * (the constructor re-bootstraps + restores shards first). Applies the update
+   * under REMOTE_ORIGIN — so the entity-set/entity observers reconcile it while
+   * the write forwarder ignores it — then opens a scope to drain the reconcile
+   * and broadcast to connected game clients.
+   */
+  async onShardUpdate(root: string, update: Uint8Array): Promise<void> {
+    if (!this.ecs?.initialized) return;
+    const doc = this.shards?.docFor(root);
+    // We no longer hold this shard, or we are gated off (no players, no tick):
+    // stop receiving and drop the update. Self-heals a stale provider registry.
+    if (!doc || !this._shouldReceive()) {
+      this._registeredRoots.delete(root);
+      this.ctx.waitUntil(this._deregisterShard(root));
+      return;
+    }
+    applyUpdate(doc, update, ECSDurableObject.REMOTE_ORIGIN);
+    // An empty scope still fires onScopeOpen (drains _pendingReconcile) + the
+    // flush handler + routeMutations, broadcasting the change to game clients.
+    await this.ecs.withScope(() => {});
   }
 
   /// ── Doc seeding (per shard) ──────────────────────────────────
@@ -920,6 +1050,11 @@ export class ECSDurableObject<
    * the entities still live in their provider doc, so other lobbies keep them.
    */
   private _closeShard(root: string, _doc: Doc) {
+    // Stop receiving notify-push for this shard (the provider drops us from its
+    // registry), so it can quiesce once no lobby is subscribed.
+    if (this._registeredRoots.delete(root)) {
+      this.ctx.waitUntil(this._deregisterShard(root));
+    }
     const cleanup = this._shardEntitySetCleanups.get(root);
     if (cleanup) {
       cleanup();
@@ -1138,6 +1273,10 @@ export class ECSDurableObject<
     // @ts-expect-error
     this.ctx.acceptWebSocket(server);
 
+    // A player connected: this lobby now has a downstream client, so register its
+    // active shards for live notify-push (idempotent; no-op if already on/ticking).
+    this._syncRegistrations();
+
     return new Response(null, {
       status: 101,
       //@ts-expect-error
@@ -1204,6 +1343,10 @@ export class ECSDurableObject<
       }
     }
     this.sessions.delete(ws);
+    // A player left: if this was the last one and we are not ticking, gate off —
+    // deregister from notify-push so providers stop RPC-ing us and we can quiesce.
+    // Exclude this (closing) socket, which may still be listed during close.
+    this._syncRegistrations(ws);
   }
 
   /**

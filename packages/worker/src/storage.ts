@@ -14,6 +14,15 @@ import type { Map as YMap } from "yjs";
 import { GLOBAL_ENTITIES_KEY } from "./reconcile-helpers";
 
 /**
+ * Minimal shape of a lobby DO namespace this provider RPCs back for notify-push
+ * (resolved by binding name from `this.env`). Only the surface used here.
+ */
+interface LobbyNamespace {
+  idFromName(name: string): unknown;
+  get(id: unknown): { onShardUpdate(root: string, update: Uint8Array): Promise<void> };
+}
+
+/**
  * Storage provider for the ECS world document.
  *
  * Compaction thresholds are configurable and default to `y-durablestream`'s own
@@ -40,6 +49,25 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
    */
   protected override onStorageError(error: unknown): void {
     ECSStorage.log.error("y-durablestream storage operation failed", {}, error as Error);
+  }
+
+  /**
+   * Deliver a co-subscriber's update to a registered lobby DO (the notify-push
+   * live path; see `ECSDurableObject.register`/`onShardUpdate`). The `address`
+   * is what the lobby passed to `register`: its own DO binding name + namespace +
+   * the shard `root`. Both DOs share one Worker, so `this.env` carries the lobby
+   * binding even though it is not in the worker-package's `CloudflareBindings`
+   * shim — resolve it by name. Fire-and-forget via `waitUntil` (the RPC also
+   * wakes a hibernating lobby); errors are observability-only (the lobby re-syncs
+   * via `syncOnce` on its next wake, so a dropped push is never divergence).
+   */
+  protected override pushToSubscriber(address: unknown, update: Uint8Array): void {
+    const { binding, name, root } = address as { binding: string; name: string; root: string };
+    if (!binding) return;
+    const ns = (this.env as unknown as Record<string, LobbyNamespace | undefined>)[binding];
+    if (!ns) return;
+    const lobby = ns.get(ns.idFromName(name));
+    this.ctx.waitUntil(lobby.onShardUpdate(root, update).catch((err) => this.onStorageError(err)));
   }
 
   protected override createStorage(): YDocStorage {

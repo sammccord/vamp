@@ -158,10 +158,14 @@ declare class WebSocketRequestResponsePair {
  * without becoming a module and losing its global declarations.
  */
 interface GameStorageStub {
-  subscribe(): Promise<ReadableStream<Uint8Array>>;
-  update(data: Uint8Array): Promise<Uint8Array | void>;
+  subscribe(clientId?: string, interest?: string[]): Promise<ReadableStream<Uint8Array>>;
+  update(data: Uint8Array, clientId?: string, key?: string): Promise<Uint8Array | void>;
   getYDoc(): Promise<Uint8Array>;
   compact(): Promise<void>;
+  // Notify-push registry: a lobby registers itself so the provider RPCs its
+  // `onShardUpdate` on every co-subscriber write (see ECSStorage.pushToSubscriber).
+  register(clientId: string, address: unknown): Promise<void>;
+  deregister(clientId: string): Promise<void>;
 }
 
 interface CloudflareBindings {
