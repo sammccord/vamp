@@ -10,11 +10,11 @@ message Vec2 {
 }
 
 message Entity {
-	1 -> guid id;
-	2 -> guid root;
+	1 -> string id;
+	2 -> string root;
 	3 -> Tags[] tags;
-	4 -> guid parent;
-	5 -> guid[] children;
+	4 -> string parent;
+	5 -> string[] children;
 	6 -> Pool health;
 	7 -> Vec2 position;
 	8 -> Vec2 velocity;

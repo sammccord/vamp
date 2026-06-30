@@ -20,19 +20,19 @@ import {  BaseClient, MethodInfo, CallOptions } from "@tempojs/client";
 import { ServiceRegistry, BaseService, ServerContext, BebopMethodAny, BebopMethod } from "@tempojs/server";
 
 export const BEBOP_SCHEMA = new Uint8Array ([
-3, 22, 0, 0, 0, 71, 117, 105, 100, 65, 114, 114, 97, 121,
-68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 3, 115, 101,
-116, 0, 242, 255, 255, 255, 0, 244, 255, 255, 255, 0, 1,
-97, 100, 100, 0, 242, 255, 255, 255, 0, 244, 255, 255,
-255, 0, 2, 114, 101, 109, 111, 118, 101, 0, 242, 255, 255,
-255, 0, 244, 255, 255, 255, 0, 3, 86, 101, 99, 50, 68,
-101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 2, 120, 0, 250,
-255, 255, 255, 0, 1, 121, 0, 250, 255, 255, 255, 0, 2, 69,
-110, 116, 105, 116, 121, 68, 101, 108, 116, 97, 0, 2, 0,
-5, 0, 0, 0, 13, 105, 100, 0, 244, 255, 255, 255, 0, 1,
-114, 111, 111, 116, 0, 244, 255, 255, 255, 0, 2, 116, 97,
-103, 115, 0, 242, 255, 255, 255, 0, 19, 0, 0, 0, 0, 3,
-112, 97, 114, 101, 110, 116, 0, 244, 255, 255, 255, 0, 4,
+3, 22, 0, 0, 0, 83, 116, 114, 105, 110, 103, 65, 114, 114,
+97, 121, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 3,
+115, 101, 116, 0, 242, 255, 255, 255, 0, 245, 255, 255,
+255, 0, 1, 97, 100, 100, 0, 242, 255, 255, 255, 0, 245,
+255, 255, 255, 0, 2, 114, 101, 109, 111, 118, 101, 0, 242,
+255, 255, 255, 0, 245, 255, 255, 255, 0, 3, 86, 101, 99,
+50, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 2, 120, 0,
+250, 255, 255, 255, 0, 1, 121, 0, 250, 255, 255, 255, 0,
+2, 69, 110, 116, 105, 116, 121, 68, 101, 108, 116, 97, 0,
+2, 0, 5, 0, 0, 0, 13, 105, 100, 0, 245, 255, 255, 255, 0,
+1, 114, 111, 111, 116, 0, 245, 255, 255, 255, 0, 2, 116,
+97, 103, 115, 0, 242, 255, 255, 255, 0, 19, 0, 0, 0, 0, 3,
+112, 97, 114, 101, 110, 116, 0, 245, 255, 255, 255, 0, 4,
 99, 104, 105, 108, 100, 114, 101, 110, 0, 0, 0, 0, 0, 0,
 5, 104, 101, 97, 108, 116, 104, 0, 21, 0, 0, 0, 0, 6, 112,
 111, 115, 105, 116, 105, 111, 110, 0, 1, 0, 0, 0, 0, 7,
@@ -86,12 +86,12 @@ export const BEBOP_SCHEMA = new Uint8Array ([
 111, 115, 0, 251, 255, 255, 255, 0, 3, 86, 101, 99, 50, 0,
 2, 0, 5, 0, 0, 0, 2, 120, 0, 247, 255, 255, 255, 0, 1,
 121, 0, 247, 255, 255, 255, 0, 2, 69, 110, 116, 105, 116,
-121, 0, 2, 0, 5, 0, 0, 0, 13, 105, 100, 0, 244, 255, 255,
-255, 0, 1, 114, 111, 111, 116, 0, 244, 255, 255, 255, 0,
+121, 0, 2, 0, 5, 0, 0, 0, 13, 105, 100, 0, 245, 255, 255,
+255, 0, 1, 114, 111, 111, 116, 0, 245, 255, 255, 255, 0,
 2, 116, 97, 103, 115, 0, 242, 255, 255, 255, 0, 19, 0, 0,
-0, 0, 3, 112, 97, 114, 101, 110, 116, 0, 244, 255, 255,
+0, 0, 3, 112, 97, 114, 101, 110, 116, 0, 245, 255, 255,
 255, 0, 4, 99, 104, 105, 108, 100, 114, 101, 110, 0, 242,
-255, 255, 255, 0, 244, 255, 255, 255, 0, 5, 104, 101, 97,
+255, 255, 255, 0, 245, 255, 255, 255, 0, 5, 104, 101, 97,
 108, 116, 104, 0, 20, 0, 0, 0, 0, 6, 112, 111, 115, 105,
 116, 105, 111, 110, 0, 16, 0, 0, 0, 0, 7, 118, 101, 108,
 111, 99, 105, 116, 121, 0, 16, 0, 0, 0, 0, 8, 109, 97,
@@ -129,7 +129,7 @@ export const BEBOP_SCHEMA = new Uint8Array ([
 0, 0, 0, 8, 0, 0, 0, 214, 29, 17, 28
 ]);
 
-export interface GuidArrayDelta {
+export interface StringArrayDelta {
 
   set?: string[];
 
@@ -138,26 +138,26 @@ export interface GuidArrayDelta {
   remove?: string[];
 }
 
-export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+export const StringArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
   // Factory function
-  (data: GuidArrayDelta): GuidArrayDelta & BebopRecord => {
+  (data: StringArrayDelta): StringArrayDelta & BebopRecord => {
     return {
       ...data,
       encode(): Uint8Array {
-        return GuidArrayDelta.encode(this);
+        return StringArrayDelta.encode(this);
       }
     };
   },
   // Static methods
   {
-    encode(record: GuidArrayDelta): Uint8Array {
+    encode(record: StringArrayDelta): Uint8Array {
       const view = BebopView.getInstance();
       view.startWriting();
-      GuidArrayDelta.encodeInto(record, view);
+      StringArrayDelta.encodeInto(record, view);
       return view.toArray();
     },
 
-    encodeInto(record: GuidArrayDelta, view: BebopView): void {
+    encodeInto(record: StringArrayDelta, view: BebopView): void {
       const pos = view.reserveMessageLength();
       const start = view.length;
       if (record.set !== undefined) {
@@ -166,7 +166,7 @@ export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.a
         const length0 = record.set.length;
         view.writeUint32(length0);
         for (let i0 = 0; i0 < length0; i0++) {
-          view.writeGuid(record.set[i0]);
+          view.writeString(record.set[i0]);
         }
       }
       }
@@ -176,7 +176,7 @@ export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.a
         const length0 = record.add.length;
         view.writeUint32(length0);
         for (let i0 = 0; i0 < length0; i0++) {
-          view.writeGuid(record.add[i0]);
+          view.writeString(record.add[i0]);
         }
       }
       }
@@ -186,7 +186,7 @@ export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.a
         const length0 = record.remove.length;
         view.writeUint32(length0);
         for (let i0 = 0; i0 < length0; i0++) {
-          view.writeGuid(record.remove[i0]);
+          view.writeString(record.remove[i0]);
         }
       }
       }
@@ -195,15 +195,15 @@ export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.a
       view.fillMessageLength(pos, end - start);
     },
 
-    decode(buffer: Uint8Array): GuidArrayDelta & BebopRecord {
+    decode(buffer: Uint8Array): StringArrayDelta & BebopRecord {
       const view = BebopView.getInstance();
       view.startReading(buffer);
-      const decoded = GuidArrayDelta.readFrom(view);
-      return GuidArrayDelta(decoded);
+      const decoded = StringArrayDelta.readFrom(view);
+      return StringArrayDelta(decoded);
     },
 
-    readFrom(view: BebopView): GuidArrayDelta {
-      const message: GuidArrayDelta = {};
+    readFrom(view: BebopView): StringArrayDelta {
+      const message: StringArrayDelta = {};
       const length = view.readMessageLength();
       const end = view.index + length;
       while (true) {
@@ -217,7 +217,7 @@ export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.a
           message.set = [];
           for (let i0 = 0; i0 < length0; i0++) {
             let x0: string;
-            x0 = view.readGuid();
+            x0 = view.readString();
             message.set[i0] = x0;
           }
         }
@@ -229,7 +229,7 @@ export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.a
           message.add = [];
           for (let i0 = 0; i0 < length0; i0++) {
             let x0: string;
-            x0 = view.readGuid();
+            x0 = view.readString();
             message.add[i0] = x0;
           }
         }
@@ -241,7 +241,7 @@ export const GuidArrayDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.a
           message.remove = [];
           for (let i0 = 0; i0 < length0; i0++) {
             let x0: string;
-            x0 = view.readGuid();
+            x0 = view.readString();
             message.remove[i0] = x0;
           }
         }
@@ -343,7 +343,7 @@ export interface EntityDelta {
 
   parent?: string;
 
-  children?: GuidArrayDelta;
+  children?: StringArrayDelta;
 
   health?: PoolDelta;
 
@@ -386,11 +386,11 @@ export const EntityDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assi
       const start = view.length;
       if (record.id !== undefined) {
         view.writeByte(1);
-        view.writeGuid(record.id);
+        view.writeString(record.id);
       }
       if (record.root !== undefined) {
         view.writeByte(2);
-        view.writeGuid(record.root);
+        view.writeString(record.root);
       }
       if (record.tags !== undefined) {
         view.writeByte(3);
@@ -404,11 +404,11 @@ export const EntityDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assi
       }
       if (record.parent !== undefined) {
         view.writeByte(4);
-        view.writeGuid(record.parent);
+        view.writeString(record.parent);
       }
       if (record.children !== undefined) {
         view.writeByte(5);
-        GuidArrayDelta.encodeInto(record.children, view);
+        StringArrayDelta.encodeInto(record.children, view);
       }
       if (record.health !== undefined) {
         view.writeByte(6);
@@ -464,11 +464,11 @@ export const EntityDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assi
             return message;
 
           case 1:
-            message.id = view.readGuid();
+            message.id = view.readString();
             break;
 
           case 2:
-            message.root = view.readGuid();
+            message.root = view.readString();
             break;
 
           case 3:
@@ -484,11 +484,11 @@ export const EntityDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assi
             break;
 
           case 4:
-            message.parent = view.readGuid();
+            message.parent = view.readString();
             break;
 
           case 5:
-            message.children = GuidArrayDelta.readFrom(view);
+            message.children = StringArrayDelta.readFrom(view);
             break;
 
           case 6:
@@ -1574,11 +1574,11 @@ export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
       const start = view.length;
       if (record.id !== undefined) {
         view.writeByte(1);
-        view.writeGuid(record.id);
+        view.writeString(record.id);
       }
       if (record.root !== undefined) {
         view.writeByte(2);
-        view.writeGuid(record.root);
+        view.writeString(record.root);
       }
       if (record.tags !== undefined) {
         view.writeByte(3);
@@ -1592,7 +1592,7 @@ export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
       }
       if (record.parent !== undefined) {
         view.writeByte(4);
-        view.writeGuid(record.parent);
+        view.writeString(record.parent);
       }
       if (record.children !== undefined) {
         view.writeByte(5);
@@ -1600,7 +1600,7 @@ export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
         const length0 = record.children.length;
         view.writeUint32(length0);
         for (let i0 = 0; i0 < length0; i0++) {
-          view.writeGuid(record.children[i0]);
+          view.writeString(record.children[i0]);
         }
       }
       }
@@ -1658,11 +1658,11 @@ export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
             return message;
 
           case 1:
-            message.id = view.readGuid();
+            message.id = view.readString();
             break;
 
           case 2:
-            message.root = view.readGuid();
+            message.root = view.readString();
             break;
 
           case 3:
@@ -1678,7 +1678,7 @@ export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
             break;
 
           case 4:
-            message.parent = view.readGuid();
+            message.parent = view.readString();
             break;
 
           case 5:
@@ -1687,7 +1687,7 @@ export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
           message.children = [];
           for (let i0 = 0; i0 < length0; i0++) {
             let x0: string;
-            x0 = view.readGuid();
+            x0 = view.readString();
             message.children[i0] = x0;
           }
         }

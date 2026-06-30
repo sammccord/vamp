@@ -7,11 +7,11 @@ export const entityTemplate = `import "__POOL_IMPORT__"
 import "./tags.bop"
 
 message Entity {
-\t1 -> guid id;
-\t2 -> guid root;
+\t1 -> string id;
+\t2 -> string root;
 \t3 -> Tags[] tags;
-\t4 -> guid parent;
-\t5 -> guid[] children;
+\t4 -> string parent;
+\t5 -> string[] children;
 \t6 -> Pool health;
 }
 `;

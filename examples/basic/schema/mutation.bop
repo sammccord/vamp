@@ -3,10 +3,10 @@
 
 import "./entity.bop"
 
-message GuidArrayDelta {
-  1 -> guid[] set;
-  2 -> guid[] add;
-  3 -> guid[] remove;
+message StringArrayDelta {
+  1 -> string[] set;
+  2 -> string[] add;
+  3 -> string[] remove;
 }
 
 message Vec2Delta {
@@ -15,11 +15,11 @@ message Vec2Delta {
 }
 
 message EntityDelta {
-  1 -> guid id;
-  2 -> guid root;
+  1 -> string id;
+  2 -> string root;
   3 -> Tags[] tags;
-  4 -> guid parent;
-  5 -> GuidArrayDelta children;
+  4 -> string parent;
+  5 -> StringArrayDelta children;
   6 -> PoolDelta health;
   7 -> Vec2Delta position;
   8 -> Vec2Delta velocity;

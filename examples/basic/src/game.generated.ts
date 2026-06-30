@@ -7,8 +7,19 @@ import { createInterestBroadcast, type InterestBroadcastConfig } from "@vamp/wor
 import type { Entity, Actions, Tags, PoolDelta, Vec2Delta } from "./bebop";
 import { MutationScope, type MutationRecord } from "./bebop";
 
+/**
+ * Component-id map for this schema, keyed by {@link Entity} field name. Ids come
+ * from the bebop field tag (stable across field reorder), not array position.
+ * Pass these to queries (`q.every(components.health)`) and `world.get`/`put`.
+ */
 export const components = { id: 1, root: 2, parent: 4, children: 5, health: 6, position: 7, velocity: 8, mana: 9, stamina: 10, level: 11, xp: 12, faction: 13 } as const satisfies Record<keyof Omit<Entity, "tags">, number>;
 
+/**
+ * Partial, CRDT-style mutation over an {@link Entity}: scalars are
+ * last-writer-wins, array fields carry `set`/`add`/`remove`, and pool/vector
+ * fields use additive `*Delta` counters. Apply with {@link materializeDelta} or
+ * {@link mergeDelta}; combine with {@link accumulateDelta}.
+ */
 export type EntityDelta = {
   id?: string;
   root?: string;
@@ -25,6 +36,10 @@ export type EntityDelta = {
   faction?: number;
 };
 
+/**
+ * Build a full {@link Entity} from a {@link EntityDelta} and optional `base`,
+ * honoring array set/add/remove and additive pool semantics.
+ */
 export function materializeDelta(delta: EntityDelta, base?: Partial<Entity>): Entity {
   return {
     id: delta.id ?? base?.id ?? '',
@@ -43,6 +58,10 @@ export function materializeDelta(delta: EntityDelta, base?: Partial<Entity>): En
   } as Entity;
 }
 
+/**
+ * Apply `delta` onto `entity` in place — same set/add/remove and additive pool
+ * rules as {@link materializeDelta}.
+ */
 export function mergeDelta(entity: Entity, delta: EntityDelta): void {
   if (delta.id !== undefined) entity.id = delta.id;
   if (delta.root !== undefined) entity.root = delta.root;
@@ -59,6 +78,10 @@ export function mergeDelta(entity: Entity, delta: EntityDelta): void {
   if (delta.faction !== undefined) entity.faction = delta.faction;
 }
 
+/**
+ * Fold `from` into `to`, collapsing two {@link EntityDelta}s into one equivalent
+ * delta (array/pool deltas combine additively). Returns the mutated `to`.
+ */
 export function accumulateDelta(from: EntityDelta, to: EntityDelta): EntityDelta {
   if (from.id !== undefined) to.id = from.id;
   if (from.root !== undefined) to.root = from.root;
@@ -76,10 +99,20 @@ export function accumulateDelta(from: EntityDelta, to: EntityDelta): EntityDelta
   return to;
 }
 
+/**
+ * {@link ECSOptions} for this schema — wires the {@link components} map and the
+ * delta algebra ({@link materializeDelta}/{@link mergeDelta}/{@link accumulateDelta})
+ * into an ECS world. `createId` mints new entity ids.
+ */
 export function createECSOptions(createId: () => string): ECSOptions<Entity, EntityDelta> {
   return { createId, components, materializeDelta, mergeDelta, accumulateDelta };
 }
 
+/**
+ * App-typed {@link ECSDurableObject}: this schema's `Actions`/`Tags`/`Entity`/
+ * `EntityDelta` are baked in, leaving `UserSession`/`Context`/`UpdateArguments`
+ * open. Subclass this as your game's durable object.
+ */
 export class GameECS<
     UserSession extends {} = {},
     Context extends {} = {},
@@ -95,26 +128,39 @@ export class GameECS<
     Cloudflare.Env
   > {}
 
+/** App-typed {@link ECSStorage} over this schema's {@link Entity}. */
 export class GameStorage extends ECSStorage<Entity> {}
 
+/**
+ * Server environment handed to RPC methods, app-typed for this schema. Retrieve
+ * it inside a method with `const [ecs, ws] = ctx.getEnvironment<GameContext>()` —
+ * the `[ECS, WebSocket]` tuple carrying the live world.
+ */
 export type GameContext<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
 > = RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
 
+/** App-typed {@link ECSRuntimeConfiguration} — the worker runtime config with this schema's types baked in. */
 export type GameECSRuntimeConfiguration<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
 > = ECSRuntimeConfiguration<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
 
+/** Factory returning a {@link GameECSRuntimeConfiguration}; pass it to {@link defineGameECSRuntime}. */
 export type GameECSRuntimeProvider<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
 > = () => GameECSRuntimeConfiguration<UserSession, Context, UpdateArguments>;
 
+/**
+ * Register the worker's runtime provider with call-site type safety on `ecs`,
+ * `context`, `registerSystems`, `tickArgs`, and `broadcastTick`. Call once from
+ * the worker entry.
+ */
 export function defineGameECSRuntime<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},
@@ -123,26 +169,45 @@ export function defineGameECSRuntime<
   defineECSRuntime(provider);
 }
 
+/**
+ * {@link EntitySystem} for this schema — runs per matching entity each update.
+ * `Actions`/`Tags`/`Entity`/`EntityDelta` are baked in; `State`/`UpdateArguments`
+ * stay open. Build one with {@link createGameEntitySystem}.
+ */
 export type GameEntitySystem<
   State extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
 > = EntitySystem<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
 
+/**
+ * {@link ArchetypeSystem} for this schema — runs once per update over every
+ * matching archetype. Build one with {@link createGameArchetypeSystem}.
+ */
 export type GameArchetypeSystem<
   State extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
 > = ArchetypeSystem<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
 
+/**
+ * {@link Behavior} for this schema — an event-driven handler keyed by an action
+ * tag. Build one with {@link createGameBehavior}.
+ */
 export type GameBehavior<
   State extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
 > = Behavior<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
 
+/** Any system for this schema: entity | archetype | event | lifecycle | behavior. */
 export type GameSystem<
   State extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
 > = System<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
 
+/**
+ * Create a per-entity system. `world` and the entity shape are typed for this
+ * schema, so the executor never restates `Tags`/`Entity`/`EntityDelta`. Specify
+ * `<State, UpdateArguments>` only when the system reads context or update args.
+ */
 export function createGameEntitySystem<
   State extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
@@ -153,6 +218,10 @@ export function createGameEntitySystem<
   return createEntitySystem(execute, query);
 }
 
+/**
+ * Create an archetype system — runs once per update over the matching
+ * archetypes. `world` is typed for this schema; see {@link createGameEntitySystem}.
+ */
 export function createGameArchetypeSystem<
   State extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
@@ -163,6 +232,10 @@ export function createGameArchetypeSystem<
   return createArchetypeSystem(execute, query);
 }
 
+/**
+ * Create an action-tag behavior. `handler(world, entity, event)` runs when
+ * `act(tag)` strikes a matching entity; higher `priority` runs first.
+ */
 export function createGameBehavior<
   State extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
@@ -175,6 +248,11 @@ export function createGameBehavior<
   return createBehavior(tag, handler, query, priority);
 }
 
+/**
+ * Interest-managed mutation broadcast bound to this schema. Supplies the bebop
+ * `encodeBatch` codec and a first-key `resolveViewer` default; pass `canSee` to
+ * scope what each observer sees, or omit `config` for a global broadcast.
+ */
 export function createGameInterestBroadcast<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},

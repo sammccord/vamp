@@ -113,9 +113,13 @@ export class ShardManager {
 
   private open(root: string): void {
     const doc = new Doc();
+    // Fire onShardOpen BEFORE createClient so the consumer can wire its doc
+    // observers ahead of the client's initial sync burst (createClient typically
+    // kicks off an async connect). The doc is registered last so docFor() only
+    // resolves a fully-wired shard.
+    this.opts.onShardOpen?.(root, doc);
     const client = this.opts.createClient(root, doc);
     this.shards.set(root, { doc, client });
-    this.opts.onShardOpen?.(root, doc);
   }
 
   private close(root: string): void {

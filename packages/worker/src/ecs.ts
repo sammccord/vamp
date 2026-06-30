@@ -828,9 +828,14 @@ export class ECSDurableObject<
         const unsub = client.onStatusChange((status) => {
           if (status === "synced") this._onShardSynced(root, doc);
         });
-        // Do NOT waitUntil: connect() resolves only when the sync stream ends, so
-        // it would pin the isolate for the connection lifetime and defeat
-        // hibernation. Fire-and-forget; connect() is documented never to reject.
+        // Fire-and-forget: connect() resolves only when the sync stream ends, so
+        // waitUntil would pin the isolate for the connection lifetime and defeat
+        // hibernation. The initial sync completes within the opening request (the
+        // read loop runs until `synced`), which is what gates ready()/seeding.
+        // NOTE: a DO subscriber's read loop does not survive past the request that
+        // opened it, so this shard receives the provider's snapshot on connect but
+        // not live pushes from OTHER subscribers afterward — see the cross-lobby
+        // limitation documented in examples/basic/tests/rpc.test.ts.
         void client.connect();
         // onStatusChange does not replay, so re-check synchronously in case the
         // shard reached `synced` between wiring and now (a fast/local sync).
@@ -842,8 +847,8 @@ export class ECSDurableObject<
           },
         };
       },
-      // ShardManager.open() fires onShardOpen BEFORE createClient connects, so the
-      // entity-set observer is attached before the sync burst arrives.
+      // ShardManager.open() fires onShardOpen before createClient, so the
+      // entity-set observer is attached before the client's initial sync burst.
       onShardOpen: (root, doc) => this._observeShardEntitySet(root, doc),
       onShardClose: (root, doc) => this._closeShard(root, doc),
     });
@@ -943,11 +948,20 @@ export class ECSDurableObject<
     if (!map) return;
     this._entityRoot.set(id, root);
     const raw = map.toJSON() as Entity;
-    // If entity doesn't exist locally, register it in the ECS archetype graph
+    // ensure id is set (it is the map key, dropped from the component data)
+    if (!raw.id) (raw as Record<string, unknown>).id = id;
+    // If entity doesn't exist locally, register it in the ECS archetype graph.
     if (!this.ecs.hasEntity(id)) {
-      // ensure id is set (it is the map key, dropped from the component data)
-      if (!raw.id) (raw as Record<string, unknown>).id = id;
       this.ecs.insert(raw);
+    }
+    // Backfill the working store. Post-init, `ecs.insert()` called outside a
+    // scope defers its data write into an auto-created scope that this (non-scope)
+    // call never commits — so the entity registers in the archetype graph but not
+    // the working store, and the reconcile drain (onScopeOpen) reads the store
+    // directly. Pre-init seeding writes the store via the immediate base mutator,
+    // making this a no-op there; idempotent on a re-add.
+    if (!this._entityStore.has(id)) {
+      this._entityStore.set(id, raw);
     }
     this._observeEntity(id, doc);
   }

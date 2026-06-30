@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { ConsoleLogger, TempoLogLevel } from "@tempojs/common";
 import { TempoWSChannel } from "@vamp/utils/ws-channel";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Actions, Attack, Entity, MutationScope, RpcClient } from "../src/bebop";
+import { Actions, Attack, Entity, MutationScope, RpcClient, TickRequest } from "../src/bebop";
 
 /** Boot a local `wrangler dev` server and resolve once it is ready. */
 function startWranglerDev(): Promise<{ proc: ChildProcess; port: number }> {
@@ -74,6 +74,43 @@ function makeEntityAt(x: number, y: number): Entity {
     position: { x, y },
     health: { points: 100, min: 0, max: 100, rate: 0, interval: 0 },
   });
+}
+
+/**
+ * An entity homed in a specific shard via its `root` (the D1b shard key). With
+ * no `root` it defaults server-side to the lobby's own `game/${ns}` shard.
+ */
+function makeShardEntity(root?: string): { id: string; entity: Entity } {
+  const id = crypto.randomUUID();
+  return {
+    id,
+    entity: Entity({
+      id,
+      root,
+      tags: [],
+      children: [],
+      health: { points: 100, min: 0, max: 100, rate: 0, interval: 0 },
+    }),
+  };
+}
+
+/**
+ * Drain async cross-shard sync into the broadcast: a foreign shard's entity
+ * arrives at a subscriber out-of-band (DO→DO stream) and lands in the pending-
+ * reconcile set, which only flushes when a scope opens. This DO is purely
+ * reactive, so we open scopes by ticking until the condition holds (or time out).
+ */
+async function pumpUntil(
+  client: RpcClient,
+  predicate: () => boolean,
+  { timeout = 15_000, label = "condition" }: { timeout?: number; label?: string } = {},
+): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeout) throw new Error(`timed out waiting for ${label}`);
+    await client.tick(TickRequest({ steps: 1 }));
+    await new Promise((r) => setTimeout(r, 75));
+  }
 }
 
 /**
@@ -322,6 +359,68 @@ describe("basic RPC service (integration)", () => {
     await streamA.return(undefined);
     await streamB.return(undefined);
     await bgA.catch(() => {});
+    await bgB.catch(() => {});
+    chA.close();
+    chB.close();
+  });
+
+  it("a lobby joining a shared character/* shard sees its existing entities, and never sees another lobby's private game shard (D1b cross-lobby)", async () => {
+    // Two DISTINCT namespaces = two distinct GameECS Durable Objects (lobbies).
+    // Lobby A authors an entity into a `character/*` shard (a provider DO keyed by
+    // the entity's `root`) plus a PRIVATE entity in its own `game/${ns}` shard.
+    // Lobby B then authors into the SAME `character/*` shard, which opens + initial-
+    // syncs that provider, pulling A's entity into B's world — cross-lobby sharing.
+    // B must NEVER see A's private game-shard entity (that provider B never subs).
+    //
+    // SCOPE NOTE — this asserts the SOUND, supported behavior: a shard's current
+    // state is pulled as a one-shot SNAPSHOT when a lobby connects to it. LIVE
+    // cross-lobby propagation (the shared provider pushing A's LATER writes to an
+    // already-connected lobby B) is NOT supported: a Durable Object subscriber's
+    // sync read-loop does not outlive the request that opened it, so the provider
+    // cannot push fresh frames to it afterward. Hence the ordering below — A writes,
+    // then B joins and snapshots. (Same-lobby realtime is unaffected; it broadcasts
+    // via the local ECS, proven by the multi-client test above.)
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const shared = `character/shared-${suffix}`;
+
+    // Lobby A authors the shared entity + a private (game-shard) entity.
+    const { channel: chA, client: clientA } = createRpcClient(`xshard-a-${suffix}`);
+    const sharedFromA = makeShardEntity(shared);
+    const privateA = makeShardEntity(); // no root → A's own game/${ns} shard
+    await clientA.spawn(sharedFromA.entity);
+    await clientA.spawn(privateA.entity);
+
+    // Let A's write reach the shared provider before B subscribes (snapshot-on-
+    // connect; see SCOPE NOTE). 1s is ample for the local DO→DO push.
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Lobby B authors its own entity into the SAME shared shard — opening +
+    // snapshotting that provider, which pulls A's entity into B's aggregated world.
+    const { channel: chB, client: clientB } = createRpcClient(`xshard-b-${suffix}`);
+    const streamB = await clientB.observe(MutationScope({})); // empty scope = see-all
+    const seenB = new Set<string>();
+    const bgB = (async () => {
+      for await (const scope of streamB) {
+        for (const key of scope.mutations?.keys() ?? []) seenB.add(key);
+      }
+    })();
+    const sharedFromB = makeShardEntity(shared);
+    await clientB.spawn(sharedFromB.entity);
+
+    // Pump B's own scopes so the snapshot-synced foreign entity drains into B's
+    // observer (it arrived during B's connect; B's own scope flush broadcasts it —
+    // no live cross-DO push needed).
+    await pumpUntil(clientB, () => seenB.has(sharedFromA.id), {
+      label: "A's shared entity visible in lobby B",
+    });
+    // Settle so any (erroneous) private-shard leakage would have surfaced.
+    await new Promise((r) => setTimeout(r, 400));
+
+    expect(seenB.has(sharedFromA.id)).toBe(true); // cross-lobby: A's shared entity reached B
+    expect(seenB.has(sharedFromB.id)).toBe(true); // B sees its own
+    expect(seenB.has(privateA.id)).toBe(false); // isolation: A's private game shard never leaks
+
+    await streamB.return(undefined);
     await bgB.catch(() => {});
     chA.close();
     chB.close();

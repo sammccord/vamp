@@ -7,26 +7,29 @@ import {
   addRef,
   entitiesMap,
   membersMap,
+  writeEntityInsert,
   writeInsert,
 } from "../../../packages/worker/src/entity-doc";
 import { type Entity, type EntityDelta, Tags } from "../src/bebop";
 
 /**
- * GLOBAL-ENTITY SCALE BENCHMARK (node-level; no workerd).
+ * ENTITY-SCALE BENCHMARK (node-level; no workerd).
  *
- * Question: how many global entities can the system hold before performance is
- * affected — and where does it hard-break?
+ * Question: how many entities fit in ONE shard before sync/seed/compaction cost
+ * bites — and how does the D1b `root`-keyed sharding model change the GLOBAL cap?
  *
- * Hypothesis: the hard ceiling is y-durablestream's 1 MB max-frame limit on the
- * initial full-state SyncStep2. The whole shared world is streamed as ONE frame
- * on every connect (and every backpressure `resync`), so N_max ≈ 1 MB / B where
- * B is the per-entity encoded bytes in the shared doc (components + refcount +
- * membership — the model in `entity-doc.ts`). Below the ceiling, connect-seed
- * and compaction are O(N) and stay within budget, so the break dominates.
+ * Model (post-D1b): each `root` is its own provider DO / `Y.Doc` holding ONLY
+ * that shard's entity DATA — the cross-namespace refcount/membership index is
+ * gone (a shard's entity-set IS its membership). So the per-entity bytes that set
+ * a shard's cap are components-only, and a snapshot streams chunked (post-B2), so
+ * the binding limit is DO memory, not the 1 MB frame. A single shard therefore
+ * caps at ~the old global figure, but the GLOBAL store is now
+ * `Σ shards` — add provider DOs to reach millions; a lobby's working set is the
+ * union of the shards it subscribes to.
  *
- * This is node-only (no Durable Object / wrangler): it imports the real shared-
- * doc writer (`entity-doc.ts`), the real example entity shape (`bebop.ts`), and
- * the real ECS, and replicates y-durablestream's frame codec verbatim (its own
+ * This is node-only (no Durable Object / wrangler): it imports the real shard-doc
+ * writers (`entity-doc.ts`), the real example entity shape (`bebop.ts`), and the
+ * real ECS, and replicates y-durablestream's frame codec verbatim (its own
  * protocol.test.ts proves the >1MB FrameDecodeError; here we pin the snapshot to
  * that limit). Neither `@vamp/worker` nor `y-durablestream`'s entry can be
  * imported here — both pull in `cloudflare:workers`.
@@ -166,28 +169,32 @@ function leanEntity(i: number): Entity {
 
 // ── measurement helpers ──────────────────────────────────────────────────────
 
-/** Build the shared doc with N entities under one namespace, as the DO would. */
+/**
+ * Build ONE shard doc with N entities, exactly as a D1b provider holds it:
+ * entity DATA only (no refcount/membership index), via the real `writeEntityInsert`.
+ */
 function buildDoc(n: number, make: (i: number) => Entity): Doc {
   const doc = new Doc();
   doc.transact(() => {
     for (let i = 0; i < n; i++) {
       const e = make(i);
-      writeInsert(doc, A, e.id as string, e as Record<string, unknown>);
+      writeEntityInsert(doc, e.id as string, e as Record<string, unknown>);
     }
   });
   return doc;
 }
 
-/** Components only — no refcount/membership index — to isolate the indexing tax. */
-function buildComponentsOnly(n: number, make: (i: number) => Entity): Doc {
+/**
+ * Pre-D1b layout for an apples-to-apples delta: the flat shared doc with the
+ * cross-namespace refcount + membership index (`writeInsert`). Used to quantify
+ * the per-entity bytes the sharded entity-data-only model SAVES by dropping it.
+ */
+function buildWithIndex(n: number, make: (i: number) => Entity): Doc {
   const doc = new Doc();
-  const entities = entitiesMap(doc);
   doc.transact(() => {
     for (let i = 0; i < n; i++) {
-      const e = make(i) as Record<string, unknown>;
-      const map = new YMap<unknown>();
-      entities.set(e.id as string, map);
-      for (const k in e) if (k !== "id" && e[k] !== undefined) map.set(k, e[k]);
+      const e = make(i);
+      writeInsert(doc, A, e.id as string, e as Record<string, unknown>);
     }
   });
   return doc;
@@ -230,7 +237,8 @@ function seedMs(doc: Doc): number {
   const parent = entitiesMap(doc);
   const handler = () => {};
   const t0 = performance.now();
-  for (const id of membersMap(doc, A).keys()) {
+  // The shard's entity-set IS its membership in the D1b model — seed from it.
+  for (const id of parent.keys()) {
     const map = parent.get(id) as YMap<unknown> | undefined;
     if (!map) continue;
     const raw = map.toJSON() as Entity;
@@ -296,37 +304,48 @@ function report(title: string, rows: Row[]): { def: number; vamp: number } {
 
 // ── the benchmark ────────────────────────────────────────────────────────────
 
-describe("global-entity scale", () => {
-  it("measures snapshot/seed/compaction vs N and derives the ceiling", () => {
+describe("entity scale (per-shard cap + sharded global)", () => {
+  it("measures snapshot/seed/compaction vs N and derives the per-shard cap", () => {
     const sizes = [100, 250, 500, 1000, 2000, 4000, 8000];
     const richHard = report("RICH entity (stress profile)", measure(richEntity, sizes));
     const leanHard = report("LEAN entity (id + position + health)", measure(leanEntity, sizes));
 
     // Linearity: per-entity bytes ~constant (≤15% spread) ⇒ snapshot is O(N) and
-    // the ceiling is a clean N_max ≈ cap/B.
+    // the per-shard cap is a clean N_max ≈ cap/B.
     const rich = measure(richEntity, [500, 4000]);
     const spread = Math.abs(rich[0].perEntity - rich[1].perEntity) / rich[0].perEntity;
     expect(spread).toBeLessThan(0.15);
 
-    // Indexing tax: how much the refcount + membership index costs per entity
-    // (the lever to raise the ceiling — e.g. by deriving membership instead of
-    // storing it). Compare full shared-doc bytes vs components-only at N=2000.
-    const full = snapshotBytes(buildDoc(2000, richEntity)) / 2000;
-    const compsOnly = snapshotBytes(buildComponentsOnly(2000, richEntity)) / 2000;
-    const taxPct = ((full - compsOnly) / compsOnly) * 100;
+    // Sharding savings: dropping the cross-namespace refcount + membership index
+    // (the D1b sharded shard stores entity DATA only) shrinks per-entity bytes,
+    // raising the per-shard cap. Compare the old indexed flat doc vs a D1b shard.
+    const sharded = snapshotBytes(buildDoc(2000, richEntity)) / 2000;
+    const withIndex = snapshotBytes(buildWithIndex(2000, richEntity)) / 2000;
+    const savingsPct = ((withIndex - sharded) / withIndex) * 100;
     console.log(
-      `\n=== Indexing tax (rich, N=2000) ===\n` +
-        `  components-only ${compsOnly.toFixed(0)} B/entity (ceiling ${Math.floor(DEFAULT_FRAME_CAP / compsOnly)})` +
-        ` | full +refs+membership ${full.toFixed(0)} B/entity (ceiling ${Math.floor(DEFAULT_FRAME_CAP / full)})` +
-        ` | tax ${taxPct.toFixed(1)}%`,
+      `\n=== Sharding savings (rich, N=2000) ===\n` +
+        `  D1b shard (entity-data only) ${sharded.toFixed(0)} B/entity (per-shard cap ${Math.floor(DEFAULT_FRAME_CAP / sharded)})` +
+        ` | old flat doc +refs+membership ${withIndex.toFixed(0)} B/entity (cap ${Math.floor(DEFAULT_FRAME_CAP / withIndex)})` +
+        ` | saved ${savingsPct.toFixed(1)}%`,
     );
 
-    // Rich entities are heavier ⇒ lower ceiling than lean; both land in the
-    // low-thousands range at the 1MB default, and ~8× higher at vamp's 8MB cap.
+    // Sharded global cap: the per-shard figure × the number of provider DOs. The
+    // store is distributed, so "millions" is a matter of how many roots exist; a
+    // lobby's working set is only the union of the shards it subscribes to.
+    const perShardMem = Math.floor((64 * 1024 * 1024) / sharded);
+    console.log(
+      `\n=== Sharded global cap ===\n` +
+        `  per-shard ≈ ${perShardMem} rich (64MB DO mem) ⇒ ` +
+        `1k shards ≈ ${(perShardMem * 1000).toLocaleString()} | ` +
+        `100k shards ≈ ${(perShardMem * 100_000).toLocaleString()} entities (add provider DOs to scale)`,
+    );
+
+    // Rich entities are heavier ⇒ lower per-shard cap than lean; both land in the
+    // low-thousands at the 1MB default, ~8× higher at vamp's 8MB cap.
     expect(richHard.def).toBeGreaterThan(500);
     expect(leanHard.def).toBeGreaterThan(richHard.def);
-    expect(richHard.vamp).toBeGreaterThan(richHard.def * 7); // 8MB ≈ 8× the ceiling
-    expect(full).toBeGreaterThan(compsOnly); // the index does cost bytes
+    expect(richHard.vamp).toBeGreaterThan(richHard.def * 7); // 8MB ≈ 8× the cap
+    expect(withIndex).toBeGreaterThan(sharded); // dropping the index saves bytes
   }, 120_000);
 
   it("quantifies Phase A id-diet savings (uuid+component → nanoid16, no component)", () => {
@@ -483,7 +502,7 @@ describe("global-entity scale", () => {
     ecs.initialize();
     const parent = entitiesMap(doc);
     const observers: Array<() => void> = [];
-    for (const id of membersMap(doc, A).keys()) {
+    for (const id of parent.keys()) {
       const map = parent.get(id) as YMap<unknown>;
       const raw = map.toJSON() as Entity;
       (raw as Record<string, unknown>).id = id;
