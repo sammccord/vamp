@@ -18,17 +18,9 @@ import { HookRegistry, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
 import { DurableObject } from "cloudflare:workers";
 import { YStreamClient } from "y-durablestream";
-import { Doc, type Map as YMap } from "yjs";
-import type { YMapEvent } from "yjs";
-import {
-  entitiesMap,
-  membersMap,
-  migrateLegacyNamespace,
-  reapOrphanedEntities,
-  writeDelete,
-  writeInsert,
-  writeUpdate,
-} from "./entity-doc";
+import type { Doc, Map as YMap, YMapEvent } from "yjs";
+import { entitiesMap, removeEntity, writeEntityInsert, writeUpdate } from "./entity-doc";
+import { ShardManager } from "./shard-manager";
 import {
   applyKeyChange,
   componentKeysToReconcile,
@@ -251,9 +243,26 @@ export class ECSDurableObject<
     | undefined;
 
   // Sync properties
-  private doc = new Doc();
-  private client: YStreamClient | null = null;
   private static LOCAL_ORIGIN = Symbol("ecs-local");
+
+  // ── D1b: multi-provider sharding ─────────────────────────────
+  // One `Y.Doc` + sync client per `root` (= shard = provider DO name), owned by
+  // the ShardManager. Replaces the former single `this.doc`/`this.client`/
+  // `this._document`. The ECS `_entityStore` is the union of entities across all
+  // subscribed shard docs (the ECS is doc-agnostic; this DO bridges N docs ↔ one
+  // world). WIP: this path needs workerd integration validation — vamp DO tests
+  // do not run in the dev sandbox (see the entity-scaling-effort memory).
+  private shards!: ShardManager;
+  // id → its home shard root. Update/Delete mutation records carry no `root`, so
+  // we remember where each entity was inserted to route later writes and to drop
+  // a shard's entities on teardown.
+  private _entityRoot = new Map<string, string>();
+  // The lobby's own shard (`game/${ns}`); locally-spawned entities default here.
+  private _defaultRoot = "";
+  // Hysteresis (ms) before an unpinned shard is torn down; the alarm reaps.
+  private _shardGraceMs = 30_000;
+  // Per-shard entity-set observer cleanups (replaces the single membership obs.).
+  private _shardEntitySetCleanups = new Map<string, () => void>();
 
   // Per-instance state synced from the Yjs doc (working copy)
   private _entityStore = new Map<string, Entity>();
@@ -271,21 +280,14 @@ export class ECSDurableObject<
   private _reconcilingIds = new Set<string>();
   // Cleanup functions for per-entity Y.Map observers
   private _entityObserverCleanups = new Map<string, () => void>();
-  // Cleanup for the per-namespace membership-map observer
-  private _membershipObserverCleanup: (() => void) | null = null;
-  // Whether we have seeded the local ECS from the Yjs doc
+  // Whether the lobby's own shard has seeded the ECS + finalized initialize().
   private _seeded = false;
   // The namespace (Y.Array key) for this instance's entity list
   private _namespace = "";
-  // The resolved Yjs document name this instance connects to
-  private _document = "global";
   // Max decodable frame size for the sync client (see ECSRuntimeConfiguration).
   // Defaults to 8 MB; the whole global doc syncs as one frame, so this caps the
   // syncable world size (≈ maxFrameSize / per-entity-bytes).
   private _maxFrameSize = 8 * 1024 * 1024;
-  // Unsubscribe for the sync status listener (tracked so re-bootstrap on wake
-  // does not stack a second listener).
-  private _statusUnsub: (() => void) | null = null;
   // Tick loop (alarm) configuration, populated from the runtime configuration.
   private _tickIntervalMs = 0;
   private _tickArgsProvider: (() => UpdateArguments) | undefined;
@@ -361,13 +363,20 @@ export class ECSDurableObject<
             this.log.error("Hibernation wake with live sockets but no persisted namespace");
             return;
           }
-          const document = await this.ctx.storage.get<string>("__vamp:document");
           // Restore the runtime context seed persisted at first bootstrap so
           // `resolveContext` can re-derive the world's context with fresh data.
           // Absent (older DOs / never seeded) yields `undefined`, which falls back
           // to the static `config.context` — identical to the pre-seed behavior.
           const seed = await this.ctx.storage.get<Record<string, unknown>>("__vamp:context");
-          await this.setup(namespace, seed, document);
+          await this.setup(namespace, seed);
+          // Re-subscribe the persisted shard set so a hibernation-recreated DO
+          // re-aggregates the same multi-provider world. setup()/initialize()
+          // already re-opened the lobby's own default shard; restore re-opens the
+          // additional players' shards (character/* etc.). Live players re-pin on
+          // reconnect; provisional pins that no player re-confirms fall back out
+          // via the alarm reap once released (D2/D3 refines the release drivers).
+          const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
+          if (persistedShards && this.shards) this.shards.restore(persistedShards);
           // Rebuild per-connection ECS observers from each live socket's durable
           // attachment, so the generator-free interest-managed broadcast resumes
           // after wake WITHOUT the original `observe` generator (destroyed with
@@ -460,8 +469,9 @@ export class ECSDurableObject<
     if (this.ecs) return;
 
     this._namespace = namespace;
-    const document = configuration.document ?? "global";
-    this._document = document;
+    // The lobby's own shard. Locally-spawned entities default their `root` here;
+    // the lobby owns + writes it, and also subscribes to participants' shards.
+    this._defaultRoot = `game/${this._namespace}`;
     if (configuration.maxFrameSize !== undefined) this._maxFrameSize = configuration.maxFrameSize;
     this._onConnectionClose = configuration.onConnectionClose;
     this._rehydrateConnection = configuration.rehydrateConnection;
@@ -479,7 +489,6 @@ export class ECSDurableObject<
     this.ctx.waitUntil(
       this.ctx.storage.put({
         "__vamp:namespace": namespace,
-        "__vamp:document": document,
         ...(configuration.seed !== undefined ? { "__vamp:context": configuration.seed } : {}),
       }),
     );
@@ -518,32 +527,59 @@ export class ECSDurableObject<
       configuration.ecs,
     );
 
-    // Flush handler: batch all coalesced mutations in a single doc.transact
+    // Flush handler: mirror coalesced mutations to the Yjs docs. Each mutation is
+    // routed to its entity's home shard (`root`) and grouped so every shard doc
+    // gets ONE transaction. Cross-shard writes are therefore NOT atomic — a flush
+    // touching entities in multiple roots is eventually consistent across shards.
     this.ecs.setFlushHandler((mutations) => {
-      this.doc.transact(() => {
-        for (const [id, mutation] of mutations) {
-          if (this._reconcilingIds.has(id)) {
-            // Reconciled from remote: copy shadow entity (avoids additive mergeDelta)
-            const scope = this.ecs!.context.scope;
-            if (scope) {
-              const shadow = scope.shadowEntities.get(id);
-              if (shadow) {
-                entities.set(id, shadow);
-              } else if (scope.deletedIds.has(id)) {
-                entities.delete(id);
-              }
+      // Group by shard root. The working-store application below is doc-agnostic,
+      // so it runs in this first pass; the per-shard transactions run in the second.
+      const byRoot = new Map<string, Array<[string, MutationRecord<Entity, EntityDelta>]>>();
+      for (const [id, mutation] of mutations) {
+        if (this._reconcilingIds.has(id)) {
+          // Reconciled from remote: copy shadow entity (avoids additive mergeDelta)
+          const scope = this.ecs!.context.scope;
+          if (scope) {
+            const shadow = scope.shadowEntities.get(id);
+            if (shadow) {
+              entities.set(id, shadow);
+            } else if (scope.deletedIds.has(id)) {
+              entities.delete(id);
             }
-          } else {
-            // Locally-authored mutation: apply it to the working entity store so
-            // reads (`ecs.entities` / `ecs.entity`) reflect local changes. Remote
-            // changes instead arrive through the Yjs observers above.
-            applyMutation(entities, id, mutation, configuration.ecs);
           }
-          // Always mirror to Yjs (idempotent; includes local changes for mixed-case)
-          this._writeMutationToDoc(id, mutation);
+        } else {
+          // Locally-authored mutation: apply it to the working entity store so
+          // reads (`ecs.entities` / `ecs.entity`) reflect local changes. Remote
+          // changes instead arrive through the Yjs observers above.
+          applyMutation(entities, id, mutation, configuration.ecs);
         }
-      }, ECSDurableObject.LOCAL_ORIGIN);
+        const root = this._rootForMutation(id, mutation);
+        let group = byRoot.get(root);
+        if (!group) {
+          group = [];
+          byRoot.set(root, group);
+        }
+        group.push([id, mutation]);
+      }
+
+      // One transaction per shard doc, opening the shard if a new root appeared.
+      let acquiredNew = false;
+      for (const [root, group] of byRoot) {
+        let doc = this.shards.docFor(root);
+        if (!doc) {
+          doc = this._acquireShard(root);
+          acquiredNew = true;
+        }
+        doc.transact(() => {
+          for (const [id, mutation] of group) {
+            this._writeMutationToDoc(id, mutation, doc!, root);
+          }
+        }, ECSDurableObject.LOCAL_ORIGIN);
+      }
       this._reconcilingIds.clear();
+      // Persist the shard set only when a new root opened — the common
+      // all-known-roots flush touches no storage.
+      if (acquiredNew) this._persistActiveShards();
     });
 
     // Scope-open handler: drain pending remote changes into the scope
@@ -627,9 +663,14 @@ export class ECSDurableObject<
       this.router.useHooks(configuration.hooks);
     }
 
-    // Connect to the Yjs document and seed ECS once synced
-    this.connectToDoc(document);
-    this._ensureSyncedAndSeed();
+    // Build the shard manager and open the lobby's own shard. Opening the default
+    // root seeds the ECS + finalizes initialize() once that shard syncs (see
+    // `_onShardSynced`). Additional shards (participants' `character/*` etc.) are
+    // acquired on demand (an entity authored into a new root, or a future explicit
+    // subscribe driver — D2) and stream their entities in post-init.
+    this._initShardManager();
+    this._acquireShard(this._defaultRoot);
+    this._persistActiveShards();
 
     // If the runtime configuration enables a tick loop, schedule the first alarm.
     if (configuration.tickIntervalMs && configuration.tickIntervalMs > 0) {
@@ -762,125 +803,153 @@ export class ECSDurableObject<
     for (const resolve of resolvers) resolve();
   }
 
-  connectToDoc(docName: string) {
-    const bindings = this.env as CloudflareBindings;
-    // `GAME_STORAGE` is typed as `DurableObjectNamespace<YStreamProviderStub>`
-    // in the shim, so `get` returns a correctly-typed stub without a double cast.
-    const stub = bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(docName));
-    this.client = new YStreamClient(this.doc, { stub, maxFrameSize: this._maxFrameSize });
-    // Attach the membership observer BEFORE connect so the SyncStep2 burst is
-    // observed: members that arrive during initial sync land in
-    // `_pendingReconcile` instead of being silently dropped.
-    this._setupMembershipObserver();
-    // Do NOT wrap in waitUntil: connect() resolves only when the sync stream
-    // ends, so waitUntil would pin the isolate for the whole connection lifetime
-    // and defeat hibernation. Fire-and-forget; connect() is documented never to
-    // reject. Re-establishment after wake is handled by the constructor's
-    // re-bootstrap re-running connectToDoc.
-    void this.client.connect();
-  }
-
   disconnect() {
     this._teardownObservers();
-    // Clear the sync status listener so a re-bootstrap (hibernation wake) does
-    // not stack a second listener.
-    this._statusUnsub?.();
-    this._statusUnsub = null;
-    this.client?.disconnect();
-    this.client = null;
+    this.shards?.teardownAll();
+  }
+
+  // ── D1b: shard manager wiring ────────────────────────────────
+
+  /**
+   * Construct the {@link ShardManager}. Each shard's sync client is a
+   * `YStreamClient` over that root's provider DO; opening a shard wires its
+   * entity-set observer (so the SyncStep2 burst is captured) and, once it syncs,
+   * seeds its entities into the one ECS world (see {@link _onShardSynced}).
+   */
+  private _initShardManager() {
+    const bindings = this.env as CloudflareBindings;
+    this.shards = new ShardManager({
+      gracePeriodMs: this._shardGraceMs,
+      createClient: (root, doc) => {
+        // `GAME_STORAGE` is typed as `DurableObjectNamespace<YStreamProviderStub>`
+        // in the shim, so `get` returns a correctly-typed stub without a cast.
+        const stub = bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(root));
+        const client = new YStreamClient(doc, { stub, maxFrameSize: this._maxFrameSize });
+        const unsub = client.onStatusChange((status) => {
+          if (status === "synced") this._onShardSynced(root, doc);
+        });
+        // Do NOT waitUntil: connect() resolves only when the sync stream ends, so
+        // it would pin the isolate for the connection lifetime and defeat
+        // hibernation. Fire-and-forget; connect() is documented never to reject.
+        void client.connect();
+        // onStatusChange does not replay, so re-check synchronously in case the
+        // shard reached `synced` between wiring and now (a fast/local sync).
+        if (client.synced) this._onShardSynced(root, doc);
+        return {
+          disconnect() {
+            unsub?.();
+            client.disconnect();
+          },
+        };
+      },
+      // ShardManager.open() fires onShardOpen BEFORE createClient connects, so the
+      // entity-set observer is attached before the sync burst arrives.
+      onShardOpen: (root, doc) => this._observeShardEntitySet(root, doc),
+      onShardClose: (root, doc) => this._closeShard(root, doc),
+    });
+  }
+
+  /** Open (pin) `root`, returning its shard doc. */
+  private _acquireShard(root: string): Doc {
+    return this.shards.acquire(root);
   }
 
   /**
-   * Wait for the YStreamClient to finish initial sync, then seed the local
-   * ECS from the Yjs doc (namespace array + per-entity maps), attach observers,
-   * and finalize ECS initialization.
+   * Persist the currently-subscribed root set so a hibernation-recreated
+   * constructor can re-subscribe (see the constructor's wake path). Fire-and-
+   * forget; cheap + idempotent.
    */
-  private _ensureSyncedAndSeed() {
-    if (this._seeded) return;
+  private _persistActiveShards() {
+    this.ctx.waitUntil(this.ctx.storage.put("__vamp:shards", this.shards.activeRoots()));
+  }
 
-    // Subscribe first, capturing the unsubscribe so we self-unsubscribe once
-    // seeded and so re-bootstrap (hibernation wake) does not stack listeners.
-    const unsub = this.client?.onStatusChange((status) => {
-      if (status === "synced" && !this._seeded) {
-        this._seedFromDoc();
-        this._statusUnsub?.();
-        this._statusUnsub = null;
-      }
-    });
-    this._statusUnsub = unsub ?? null;
+  /// ── Doc seeding (per shard) ──────────────────────────────────
 
-    // Re-check `synced` synchronously: connect() may have reached `synced`
-    // between the field read inside the subscription wiring and now.
-    // onStatusChange does NOT replay the current status, so without this a fast
-    // sync is missed and `ready()` would force-init an empty world.
-    if (this.client?.synced && !this._seeded) {
-      this._seedFromDoc();
-      this._statusUnsub?.();
-      this._statusUnsub = null;
+  /**
+   * Called when a shard finishes initial sync. Seeds every entity in that shard's
+   * doc into the ECS. The lobby's own (default-root) shard additionally gates ECS
+   * initialization + `ready()`: once it has synced + seeded, the world is
+   * publishable. A shard that syncs AFTER init streams its entities in via
+   * `_pendingReconcile` so they broadcast to clients like any remote change.
+   */
+  private _onShardSynced(root: string, doc: Doc) {
+    if (!this.ecs) return;
+    const alreadyInit = this.ecs.initialized;
+    for (const id of entitiesMap(doc).keys()) {
+      this._addEntityFromDoc(id, doc, root);
+      if (alreadyInit) this._pendingReconcile.set(id, { type: "insert" });
+    }
+    if (root === this._defaultRoot && !this._seeded) {
+      this._seeded = true;
+      this.ecs.initialize();
+      this._resolveReady();
     }
   }
 
-  /// ── Doc seeding ──────────────────────────────────────────────
-
-  /** The GLOBAL `id → components` store, shared across all namespaces. */
-  private _entities(): YMap<YMap<unknown>> {
-    return entitiesMap(this.doc);
-  }
-
-  /** This namespace's membership set: `id → true` for entities this lobby tracks. */
-  private _members(): YMap<boolean> {
-    return membersMap(this.doc, this._namespace);
-  }
-
-  private _seedFromDoc() {
-    if (this._seeded || !this.ecs || !this.client?.synced) return;
-    this._seeded = true;
-
-    // Upgrade any document still in the legacy layout before reading.
-    migrateLegacyNamespace(this.doc, this._namespace, ECSDurableObject.LOCAL_ORIGIN);
-
-    // Seed every entity this lobby is a member of. The membership observer is
-    // already attached (connectToDoc), so members added during the sync burst
-    // are captured; `_addEntityFromDoc` is idempotent (guards on `hasEntity` and
-    // existing observers) so an id is never double-processed.
-    for (const id of this._members().keys()) {
-      this._addEntityFromDoc(id);
-    }
-
-    this.ecs.initialize();
-    this._resolveReady();
-  }
-
-  private _setupMembershipObserver() {
-    const members = this._members();
-    const handler = (event: YMapEvent<boolean>) => {
+  /**
+   * Observe a shard's entity-set (`__vamp:entities`). In the sharded model a
+   * shard's entity set IS its membership: an add pulls the entity into the ECS, a
+   * delete evicts it. Replaces the former per-namespace membership-map observer.
+   */
+  private _observeShardEntitySet(root: string, doc: Doc) {
+    const entities = entitiesMap(doc);
+    const handler = (event: YMapEvent<YMap<unknown>>) => {
       if (event.transaction.origin === ECSDurableObject.LOCAL_ORIGIN) return;
       for (const [id, change] of event.changes.keys) {
         if (change.action === "delete") {
           this._removeEntityFromDoc(id);
         } else {
-          // add or re-add: pull the global entity into this lobby.
-          this._addEntityFromDoc(id);
+          // add or re-add: pull the entity into the ECS from this shard.
+          this._addEntityFromDoc(id, doc, root);
           this._pendingReconcile.set(id, { type: "insert" });
         }
       }
     };
-    members.observe(handler);
-    this._membershipObserverCleanup = () => members.unobserve(handler);
+    entities.observe(handler);
+    this._shardEntitySetCleanups.set(root, () => entities.unobserve(handler));
   }
 
-  private _addEntityFromDoc(id: string) {
+  /**
+   * Tear down a shard: unwire its entity-set observer and locally evict its
+   * entities from the ECS world. This is a LOCAL eviction, not a synced delete —
+   * the entities still live in their provider doc, so other lobbies keep them.
+   */
+  private _closeShard(root: string, _doc: Doc) {
+    const cleanup = this._shardEntitySetCleanups.get(root);
+    if (cleanup) {
+      cleanup();
+      this._shardEntitySetCleanups.delete(root);
+    }
+    if (this.ecs) {
+      // Snapshot the ids first — the loop mutates `_entityRoot`.
+      const ids: string[] = [];
+      for (const [id, r] of this._entityRoot) if (r === root) ids.push(id);
+      for (const id of ids) {
+        this._unobserveEntity(id);
+        const entity = this._entityStore.get(id);
+        if (entity) {
+          this.ecs.delete(entity);
+          this._pendingReconcile.set(id, { type: "delete", entity });
+        }
+        this._entityRoot.delete(id);
+      }
+    }
+    this._persistActiveShards();
+  }
+
+  private _addEntityFromDoc(id: string, doc: Doc, root: string) {
     if (!this.ecs) return;
-    const map = this._entities().get(id);
+    const map = entitiesMap(doc).get(id);
     if (!map) return;
+    this._entityRoot.set(id, root);
     const raw = map.toJSON() as Entity;
     // If entity doesn't exist locally, register it in the ECS archetype graph
     if (!this.ecs.hasEntity(id)) {
-      // ensure id is set
+      // ensure id is set (it is the map key, dropped from the component data)
       if (!raw.id) (raw as Record<string, unknown>).id = id;
       this.ecs.insert(raw);
     }
-    this._observeEntity(id);
+    this._observeEntity(id, doc);
   }
 
   private _removeEntityFromDoc(id: string) {
@@ -891,13 +960,14 @@ export class ECSDurableObject<
       this._pendingReconcile.set(id, { type: "delete", entity });
     }
     this._unobserveEntity(id);
+    this._entityRoot.delete(id);
   }
 
   /// ── Per-entity Y.Map observers ───────────────────────────────
 
-  private _observeEntity(id: string) {
+  private _observeEntity(id: string, doc: Doc) {
     if (this._entityObserverCleanups.has(id)) return;
-    const map = this._entities().get(id);
+    const map = entitiesMap(doc).get(id);
     if (!map) return;
     const handler = (event: YMapEvent<unknown>) => {
       if (event.transaction.origin === ECSDurableObject.LOCAL_ORIGIN) return;
@@ -973,40 +1043,64 @@ export class ECSDurableObject<
       cleanup();
     }
     this._entityObserverCleanups.clear();
-    if (this._membershipObserverCleanup) {
-      this._membershipObserverCleanup();
-      this._membershipObserverCleanup = null;
+    for (const cleanup of this._shardEntitySetCleanups.values()) {
+      cleanup();
     }
+    this._shardEntitySetCleanups.clear();
   }
 
-  /// ── Writing local mutations back to the Yjs doc ──────────────
+  /// ── Writing local mutations back to the Yjs docs ─────────────
 
-  private _writeMutationToDoc(id: string, mutation: MutationRecord<Entity, EntityDelta>) {
-    // Runs inside the flush handler's `doc.transact(LOCAL_ORIGIN)`, so the
-    // entity-doc `write*` helpers (which assume a surrounding transaction) batch
-    // into one update message.
+  /**
+   * The home shard `root` for a mutation. An Insert may carry an explicit `root`
+   * on the entity (placing it in a specific shard, e.g. a `character/${player}`);
+   * otherwise it defaults to the lobby's own shard. Update/Delete records carry no
+   * entity, so they resolve to the entity's remembered home shard.
+   */
+  private _rootForMutation(id: string, mutation: MutationRecord<Entity, EntityDelta>): string {
+    if (mutation.tag === MutationType.Insert) {
+      const entity = mutation.value.entity as Record<string, unknown>;
+      return (entity.root as string | undefined) ?? this._entityRoot.get(id) ?? this._defaultRoot;
+    }
+    return this._entityRoot.get(id) ?? this._defaultRoot;
+  }
+
+  /**
+   * Mirror one mutation into its shard's `doc`. Runs inside the flush handler's
+   * per-shard `doc.transact(LOCAL_ORIGIN)`, so the entity-doc `write*` helpers
+   * (which assume a surrounding transaction) batch into one update message.
+   * Writes **entity data only** — the shard's entity-set is its membership, so
+   * there is no separate refcount/membership index to maintain.
+   */
+  private _writeMutationToDoc(
+    id: string,
+    mutation: MutationRecord<Entity, EntityDelta>,
+    doc: Doc,
+    root: string,
+  ) {
     switch (mutation.tag) {
       case MutationType.Insert: {
-        writeInsert(
-          this.doc,
-          this._namespace,
-          id,
-          mutation.value.entity as Record<string, unknown>,
-        );
-        // Observe the global entity so cross-namespace mutations reconcile here
+        const entity = mutation.value.entity as Record<string, unknown>;
+        // Stamp the resolved home shard onto the entity so subscribers (and a
+        // later read) see where it lives; defaults the lobby's own shard.
+        if (entity.root === undefined) entity.root = root;
+        writeEntityInsert(doc, id, entity);
+        this._entityRoot.set(id, root);
+        // Observe so a co-subscriber's mutation to this entity reconciles here,
         // even though this insert originated locally.
-        this._observeEntity(id);
+        this._observeEntity(id, doc);
         break;
       }
       case MutationType.Update: {
-        writeUpdate(this.doc, id, mutation.value.delta as Record<string, unknown>);
+        writeUpdate(doc, id, mutation.value.delta as Record<string, unknown>);
         break;
       }
       case MutationType.Delete: {
-        // Drop this lobby's membership + reference; the global entity is GC'd
-        // only when no namespace references it anymore.
-        writeDelete(this.doc, this._namespace, id);
+        // Remove from the home shard doc; syncs to every subscriber. Owner-only
+        // delete is an app-level policy; cross-shard ops are eventually consistent.
+        removeEntity(doc, id);
         this._unobserveEntity(id);
+        this._entityRoot.delete(id);
         break;
       }
     }
@@ -1132,6 +1226,9 @@ export class ECSDurableObject<
 
     this._tickCount++;
 
+    // Hysteresis teardown: close shards whose grace period elapsed with no pins.
+    this.shards.reap(Date.now());
+
     try {
       const tickArgs = (this._tickArgsProvider?.() ?? []) as UpdateArguments;
       // Run time-based systems through a scope so tick mutations are batched into
@@ -1150,11 +1247,10 @@ export class ECSDurableObject<
     // the single-large-update row and quiet-but-large worlds. Run via waitUntil so
     // it does not block the tick or race the flush handler's doc.transact.
     if (shouldCompactThisTick(this._tickCount, this._compactEveryNTicks)) {
-      // GC any globally-orphaned entities (the concurrent last-reference race)
-      // before compacting, so the snapshot does not persist dead entities.
-      // Safe: an insert writes the entity and its refcount in one transaction,
-      // so an empty refcount set always means a genuine orphan, never sync lag.
-      reapOrphanedEntities(this.doc, ECSDurableObject.LOCAL_ORIGIN);
+      // Compact every subscribed shard's provider. (The cross-namespace orphan
+      // GC is gone: in the sharded model an entity lives in exactly one home
+      // shard whose subscriber set IS its references — no global refcount to
+      // reap; a shard's lifecycle governs its entities.)
       this.ctx.waitUntil(this._commitDoc());
     }
 
@@ -1172,20 +1268,23 @@ export class ECSDurableObject<
   }
 
   /**
-   * Force the storage provider Durable Object to compact its world document into
-   * a snapshot, bounding the incremental-update log. The provider owns the
-   * authoritative doc; we invoke its `compact()` RPC (added to `ECSStorage`)
-   * rather than its in-memory doc, so this is the time-based backstop the byte/
-   * update thresholds alone cannot provide for single-large-update and
-   * quiet-but-large worlds.
+   * Force each subscribed shard's storage provider Durable Object to compact its
+   * world document into a snapshot, bounding the incremental-update log. The
+   * provider owns the authoritative doc; we invoke its `compact()` RPC (added to
+   * `ECSStorage`), so this is the time-based backstop the byte/update thresholds
+   * alone cannot provide for single-large-update and quiet-but-large worlds.
    */
   private async _commitDoc(): Promise<void> {
-    try {
-      const bindings = this.env as CloudflareBindings;
-      const stub = bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(this._document));
-      await stub.compact();
-    } catch (err) {
-      this.log.error("Error committing doc for compaction", {}, err as Error);
-    }
+    const bindings = this.env as CloudflareBindings;
+    await Promise.all(
+      this.shards.activeRoots().map(async (root) => {
+        try {
+          const stub = bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(root));
+          await stub.compact();
+        } catch (err) {
+          this.log.error("Error committing shard for compaction", { root }, err as Error);
+        }
+      }),
+    );
   }
 }

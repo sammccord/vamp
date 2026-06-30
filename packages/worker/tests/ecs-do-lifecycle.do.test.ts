@@ -3,7 +3,7 @@ import { ServiceRegistry } from "@tempojs/server";
 import { type BaseEntity, createEntitySystem, type ECSOptions } from "@vamp/ecs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as Y from "yjs";
-import { entitiesMap, membersMap, writeInsert } from "../src/entity-doc.ts";
+import { entitiesMap, writeInsert } from "../src/entity-doc.ts";
 
 /**
  * Durable Object lifecycle tests, run in plain Node (see vite.config.ts, which
@@ -196,18 +196,6 @@ function seedDoc(namespace: string, entities: Array<Entity & { id: string }>): U
   return Y.encodeStateAsUpdate(doc);
 }
 
-/** A Yjs doc in the LEGACY layout (per-namespace `Y.Array` + top-level entity maps). */
-function legacySeedDoc(namespace: string, entities: Array<Entity & { id: string }>): Uint8Array {
-  const doc = new Y.Doc();
-  const arr = doc.getArray<string>(namespace);
-  for (const e of entities) {
-    arr.push([e.id]);
-    const map = doc.getMap<unknown>(e.id);
-    for (const [k, v] of Object.entries(e)) map.set(k, v);
-  }
-  return Y.encodeStateAsUpdate(doc);
-}
-
 interface RuntimeOverrides {
   registerSystems?: (ecs: unknown) => void;
   tickIntervalMs?: number;
@@ -240,17 +228,19 @@ beforeEach(() => {
 });
 
 describe("ECSDurableObject — bootstrap & persistence", () => {
-  test("setup() persists the namespace, document, and context seed to storage", async () => {
+  test("setup() persists the namespace, context seed, and subscribed shard set", async () => {
     configureRuntime();
     const storage = makeStorage();
     const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
 
-    await instance.setup("room1", { faction: 3 }, "doc-a");
+    await instance.setup("room1", { faction: 3 });
 
     expect(instance.initialized()).toBe(true);
     expect(storage._map.get("__vamp:namespace")).toBe("room1");
-    expect(storage._map.get("__vamp:document")).toBe("doc-a");
     expect(storage._map.get("__vamp:context")).toEqual({ faction: 3 });
+    // The lobby opens its own shard (`game/${ns}`) at bootstrap, and persists the
+    // active root set so a hibernation-recreated constructor can re-subscribe.
+    expect(storage._map.get("__vamp:shards")).toEqual(["game/room1"]);
   });
 
   test("seeds the local ECS world from the persisted Yjs document on connect", async () => {
@@ -268,32 +258,41 @@ describe("ECSDurableObject — bootstrap & persistence", () => {
     expect(instance.ecs.entity("e2")).toMatchObject({ x: 1, y: 2 });
   });
 
-  test("migrates a legacy-layout document and seeds from it", async () => {
-    configureRuntime();
-    const instance = newDO(
-      makeCtx(makeStorage()),
-      makeEnv(makeStub(legacySeedDoc("room1", [{ id: "old1", x: 3, y: 4 }]))),
-    );
-
-    await instance.setup("room1");
-
-    expect(instance.ecs.entity("old1")).toMatchObject({ x: 3, y: 4 });
-    // Migration lifts the entity into the shared global store + namespace membership.
-    expect(entitiesMap(instance.doc).has("old1")).toBe(true);
-    expect(membersMap(instance.doc, "room1").has("old1")).toBe(true);
-  });
-
-  test("a local insert is written through to the shared Yjs document", async () => {
+  test("a local insert is written through to its shard's Yjs document", async () => {
     configureRuntime();
     const instance = newDO(makeCtx(makeStorage()), makeEnv(makeStub()));
     await instance.setup("room1");
 
     await instance.ecs.withScope(() => instance.ecs.insert({ id: "p1", x: 10, y: 20 }));
 
-    // Inserts land in the global entity store and this namespace's membership —
-    // the unit the storage DO durably persists.
-    expect(entitiesMap(instance.doc).get("p1")?.toJSON()).toMatchObject({ x: 10, y: 20 });
-    expect(membersMap(instance.doc, "room1").has("p1")).toBe(true);
+    // A locally-spawned entity defaults to the lobby's own shard (`game/${ns}`)
+    // and is written there as entity data only — the shard's entity-set is its
+    // membership, so there is no separate refcount/membership index.
+    const shardDoc = instance.shards.docFor("game/room1");
+    expect(entitiesMap(shardDoc).get("p1")?.toJSON()).toMatchObject({
+      x: 10,
+      y: 20,
+      // The resolved home shard is stamped onto the entity so subscribers see it.
+      root: "game/room1",
+    });
+  });
+
+  test("an entity authored with an explicit root opens + writes to that shard", async () => {
+    configureRuntime();
+    const instance = newDO(makeCtx(makeStorage()), makeEnv(makeStub()));
+    await instance.setup("room1");
+
+    await instance.ecs.withScope(() =>
+      instance.ecs.insert({ id: "c1", x: 1, y: 2, root: "character/alice" }),
+    );
+
+    // The explicit root opens a second shard; the entity lands in THAT shard's
+    // doc, not the lobby's own. Both shards are now subscribed + persisted.
+    expect(instance.shards.docFor("game/room1")?.getMap("__vamp:entities").has("c1")).toBe(false);
+    expect(
+      entitiesMap(instance.shards.docFor("character/alice")).get("c1")?.toJSON(),
+    ).toMatchObject({ x: 1, y: 2 });
+    expect(instance.shards.activeRoots().sort()).toEqual(["character/alice", "game/room1"]);
   });
 });
 
@@ -304,7 +303,7 @@ describe("ECSDurableObject — hibernation wake", () => {
 
     // A DO that was previously initialized: namespace persisted + live sockets
     // carrying their session attachments (what survives an eviction).
-    const storage = makeStorage({ "__vamp:namespace": "room1", "__vamp:document": "global" });
+    const storage = makeStorage({ "__vamp:namespace": "room1" });
     const ws1 = makeWs({ userId: "u1" });
     const ws2 = makeWs({ userId: "u2" });
     const ctx = makeCtx(storage, [ws1, ws2]);

@@ -138,6 +138,17 @@ export function writeInsert(
   joinNamespace(doc, namespace, id);
 }
 
+/**
+ * Remove an entity from its shard doc — the sharded-model delete. In the
+ * `root`-keyed sharding model a shard's entity-set *is* its membership, so a
+ * delete is simply dropping the entity's map from `__vamp:entities`; there is no
+ * separate refcount/membership index to release. Syncs to every subscriber of
+ * the shard. Assumes a surrounding transaction.
+ */
+export function removeEntity(doc: Doc, id: string): void {
+  entitiesMap(doc).delete(id);
+}
+
 /** Apply a component delta (set/delete keys) to a global entity. Assumes a surrounding transaction. */
 export function writeUpdate(doc: Doc, id: string, delta: Record<string, unknown>): void {
   const map = entitiesMap(doc).get(id);
