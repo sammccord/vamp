@@ -51,6 +51,9 @@ catalogs:
     mitata:
       specifier: ^1.0.34
       version: 1.0.34
+    nanoid:
+      specifier: ^5.1.6
+      version: 5.1.16
     pino:
       specifier: ^10.3.1
       version: 10.3.1
@@ -82,8 +85,8 @@ catalogs:
       specifier: ^4.74.0
       version: 4.74.0
     y-durablestream:
-      specifier: ^0.4.0
-      version: 0.4.0
+      specifier: ^0.7.0
+      version: 0.7.0
     yjs:
       specifier: ^13.6.30
       version: 13.6.30
@@ -134,6 +137,9 @@ importers:
       hono:
         specifier: 'catalog:'
         version: 4.12.14
+      nanoid:
+        specifier: 'catalog:'
+        version: 5.1.16
       solid-js:
         specifier: 'catalog:'
         version: 1.9.13
@@ -185,7 +191,7 @@ importers:
         version: 8.21.0
       y-durablestream:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.7.0
       yjs:
         specifier: 'catalog:'
         version: 13.6.30
@@ -353,7 +359,7 @@ importers:
         version: 1.3.1
       y-durablestream:
         specifier: 'catalog:'
-        version: 0.4.0
+        version: 0.7.0
       yjs:
         specifier: 'catalog:'
         version: 13.6.30
@@ -3085,14 +3091,14 @@ packages:
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
-  nanoid@3.3.11:
-    resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
-
   nanoid@3.3.13:
     resolution: {integrity: sha512-sPdqC6ByMVVGvF1ynvvMo0/o+oD1VX7DaHhijt1bFgjvBkHBib4t49GoNDhf2NDta4oeUNlaGbSt5K7qjZ955Q==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
+    hasBin: true
+
+  nanoid@5.1.16:
+    resolution: {integrity: sha512-kVrnsrJqMR8+oLJnGEmSWw9BivK5mt7H3FZatVRjrc5wGqFYuBxX1yG7+A7Gi5AefkX6t/oCkizcQgpu0cY1dQ==}
+    engines: {node: ^18 || >=20}
     hasBin: true
 
   node-releases@2.0.48:
@@ -3657,8 +3663,8 @@ packages:
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
 
-  y-durablestream@0.4.0:
-    resolution: {integrity: sha512-51k/+L44EU7nDkOkYGSafFr0kgeZKJkRpTERYcehF0Nk3Ntf1oksaWV9Cvy7FJDS6RJzwmQZPHaLe3kvIskkOg==}
+  y-durablestream@0.7.0:
+    resolution: {integrity: sha512-s+umqgKhpw/cuRH/3HFY7cjhfsqMZqiPx9v4kDTyJ2kXt9CYtHOxdJt5LYmS7hylYRnJPgXwN7E7KOczhBv1jg==}
 
   y-protocols@1.0.7:
     resolution: {integrity: sha512-YSVsLoXxO67J6eE/nV4AtFtT3QEotZf5sK5BHxFBXso7VDUT3Tx07IfA6hsu5Q5OmBdMkQVmFZ9QOA7fikWvnw==}
@@ -5503,9 +5509,9 @@ snapshots:
 
   ms@2.1.3: {}
 
-  nanoid@3.3.11: {}
-
   nanoid@3.3.13: {}
+
+  nanoid@5.1.16: {}
 
   node-releases@2.0.48: {}
 
@@ -5781,7 +5787,7 @@ snapshots:
 
   postcss@8.5.8:
     dependencies:
-      nanoid: 3.3.11
+      nanoid: 3.3.13
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
@@ -6358,7 +6364,7 @@ snapshots:
 
   xmlchars@2.2.0: {}
 
-  y-durablestream@0.4.0:
+  y-durablestream@0.7.0:
     dependencies:
       lib0: 0.2.117
       y-protocols: 1.0.7(yjs@13.6.30)

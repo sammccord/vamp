@@ -1,8 +1,14 @@
 import { createBaseMutator, ECS, type ECSOptions } from "@vamp/ecs";
+import { nanoid } from "nanoid";
 import { describe, expect, it } from "vitest";
-import { Doc, encodeStateAsUpdate, Map as YMap } from "yjs";
+import { applyUpdate, Doc, encodeStateAsUpdate, Map as YMap } from "yjs";
 
-import { entitiesMap, membersMap, writeInsert } from "../../../packages/worker/src/entity-doc";
+import {
+  addRef,
+  entitiesMap,
+  membersMap,
+  writeInsert,
+} from "../../../packages/worker/src/entity-doc";
 import { type Entity, type EntityDelta, Tags } from "../src/bebop";
 
 /**
@@ -29,9 +35,11 @@ import { type Entity, type EntityDelta, Tags } from "../src/bebop";
 const A = "bench-ns";
 
 // ── y-durablestream frame codec replica (src/protocol.ts) ────────────────────
-// 4-byte big-endian length header + 1 MB payload cap. Mirrors the published
-// codec so the ceiling proof exercises the real framing math.
-const MAX_FRAME_SIZE = 1024 * 1024;
+// 4-byte big-endian length header + configurable payload cap. Mirrors the
+// published codec so the ceiling proof exercises the real framing math.
+// Can't import the real symbols (package entry pulls in `cloudflare:workers`).
+const DEFAULT_FRAME_CAP = 1024 * 1024; // y-durablestream DEFAULT_MAX_FRAME_SIZE
+const VAMP_FRAME_CAP = 8 * 1024 * 1024; // what vamp configures (ecs.ts maxFrameSize)
 
 function encodeFrame(message: Uint8Array): Uint8Array {
   const frame = new Uint8Array(4 + message.byteLength);
@@ -41,13 +49,54 @@ function encodeFrame(message: Uint8Array): Uint8Array {
 }
 
 /** Decode one frame, throwing exactly as y-durablestream's FrameDecoder does. */
-function decodeFrameOrThrow(frame: Uint8Array): Uint8Array {
+function decodeFrameOrThrow(frame: Uint8Array, cap = DEFAULT_FRAME_CAP): Uint8Array {
   const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
   const len = view.getUint32(0, false);
-  if (len > MAX_FRAME_SIZE) {
-    throw new Error(`Frame payload length ${len} exceeds maximum of ${MAX_FRAME_SIZE} bytes`);
+  if (len > cap) {
+    throw new Error(`Frame payload length ${len} exceeds maximum of ${cap} bytes`);
   }
   return frame.slice(4, 4 + len);
+}
+
+// ── y-durablestream message layer replica (Phase B2, src/protocol.ts) ─────────
+// Splits one message into ≤cap frames with an 8-byte [total][index] part header
+// and reassembles by concatenation — the byte-level chunking that lifts the
+// single-frame ceiling. Mirrored locally (can't import the real symbols here).
+const PART_HEADER = 8;
+
+function encodeMessageLocal(message: Uint8Array, chunkCap: number): Uint8Array[] {
+  const maxChunk = Math.max(1, chunkCap - 4 - PART_HEADER); // 4 = frame length header
+  const total = Math.max(1, Math.ceil(message.byteLength / maxChunk));
+  const frames: Uint8Array[] = [];
+  for (let i = 0; i < total; i++) {
+    const chunk = message.subarray(i * maxChunk, (i + 1) * maxChunk);
+    const payload = new Uint8Array(PART_HEADER + chunk.byteLength);
+    const v = new DataView(payload.buffer);
+    v.setUint32(0, total, false);
+    v.setUint32(4, i, false);
+    payload.set(chunk, PART_HEADER);
+    frames.push(encodeFrame(payload));
+  }
+  return frames;
+}
+
+/** Reassemble frames into the original message, enforcing the per-frame cap. */
+function reassembleMessageLocal(frames: Uint8Array[], cap: number): Uint8Array {
+  const parts: Uint8Array[] = [];
+  for (const f of frames) {
+    const payload = decodeFrameOrThrow(f, cap); // each frame must be within cap
+    const v = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    parts[v.getUint32(4, false)] = payload.subarray(PART_HEADER);
+  }
+  let len = 0;
+  for (const p of parts) len += p.byteLength;
+  const out = new Uint8Array(len);
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.byteLength;
+  }
+  return out;
 }
 
 // ── ECS options (pure half of game.generated.ts; that file pulls @vamp/worker) ─
@@ -91,7 +140,7 @@ function richEntity(i: number): Entity {
   if (i % 3 === 0) tags.push(Tags.Hostile);
   if (i % 5 === 0) tags.push(Tags.Flying);
   return {
-    id: `e-${i.toString(36).padStart(8, "0")}`,
+    id: nanoid(16), // production id scheme (see examples/basic/src/index.ts)
     tags,
     children: [],
     health: { points: 50 + (i % 50), min: 0, max: 100, rate: 1, interval: 0 },
@@ -108,7 +157,7 @@ function richEntity(i: number): Entity {
 /** Lean entity: id + position + health only. */
 function leanEntity(i: number): Entity {
   return {
-    id: `e-${i.toString(36).padStart(8, "0")}`,
+    id: nanoid(16),
     tags: [],
     position: { x: (i * 13) % 512, y: (i * 7) % 512 },
     health: { points: 100, min: 0, max: 100, rate: 0, interval: 0 },
@@ -138,7 +187,7 @@ function buildComponentsOnly(n: number, make: (i: number) => Entity): Doc {
       const e = make(i) as Record<string, unknown>;
       const map = new YMap<unknown>();
       entities.set(e.id as string, map);
-      for (const k in e) if (e[k] !== undefined) map.set(k, e[k]);
+      for (const k in e) if (k !== "id" && e[k] !== undefined) map.set(k, e[k]);
     }
   });
   return doc;
@@ -147,6 +196,28 @@ function buildComponentsOnly(n: number, make: (i: number) => Entity): Doc {
 /** Snapshot bytes streamed on connect (≈ the SyncStep2 frame payload). */
 function snapshotBytes(doc: Doc): number {
   return encodeStateAsUpdate(doc).byteLength;
+}
+
+/**
+ * Pre-Phase-A layout for an apples-to-apples delta: 36-char `crypto.randomUUID`
+ * ids AND the id stored as a redundant component (id encoded 4×). Mirrors the
+ * old `writeInsert`.
+ */
+function buildOldScheme(n: number, make: (i: number) => Entity): Doc {
+  const doc = new Doc();
+  const entities = entitiesMap(doc);
+  doc.transact(() => {
+    for (let i = 0; i < n; i++) {
+      const e = make(i) as Record<string, unknown>;
+      e.id = crypto.randomUUID(); // 36-char uuid
+      const map = new YMap<unknown>();
+      entities.set(e.id as string, map);
+      for (const k in e) if (e[k] !== undefined) map.set(k, e[k]); // INCLUDING id
+      addRef(doc, A, e.id as string);
+      membersMap(doc, A).set(e.id as string, true);
+    }
+  });
+  return doc;
 }
 
 /** Simulate `_seedFromDoc` + `_addEntityFromDoc`: toJSON + ecs.insert + observe. */
@@ -163,6 +234,7 @@ function seedMs(doc: Doc): number {
     const map = parent.get(id) as YMap<unknown> | undefined;
     if (!map) continue;
     const raw = map.toJSON() as Entity;
+    if (!raw.id) (raw as Record<string, unknown>).id = id; // id is not stored as a component
     if (!ecs.hasEntity(id)) ecs.insert(raw);
     map.observe(handler); // per-entity observer attach (the DO does this)
   }
@@ -197,24 +269,29 @@ function measure(make: (i: number) => Entity, sizes: number[]): Row[] {
   return rows;
 }
 
-function report(title: string, rows: Row[]): number {
+function report(title: string, rows: Row[]): { def: number; vamp: number } {
   const perEntity = rows.reduce((s, r) => s + r.perEntity, 0) / rows.length;
-  const nHard = Math.floor(MAX_FRAME_SIZE / perEntity);
+  const nDefault = Math.floor(DEFAULT_FRAME_CAP / perEntity);
+  const nVamp = Math.floor(VAMP_FRAME_CAP / perEntity);
   console.log(`\n=== ${title} ===`);
   console.log("      N |  snapshot |  B/entity |  seed ms | compact ms | % of 1MB frame");
   for (const r of rows) {
-    const pct = ((r.bytes / MAX_FRAME_SIZE) * 100).toFixed(1);
+    const pct = ((r.bytes / DEFAULT_FRAME_CAP) * 100).toFixed(1);
     console.log(
       `  ${String(r.n).padStart(6)} | ${(r.bytes / 1024).toFixed(1).padStart(7)}KB | ` +
         `${r.perEntity.toFixed(0).padStart(6)} B | ${r.seedMs.toFixed(1).padStart(7)} | ` +
         `${r.compactMs.toFixed(2).padStart(9)} | ${pct.padStart(6)}%`,
     );
   }
+  // Post-B2 the frame cap no longer bounds size (snapshot is chunked + reassembled),
+  // so the bound is DO memory. Conservative: ~64 MB usable for the encoded doc
+  // (the rest of the 128 MB isolate holds the ECS working store + observers).
+  const memBound = Math.floor((64 * 1024 * 1024) / perEntity);
   console.log(
-    `  → mean B/entity ≈ ${perEntity.toFixed(0)} B  ⇒  HARD ceiling N_max ≈ ${nHard} ` +
-      `(1MB frame); KV-snapshot ceiling ≈ ${Math.floor((128 * 1024) / perEntity)} (128KB per-value)`,
+    `  → mean B/entity ≈ ${perEntity.toFixed(0)} B  ⇒  pre-B2 N_max ≈ ${nDefault} @1MB / ${nVamp} @8MB frame; ` +
+      `post-B2 (chunked) bound ≈ ${memBound} (≈64MB DO memory); KV-snapshot ceiling ≈ ${Math.floor((128 * 1024) / perEntity)} (128KB)`,
   );
-  return nHard;
+  return { def: nDefault, vamp: nVamp };
 }
 
 // ── the benchmark ────────────────────────────────────────────────────────────
@@ -226,7 +303,7 @@ describe("global-entity scale", () => {
     const leanHard = report("LEAN entity (id + position + health)", measure(leanEntity, sizes));
 
     // Linearity: per-entity bytes ~constant (≤15% spread) ⇒ snapshot is O(N) and
-    // the ceiling is a clean N_max ≈ 1MB/B.
+    // the ceiling is a clean N_max ≈ cap/B.
     const rich = measure(richEntity, [500, 4000]);
     const spread = Math.abs(rich[0].perEntity - rich[1].perEntity) / rich[0].perEntity;
     expect(spread).toBeLessThan(0.15);
@@ -239,43 +316,205 @@ describe("global-entity scale", () => {
     const taxPct = ((full - compsOnly) / compsOnly) * 100;
     console.log(
       `\n=== Indexing tax (rich, N=2000) ===\n` +
-        `  components-only ${compsOnly.toFixed(0)} B/entity (ceiling ${Math.floor(MAX_FRAME_SIZE / compsOnly)})` +
-        ` | full +refs+membership ${full.toFixed(0)} B/entity (ceiling ${Math.floor(MAX_FRAME_SIZE / full)})` +
+        `  components-only ${compsOnly.toFixed(0)} B/entity (ceiling ${Math.floor(DEFAULT_FRAME_CAP / compsOnly)})` +
+        ` | full +refs+membership ${full.toFixed(0)} B/entity (ceiling ${Math.floor(DEFAULT_FRAME_CAP / full)})` +
         ` | tax ${taxPct.toFixed(1)}%`,
     );
 
     // Rich entities are heavier ⇒ lower ceiling than lean; both land in the
-    // low-thousands range.
-    expect(richHard).toBeGreaterThan(500);
-    expect(leanHard).toBeGreaterThan(richHard);
+    // low-thousands range at the 1MB default, and ~8× higher at vamp's 8MB cap.
+    expect(richHard.def).toBeGreaterThan(500);
+    expect(leanHard.def).toBeGreaterThan(richHard.def);
+    expect(richHard.vamp).toBeGreaterThan(richHard.def * 7); // 8MB ≈ 8× the ceiling
     expect(full).toBeGreaterThan(compsOnly); // the index does cost bytes
   }, 120_000);
 
-  it("PROVES the 1MB frame ceiling: a snapshot just over 1MB fails to decode", () => {
-    // Find N where the rich-entity snapshot first exceeds the 1MB frame limit.
+  it("quantifies Phase A id-diet savings (uuid+component → nanoid16, no component)", () => {
+    for (const [label, make] of [
+      ["RICH", richEntity],
+      ["LEAN", leanEntity],
+    ] as const) {
+      const N = 1500;
+      const oldB = snapshotBytes(buildOldScheme(N, make)) / N;
+      const newB = snapshotBytes(buildDoc(N, make)) / N; // current scheme
+      const oldCeil = Math.floor(DEFAULT_FRAME_CAP / oldB);
+      const newCeil = Math.floor(DEFAULT_FRAME_CAP / newB);
+      const gain = ((newCeil - oldCeil) / oldCeil) * 100;
+      console.log(
+        `\n=== Phase A delta · ${label} ===\n` +
+          `  old (uuid + id component): ${oldB.toFixed(0)} B/entity → ceiling ${oldCeil}\n` +
+          `  new (nanoid16, no component): ${newB.toFixed(0)} B/entity → ceiling ${newCeil}\n` +
+          `  ⇒ +${gain.toFixed(0)}% entities`,
+      );
+      expect(newB).toBeLessThan(oldB); // the id diet must shrink B
+    }
+  }, 120_000);
+
+  it("PROVES B1 + B2: >1MB rejected unchunked; B2 chunks a >8MB snapshot and reassembles intact", () => {
+    // (B1) A snapshot just over the 1MB default is rejected by a default decoder
+    // but accepted by vamp's 8MB cap — the quick multiplier.
     let n = 1000;
     let doc = buildDoc(n, richEntity);
-    while (snapshotBytes(doc) < MAX_FRAME_SIZE) {
+    while (snapshotBytes(doc) < DEFAULT_FRAME_CAP) {
       doc.destroy();
       n = Math.ceil(n * 1.5);
       doc = buildDoc(n, richEntity);
     }
-    const overSnapshot = encodeStateAsUpdate(doc);
+    const over1mb = encodeStateAsUpdate(doc);
+    expect(() => decodeFrameOrThrow(encodeFrame(over1mb))).toThrow(/exceeds maximum/);
+    expect(decodeFrameOrThrow(encodeFrame(over1mb), VAMP_FRAME_CAP).byteLength).toBe(
+      over1mb.byteLength,
+    );
+    doc.destroy();
+
+    // (B2) Grow a snapshot past 8 MB — beyond ANY single-frame cap — then chunk
+    // it at the provider's 1 MB default and reassemble through a 1 MB decoder.
+    let m = 8000;
+    let big = buildDoc(m, richEntity);
+    while (snapshotBytes(big) < 8 * 1024 * 1024) {
+      big.destroy();
+      m = Math.ceil(m * 1.4);
+      big = buildDoc(m, richEntity);
+    }
+    const snapshot = encodeStateAsUpdate(big);
+    const CHUNK = DEFAULT_FRAME_CAP; // provider frameChunkSize default (1 MB)
+
+    const frames = encodeMessageLocal(snapshot, CHUNK);
+    expect(frames.length).toBeGreaterThan(8); // many sub-cap frames
+    for (const f of frames) expect(f.byteLength).toBeLessThanOrEqual(CHUNK);
+
+    // Reassemble through a 1 MB-capped decoder (would reject the whole snapshot
+    // as one frame) and apply — a fresh replica matches the source entity count.
+    const reassembled = reassembleMessageLocal(frames, CHUNK);
+    expect(reassembled.byteLength).toBe(snapshot.byteLength);
+    const replica = new Doc();
+    applyUpdate(replica, reassembled);
+    expect(entitiesMap(replica).size).toBe(entitiesMap(big).size);
+
     console.log(
-      `\n=== Frame ceiling proof ===\n  N=${n} rich entities ⇒ snapshot ${(overSnapshot.byteLength / 1024).toFixed(1)}KB > 1024KB`,
+      `\n=== B2 chunked-sync proof ===\n  ${m} rich entities ⇒ ${(snapshot.byteLength / 1024 / 1024).toFixed(1)}MB snapshot ` +
+        `→ ${frames.length} × ≤1MB frames → reassembled intact (${entitiesMap(replica).size} entities) ` +
+        `through a 1MB-capped decoder`,
+    );
+    big.destroy();
+    replica.destroy();
+  }, 180_000);
+
+  // Phase C / S2 spike: per-entity-authored updates (one transaction per entity)
+  // are the price of interest-filtered partial sync. Quantify the overhead vs the
+  // current batched flow (one transaction per flush), in the tick worst case —
+  // updating K of a lobby's entities each frame.
+  it("Spike: per-entity vs batched update authoring overhead", () => {
+    const captureUpdates = (
+      doc: Doc,
+      fn: () => void,
+    ): { count: number; bytes: number; ms: number } => {
+      const updates: Uint8Array[] = [];
+      const onUpdate = (u: Uint8Array) => updates.push(u);
+      doc.on("update", onUpdate);
+      const t0 = performance.now();
+      fn();
+      const ms = performance.now() - t0;
+      doc.off("update", onUpdate);
+      return { count: updates.length, bytes: updates.reduce((s, u) => s + u.byteLength, 0), ms };
+    };
+
+    console.log("\n=== Per-entity vs batched authoring (tick: update K entities) ===");
+    console.log(
+      "      K | batched: 1 upd, bytes, ms | per-entity: K upd, bytes, ms | bytes× | frames×",
+    );
+    for (const K of [10, 100, 1000]) {
+      const doc = buildDoc(K, richEntity);
+      const ids = [...entitiesMap(doc).keys()];
+      const at = (id: string) => entitiesMap(doc).get(id) as YMap<unknown>;
+
+      // Batched: one transaction touching one field on each of K entities → 1 update.
+      const batched = captureUpdates(doc, () => {
+        doc.transact(() => {
+          for (let i = 0; i < ids.length; i++) at(ids[i]).set("xp", i + 1);
+        });
+      });
+
+      // Per-entity: K transactions, each touching one entity → K updates (each
+      // a standalone, interest-filterable frame).
+      const per = captureUpdates(doc, () => {
+        for (let i = 0; i < ids.length; i++) {
+          doc.transact(() => at(ids[i]).set("xp", i + 1000));
+        }
+      });
+
+      console.log(
+        `  ${String(K).padStart(5)} | ${String(batched.count).padStart(3)} upd ${batched.bytes.toString().padStart(7)}B ${batched.ms.toFixed(2).padStart(6)}ms` +
+          ` | ${String(per.count).padStart(4)} upd ${per.bytes.toString().padStart(8)}B ${per.ms.toFixed(2).padStart(7)}ms` +
+          ` | ${(per.bytes / batched.bytes).toFixed(1)}× | ${per.count}×`,
+      );
+
+      // Per-entity emits exactly K updates (one per entity) vs 1 batched.
+      expect(per.count).toBe(K);
+      expect(batched.count).toBe(1);
+      doc.destroy();
+    }
+  }, 120_000);
+
+  // The current (post-B2) cap is DO memory: the subscriber holds the in-memory
+  // Y.Doc (decoded structs) + the ECS working store (JS entity objects) + a
+  // per-entity Y.Map observer. Measure that real footprint per entity (node
+  // heap; workerd will differ but this is far closer than encoded bytes) and
+  // derive the cap against a 100 MB working budget of the 128 MB isolate.
+  it("Memory footprint per entity → DO-memory cap", () => {
+    const BUDGET = 100 * 1024 * 1024; // usable heap within the 128 MB isolate
+    const gc = (globalThis as { gc?: () => void }).gc;
+    const N = 50000;
+
+    // Single-shot, gc-bracketed: baseline AFTER gc, then build the full
+    // subscriber footprint (doc + ECS world + per-entity observers) retained,
+    // gc again, and diff. Looping/measuring repeatedly cross-contaminates the
+    // heap, so we measure exactly once.
+    if (gc) {
+      gc();
+      gc();
+    }
+    const before = process.memoryUsage().heapUsed;
+
+    const doc = buildDoc(N, richEntity);
+    const store = new Map<string, Entity>();
+    const options = makeOptions();
+    const ecs = new ECS(store, createBaseMutator(store, options), {}, options);
+    ecs.initialize();
+    const parent = entitiesMap(doc);
+    const observers: Array<() => void> = [];
+    for (const id of membersMap(doc, A).keys()) {
+      const map = parent.get(id) as YMap<unknown>;
+      const raw = map.toJSON() as Entity;
+      (raw as Record<string, unknown>).id = id;
+      if (!ecs.hasEntity(id)) ecs.insert(raw);
+      const h = () => {};
+      map.observe(h);
+      observers.push(() => map.unobserve(h));
+    }
+
+    if (gc) {
+      gc();
+      gc();
+    }
+    const after = process.memoryUsage().heapUsed;
+    const perEntity = (after - before) / N;
+
+    console.log("\n=== In-memory footprint (doc + ECS world + observers) ===");
+    if (!gc) console.log("  ⚠ no --expose-gc: heap delta is unreliable, treat as rough");
+    console.log(
+      `  N=${N} rich · heap +${((after - before) / 1024 / 1024).toFixed(1)}MB · ` +
+        `${perEntity.toFixed(0)} B/entity (in-memory) vs ${(snapshotBytes(doc) / N).toFixed(0)} B/entity (encoded)`,
+    );
+    console.log(
+      `  ⇒ DO-memory cap ≈ ${Math.floor(BUDGET / Math.max(1, perEntity))} rich entities @100MB working budget`,
     );
 
-    // The provider frames the full snapshot; the subscriber's decoder rejects it.
-    expect(() => decodeFrameOrThrow(encodeFrame(overSnapshot))).toThrow(/exceeds maximum/);
-
-    // An entity-set comfortably below the limit frames + round-trips intact.
-    const under = buildDoc(Math.floor(n * 0.6), richEntity);
-    const underSnapshot = encodeStateAsUpdate(under);
-    expect(underSnapshot.byteLength).toBeLessThan(MAX_FRAME_SIZE);
-    const decoded = decodeFrameOrThrow(encodeFrame(underSnapshot));
-    expect(decoded.byteLength).toBe(underSnapshot.byteLength);
-
+    // Keep the footprint alive until measured, then release.
+    for (const off of observers) off();
+    void ecs;
+    void store;
     doc.destroy();
-    under.destroy();
+    expect(perEntity).toBeGreaterThan(0);
   }, 120_000);
 });

@@ -20,6 +20,7 @@ catalog:
   hono: ^4.12.14
   lodash-es: ^4.17.23
   mitata: ^1.0.34
+  nanoid: ^5.1.6
   pino: ^10.3.1
   solid-js: ^1.9.9
   tseep: ^1.3.1
@@ -32,7 +33,7 @@ catalog:
   webextension-polyfill: ^0.12.0
   websocket-ts: ^2.2.1
   wrangler: ^4.74.0
-  y-durablestream: ^0.4.0
+  y-durablestream: ^0.7.0
   yjs: ^13.6.30
 
 catalogMode: prefer

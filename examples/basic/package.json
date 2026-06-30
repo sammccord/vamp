@@ -22,6 +22,7 @@
     "@vamp/worker": "workspace:*",
     "bebop": "catalog:",
     "hono": "catalog:",
+    "nanoid": "catalog:",
     "solid-js": "catalog:"
   },
   "devDependencies": {

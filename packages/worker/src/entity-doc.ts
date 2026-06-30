@@ -73,17 +73,17 @@ export function releaseRef(doc: Doc, namespace: string, id: string): void {
 }
 
 /**
- * Write an entity insert: create-or-reuse its global nested map, populate
- * component keys, then record this namespace's reference and membership. Assumes
- * a surrounding transaction. Reuse (rather than replace) means an entity already
- * created by another lobby is shared, never duplicated.
+ * Write only the entity's component data into the global store: create-or-reuse
+ * its nested map and populate component keys. Reuse (rather than replace) means
+ * an entity already created by another lobby is shared, never duplicated.
+ * Assumes a surrounding transaction.
+ *
+ * This is the **entity-data** half of an insert. In the interest-scoped (AOI)
+ * model the subscriber authors only this (its doc holds entity data, not the
+ * refcount/membership index); namespace membership is recorded separately and
+ * authoritatively via {@link joinNamespace}.
  */
-export function writeInsert(
-  doc: Doc,
-  namespace: string,
-  id: string,
-  entity: Record<string, unknown>,
-): void {
+export function writeEntityInsert(doc: Doc, id: string, entity: Record<string, unknown>): void {
   const entities = entitiesMap(doc);
   let map = entities.get(id);
   if (!map) {
@@ -91,13 +91,51 @@ export function writeInsert(
     entities.set(id, map);
   }
   for (const key in entity) {
+    // `id` is the map key (and the refs/membership key) — storing it as a
+    // component too is pure redundancy (~1 of 4 id copies). Readers backfill it
+    // from the key (`_addEntityFromDoc`, `ECSStorage.entity`).
+    if (key === "id") continue;
     if (Object.prototype.hasOwnProperty.call(entity, key)) {
       const val = entity[key];
       if (val !== undefined) map.set(key, cloneComponentValue(val));
     }
   }
+}
+
+/**
+ * Record that `namespace` references entity `id`: bump the refcount and add it to
+ * the namespace's membership set. The **membership** half of an insert, kept
+ * authoritative on the provider in the AOI model. Idempotent. Assumes a
+ * surrounding transaction.
+ */
+export function joinNamespace(doc: Doc, namespace: string, id: string): void {
   addRef(doc, namespace, id);
   membersMap(doc, namespace).set(id, true);
+}
+
+/**
+ * Remove `id` from `namespace`: drop membership and release the refcount,
+ * GC'ing the global entity when it was the last reference. Assumes a
+ * surrounding transaction.
+ */
+export function leaveNamespace(doc: Doc, namespace: string, id: string): void {
+  membersMap(doc, namespace).delete(id);
+  releaseRef(doc, namespace, id);
+}
+
+/**
+ * Combined insert (entity data + namespace membership) — the full-sync path.
+ * Equivalent to {@link writeEntityInsert} + {@link joinNamespace}. Assumes a
+ * surrounding transaction.
+ */
+export function writeInsert(
+  doc: Doc,
+  namespace: string,
+  id: string,
+  entity: Record<string, unknown>,
+): void {
+  writeEntityInsert(doc, id, entity);
+  joinNamespace(doc, namespace, id);
 }
 
 /** Apply a component delta (set/delete keys) to a global entity. Assumes a surrounding transaction. */
@@ -114,13 +152,12 @@ export function writeUpdate(doc: Doc, id: string, delta: Record<string, unknown>
 }
 
 /**
- * Remove an entity from a namespace: drop membership and release the refcount
- * (GC'ing the global entity if it was the last reference). Assumes a surrounding
- * transaction.
+ * Combined delete — the full-sync path. Alias of {@link leaveNamespace}: drop
+ * membership and release the refcount (GC'ing the global entity if it was the
+ * last reference). Assumes a surrounding transaction.
  */
 export function writeDelete(doc: Doc, namespace: string, id: string): void {
-  membersMap(doc, namespace).delete(id);
-  releaseRef(doc, namespace, id);
+  leaveNamespace(doc, namespace, id);
 }
 
 /**
@@ -173,6 +210,7 @@ export function migrateLegacyNamespace(doc: Doc, namespace: string, origin?: unk
         const emap = new YMap<unknown>();
         entities.set(id, emap);
         for (const [key, value] of legacyMap.entries()) {
+          if (key === "id") continue; // redundant with the map key (see writeInsert)
           emap.set(key, cloneComponentValue(value));
         }
         for (const key of [...legacyMap.keys()]) legacyMap.delete(key);

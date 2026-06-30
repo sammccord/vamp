@@ -113,6 +113,13 @@ export interface ECSRuntimeConfiguration<
       EntityDelta
     >,
   ) => void;
+  // Max decodable frame size (bytes) for the YStreamClient. The whole global
+  // doc syncs as one frame on connect, so this caps the syncable world size:
+  // ceiling ≈ maxFrameSize / per-entity-bytes. Defaults to 8 MB (≈18k rich /
+  // 35k lean entities) — well above y-durablestream's conservative 1 MB guard,
+  // safe because the provider↔subscriber stream is trusted DO-to-DO. Raise
+  // further if entities are small / worlds are huge (bounded by DO memory).
+  maxFrameSize?: number;
   // Opt-in server-authoritative tick loop. When set (> 0), an `alarm()` runs
   // `ecs.update(...)` inside a scope on this cadence and reschedules itself.
   // Unset/zero keeps the DO purely reactive (and fully hibernatable).
@@ -272,6 +279,10 @@ export class ECSDurableObject<
   private _namespace = "";
   // The resolved Yjs document name this instance connects to
   private _document = "global";
+  // Max decodable frame size for the sync client (see ECSRuntimeConfiguration).
+  // Defaults to 8 MB; the whole global doc syncs as one frame, so this caps the
+  // syncable world size (≈ maxFrameSize / per-entity-bytes).
+  private _maxFrameSize = 8 * 1024 * 1024;
   // Unsubscribe for the sync status listener (tracked so re-bootstrap on wake
   // does not stack a second listener).
   private _statusUnsub: (() => void) | null = null;
@@ -393,6 +404,8 @@ export class ECSDurableObject<
       logger?: ContextLogger;
       // The yjs document to connect to, defaults to 'global', can specify alternate to shard entity state across multiple documents
       document?: string;
+      // Max decodable sync frame size (bytes); caps syncable world size. Default 8 MB.
+      maxFrameSize?: number;
       // The tempo rpc service registry registered with the generated game services
       serviceRegistry: ServiceRegistry;
       // Optional hooks for tempo rpc middleware
@@ -449,6 +462,7 @@ export class ECSDurableObject<
     this._namespace = namespace;
     const document = configuration.document ?? "global";
     this._document = document;
+    if (configuration.maxFrameSize !== undefined) this._maxFrameSize = configuration.maxFrameSize;
     this._onConnectionClose = configuration.onConnectionClose;
     this._rehydrateConnection = configuration.rehydrateConnection;
     // Persist the namespace (and resolved document) so a hibernation-recreated
@@ -753,7 +767,7 @@ export class ECSDurableObject<
     // `GAME_STORAGE` is typed as `DurableObjectNamespace<YStreamProviderStub>`
     // in the shim, so `get` returns a correctly-typed stub without a double cast.
     const stub = bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(docName));
-    this.client = new YStreamClient(this.doc, { stub });
+    this.client = new YStreamClient(this.doc, { stub, maxFrameSize: this._maxFrameSize });
     // Attach the membership observer BEFORE connect so the SyncStep2 burst is
     // observed: members that arrive during initial sync land in
     // `_pendingReconcile` instead of being silently dropped.

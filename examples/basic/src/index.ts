@@ -1,5 +1,6 @@
 import { ConsoleLogger } from "@tempojs/common";
 import { Hono } from "hono/quick";
+import { nanoid } from "nanoid";
 import { TempoServiceRegistry } from "./bebop";
 import { createECSOptions, defineGameECSRuntime } from "./game.generated";
 // Importing the service module runs its `@TempoServiceRegistry.register` decorator,
@@ -42,7 +43,10 @@ const serviceRegistry = new SharedServiceRegistry(new ConsoleLogger("rpc"));
 // constructed inside the DO rather than passed across the RPC boundary.
 defineGameECSRuntime<{}, GameWorldContext>(() => ({
   serviceRegistry,
-  ecs: createECSOptions(() => crypto.randomUUID()),
+  // nanoid(16) ≈ 96 bits — ample collision headroom past 100k entities — and
+  // far shorter than a 36-char uuid, which the doc encodes ~3× per entity
+  // (entities/refs/membership keys). Shrinks per-entity bytes ⇒ higher ceiling.
+  ecs: createECSOptions(() => nanoid(16)),
   // Static default context, merged under any runtime-resolved context below.
   context: { faction: 0, seededAt: 0 },
   // Derive the world context at runtime from the per-request seed. The handler

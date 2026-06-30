@@ -3,11 +3,14 @@ import { applyUpdate, Doc, encodeStateAsUpdate, type Map as YMap } from "yjs";
 
 import {
   entitiesMap,
+  joinNamespace,
+  leaveNamespace,
   membersMap,
   migrateLegacyNamespace,
   reapOrphanedEntities,
   refsMap,
   writeDelete,
+  writeEntityInsert,
   writeInsert,
   writeUpdate,
 } from "../src/entity-doc.ts";
@@ -192,5 +195,66 @@ describe("entity-doc: legacy layout migration", () => {
     expect(refCount(doc, "shared")).toBe(2);
     expect(membersMap(doc, A).has("shared")).toBe(true);
     expect(membersMap(doc, B).has("shared")).toBe(true);
+  });
+});
+
+describe("entity-doc: AOI data-model split (entity data vs namespace membership)", () => {
+  it("writeEntityInsert writes ONLY component data — no refs/membership", () => {
+    const doc = new Doc();
+    writeEntityInsert(doc, "e1", { id: "e1", hp: 7 });
+
+    expect((entitiesMap(doc).get("e1") as YMap<unknown>).get("hp")).toBe(7);
+    // The `id` component is dropped (it's the map key).
+    expect((entitiesMap(doc).get("e1") as YMap<unknown>).has("id")).toBe(false);
+    // No refcount, no membership recorded.
+    expect(refsMap(doc).has("e1")).toBe(false);
+    expect(membersMap(doc, "lobby").has("e1")).toBe(false);
+  });
+
+  it("joinNamespace records refcount + membership; size = number of lobbies", () => {
+    const doc = new Doc();
+    writeEntityInsert(doc, "e1", { hp: 1 });
+
+    joinNamespace(doc, "A", "e1");
+    joinNamespace(doc, "B", "e1");
+    joinNamespace(doc, "A", "e1"); // idempotent
+
+    expect(refsMap(doc).get("e1")?.size).toBe(2);
+    expect(membersMap(doc, "A").has("e1")).toBe(true);
+    expect(membersMap(doc, "B").has("e1")).toBe(true);
+  });
+
+  it("leaveNamespace drops membership and GCs the global entity at refcount 0", () => {
+    const doc = new Doc();
+    writeEntityInsert(doc, "e1", { hp: 1 });
+    joinNamespace(doc, "A", "e1");
+    joinNamespace(doc, "B", "e1");
+
+    leaveNamespace(doc, "A", "e1");
+    expect(membersMap(doc, "A").has("e1")).toBe(false);
+    expect(entitiesMap(doc).has("e1")).toBe(true); // still referenced by B
+    expect(refsMap(doc).get("e1")?.size).toBe(1);
+
+    leaveNamespace(doc, "B", "e1");
+    expect(entitiesMap(doc).has("e1")).toBe(false); // last reference gone → GC'd
+    expect(refsMap(doc).has("e1")).toBe(false);
+  });
+
+  it("writeInsert == writeEntityInsert + joinNamespace (same logical state)", () => {
+    const combined = new Doc();
+    writeInsert(combined, "A", "e1", { hp: 5 });
+
+    const split = new Doc();
+    writeEntityInsert(split, "e1", { hp: 5 });
+    joinNamespace(split, "A", "e1");
+
+    // Compare logical content (raw encoded bytes differ by clientID/clock).
+    expect((entitiesMap(combined).get("e1") as YMap<unknown>).toJSON()).toEqual(
+      (entitiesMap(split).get("e1") as YMap<unknown>).toJSON(),
+    );
+    expect((refsMap(combined).get("e1") as YMap<boolean>).toJSON()).toEqual(
+      (refsMap(split).get("e1") as YMap<boolean>).toJSON(),
+    );
+    expect(membersMap(combined, "A").toJSON()).toEqual(membersMap(split, "A").toJSON());
   });
 });

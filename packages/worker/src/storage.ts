@@ -61,7 +61,12 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
   entity(id: string): E | undefined {
     const entities = this.doc.getMap<YMap<unknown>>(GLOBAL_ENTITIES_KEY);
     const emap = entities.get(id);
-    return emap ? (emap.toJSON() as E) : undefined;
+    if (!emap) return undefined;
+    // `id` is not stored as a component (it is the map key); backfill it so
+    // callers always get a complete entity. Mirrors `_addEntityFromDoc`.
+    const raw = emap.toJSON() as Record<string, unknown>;
+    if (raw.id === undefined) raw.id = id;
+    return raw as E;
   }
 
   /**
