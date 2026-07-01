@@ -13,6 +13,10 @@
   "changesets": [
     "beta-1-release",
     "beta-2-provenance",
+    "cli-configurable-env",
+    "cli-js-import-extensions",
+    "cli-split-generated-output",
+    "cli-stable-pool-import",
     "cozy-houses-clap"
   ]
 }
