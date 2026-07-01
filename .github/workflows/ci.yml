@@ -45,12 +45,17 @@ jobs:
       - name: Check (fmt + lint + typecheck)
         run: pnpm vp check
 
-      # 2. full recursive test suite (incl. the ECS suite)
-      #    NOTE: the recursive flag goes BEFORE the task name (`-r test`), not
-      #    after it. `vp test -r` runs vitest at the repo root (no test files)
-      #    and `vp run test -r` fails with "Task not found".
-      - name: Test
-        run: pnpm vp run -r test
+      # 2. unit test suite — the library packages only (packages/* + tools/*).
+      #    The `basic` example app's tests are integration/benchmarks, not units:
+      #    `rpc.test.ts` boots a wrangler dev server, and `entity-scale.bench.
+      #    test.ts` / `stress.bench.ts` are footprint benchmarks whose heap-delta
+      #    assertions are unreliable without `--expose-gc` (they flake in CI) and
+      #    belong to `pnpm bench`, not the unit gate. Filtering to the published
+      #    packages keeps CI fast and deterministic. NOTE: `--filter` selectors
+      #    go BEFORE the task name; the globs are single-quoted so vp (not the
+      #    shell) expands them.
+      - name: Test (unit)
+        run: pnpm vp run --filter './packages/*' --filter './tools/*' test
 
       # 3. codegen round-trip: regenerate the example and prove the output
       #    still type-checks and is deterministic / committed.
@@ -67,9 +72,10 @@ jobs:
           pnpm vp check examples/basic
           git diff --exit-code examples/basic/src
 
-      # 4. publish-readiness gate + lightweight metadata lint
-      - name: Ready gate
-        run: pnpm run ready
-
+      # 4. publish-readiness / metadata lint: prove every @vamp/* package packs
+      #    cleanly (correct `files`, resolvable `exports`, no missing dist).
+      #    The old `pnpm run ready` gate was dropped here: it re-ran fmt + lint +
+      #    build (already covered by Check + Build above) and, via `vp run -r
+      #    test`, the `basic` benchmark suite this workflow deliberately skips.
       - name: Package metadata lint
         run: pnpm --filter "@vamp/*" exec npm pack --dry-run

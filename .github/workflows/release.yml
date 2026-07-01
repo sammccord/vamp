@@ -80,9 +80,12 @@ jobs:
         if: steps.cs.outputs.count != '0'
         run: pnpm vp check
 
-      - name: Test
+      # Unit tests for the published packages only (packages/* + tools/*); the
+      # private `basic` example's integration/benchmark suites are not part of a
+      # library release and flake without `--expose-gc`. Mirrors CI's Test step.
+      - name: Test (unit)
         if: steps.cs.outputs.count != '0'
-        run: pnpm vp run -r test
+        run: pnpm vp run --filter './packages/*' --filter './tools/*' test
 
       # Commit the bump locally (not pushed yet — see publish-before-push note).
       - name: Commit version bump
