@@ -11,6 +11,7 @@
     "@vamp/cli": "0.1.0"
   },
   "changesets": [
+    "beta-1-release",
     "cozy-houses-clap"
   ]
 }

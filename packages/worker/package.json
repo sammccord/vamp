@@ -1,6 +1,6 @@
 {
   "name": "@vamp/worker",
-  "version": "1.0.0-beta.0",
+  "version": "1.0.0-beta.1",
   "description": "Cloudflare Workers Durable Object integration for @vamp.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/worker#readme",
   "bugs": {
