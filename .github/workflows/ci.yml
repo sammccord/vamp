@@ -22,6 +22,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # 0. Build the workspace packages FIRST. Each @vamp/* package exposes its
+      #    public types only through its built `dist/*.d.mts` (the `exports` map
+      #    points at `./dist/*.mjs`; there is no source condition or path alias).
+      #    Consumers (`@vamp/worker`, `@vamp/solid`, `examples/basic`) import
+      #    `@vamp/ecs` etc. via `workspace:*`, so without dist the type-aware
+      #    `vp check` and the codegen `tsc --noEmit` below fail with
+      #    `TS2307: Cannot find module '@vamp/ecs'`. `-r build` topo-sorts, so
+      #    ecs/utils build before worker/solid.
+      - name: Build packages
+        run: pnpm vp run -r build
+
       # 1. format + lint + type-check (oxfmt + oxlint typeAware + tsc)
       - name: Check (fmt + lint + typecheck)
         run: pnpm vp check
@@ -35,10 +46,17 @@ jobs:
 
       # 3. codegen round-trip: regenerate the example and prove the output
       #    still type-checks and is deterministic / committed.
+      #    Type-check via `vp check` (NOT bare `tsc`): the example's generated
+      #    `bebop.ts` (bebopc output) does not satisfy the bebop runtime's own
+      #    types under strict `tsc`, so `vp check` deliberately ignores
+      #    `**/bebop.ts` (see `vite.config.ts` fmt/lint ignorePatterns). Bare
+      #    `tsc --noEmit` has no such exclusion and fails on generated code the
+      #    project owns — and since `bebop.ts` is imported by the other sources,
+      #    a tsconfig `exclude` cannot silence it.
       - name: Codegen round-trip
         run: |
           pnpm --filter basic run generate
-          pnpm --filter basic exec tsc --noEmit
+          pnpm vp check examples/basic
           git diff --exit-code examples/basic/src
 
       # 4. publish-readiness gate + lightweight metadata lint

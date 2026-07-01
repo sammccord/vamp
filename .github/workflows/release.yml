@@ -67,7 +67,15 @@ jobs:
         if: steps.cs.outputs.count != '0'
         run: pnpm changeset version
 
-      # b. Gate the release on the same checks CI runs.
+      # b. Gate the release on the same checks CI runs. Build BEFORE check: the
+      #    @vamp/* packages expose their types only via their built `dist/*.d.mts`
+      #    (exports point at `./dist/*.mjs`, no source condition), so the
+      #    type-aware `vp check` cannot resolve cross-package `workspace:*`
+      #    imports until dist exists. `-r build` topo-sorts deps first.
+      - name: Build
+        if: steps.cs.outputs.count != '0'
+        run: pnpm vp run -r build
+
       - name: Check (fmt + lint + typecheck)
         if: steps.cs.outputs.count != '0'
         run: pnpm vp check
@@ -75,10 +83,6 @@ jobs:
       - name: Test
         if: steps.cs.outputs.count != '0'
         run: pnpm vp run -r test
-
-      - name: Build
-        if: steps.cs.outputs.count != '0'
-        run: pnpm vp run -r build
 
       # Commit the bump locally (not pushed yet — see publish-before-push note).
       - name: Commit version bump
