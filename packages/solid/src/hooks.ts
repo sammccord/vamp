@@ -1,4 +1,4 @@
-import type { BaseEntity } from "@vamp/ecs";
+import type { BaseEntity } from "@vampgg/ecs";
 import { type Accessor, createMemo, onCleanup } from "solid-js";
 import { useGame } from "./context";
 import type { QueryInput } from "./registry";

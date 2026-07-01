@@ -6,15 +6,15 @@ import {
   type ECSOptions,
   type GenericAction,
   MutationRecord,
-} from "@vamp/ecs";
-import { Message } from "@vamp/utils/bebop";
-import { STREAM_MESSAGE_ID_KEY, STREAM_METHOD_ID_KEY } from "@vamp/utils/ws-router";
+} from "@vampgg/ecs";
+import { Message } from "@vampgg/utils/bebop";
+import { STREAM_MESSAGE_ID_KEY, STREAM_METHOD_ID_KEY } from "@vampgg/utils/ws-router";
 import { describe, expect, test } from "vitest";
 import { createInterestBroadcast } from "../src/interest.ts";
 
 /**
  * Unit coverage for the generic interest-managed broadcast factory. Uses a real
- * `@vamp/ecs` world plus a fake hibernatable WebSocket and a self-contained text
+ * `@vampgg/ecs` world plus a fake hibernatable WebSocket and a self-contained text
  * codec (no bebop), so the suite is a plain node test — which also proves
  * `interest.ts` is free of `cloudflare:workers` (it would fail to import here
  * otherwise).

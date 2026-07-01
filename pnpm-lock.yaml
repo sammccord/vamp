@@ -125,16 +125,16 @@ importers:
       '@tempojs/server':
         specifier: 'catalog:'
         version: 0.0.12
-      '@vamp/ecs':
+      '@vampgg/ecs':
         specifier: workspace:*
         version: link:../../packages/ecs
-      '@vamp/solid':
+      '@vampgg/solid':
         specifier: workspace:*
         version: link:../../packages/solid
-      '@vamp/utils':
+      '@vampgg/utils':
         specifier: workspace:*
         version: link:../../packages/utils
-      '@vamp/worker':
+      '@vampgg/worker':
         specifier: workspace:*
         version: link:../../packages/worker
       bebop:
@@ -159,7 +159,7 @@ importers:
       '@types/ws':
         specifier: ^8.5.12
         version: 8.18.1
-      '@vamp/cli':
+      '@vampgg/cli':
         specifier: workspace:*
         version: link:../../tools/cli
       bebop-tools:
@@ -244,7 +244,7 @@ importers:
 
   packages/solid:
     dependencies:
-      '@vamp/ecs':
+      '@vampgg/ecs':
         specifier: workspace:*
         version: link:../ecs
     devDependencies:
@@ -339,10 +339,10 @@ importers:
       '@tempojs/server':
         specifier: 'catalog:'
         version: 0.0.12
-      '@vamp/ecs':
+      '@vampgg/ecs':
         specifier: workspace:*
         version: link:../ecs
-      '@vamp/utils':
+      '@vampgg/utils':
         specifier: workspace:*
         version: link:../utils
       pino:
@@ -401,13 +401,13 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.12.0
-      '@vamp/ecs':
+      '@vampgg/ecs':
         specifier: workspace:*
         version: link:../../packages/ecs
-      '@vamp/utils':
+      '@vampgg/utils':
         specifier: workspace:*
         version: link:../../packages/utils
-      '@vamp/worker':
+      '@vampgg/worker':
         specifier: workspace:*
         version: link:../../packages/worker
       bebop-tools:

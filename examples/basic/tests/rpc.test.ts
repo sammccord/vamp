@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { ConsoleLogger, TempoLogLevel } from "@tempojs/common";
-import { TempoWSChannel } from "@vamp/utils/ws-channel";
+import { TempoWSChannel } from "@vampgg/utils/ws-channel";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Actions, Attack, Entity, MutationScope, RpcClient } from "../src/bebop";
 

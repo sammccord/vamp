@@ -1,4 +1,4 @@
-import { query as buildQuery, type QueryBuilder } from "@vamp/ecs";
+import { query as buildQuery, type QueryBuilder } from "@vampgg/ecs";
 import { createRoot, getOwner } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { createQueryRegistry } from "../src/registry.ts";

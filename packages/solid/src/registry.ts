@@ -7,7 +7,7 @@ import {
   query as buildQuery,
   type QueryBuilder,
   type TrackedQuery,
-} from "@vamp/ecs";
+} from "@vampgg/ecs";
 import { type Accessor, createSignal, type Owner, runWithOwner, type Setter } from "solid-js";
 import type { AnyECS } from "./types";
 
@@ -27,7 +27,7 @@ export interface QueryHandle {
 
 /**
  * The Solid binding over the framework-agnostic membership tracker
- * (`createQueryMembershipTracker` in `@vamp/ecs`). The tracker owns the
+ * (`createQueryMembershipTracker` in `@vampgg/ecs`). The tracker owns the
  * id-set diffing; this layer adds only Solid concerns: one shared signal +
  * reference count per distinct `Query`, owned at the provider scope so it
  * persists across the components that share a query and is disposed with them.

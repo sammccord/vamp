@@ -20,7 +20,7 @@ name: release
 # untouched and the changesets intact — a re-run republishes cleanly.
 #
 # Requires an `NPM_TOKEN` repo secret (npm automation token with publish rights
-# to the @vamp scope). Provenance is attached via OIDC. Pushing the bump commit
+# to the @vampgg scope). Provenance is attached via OIDC. Pushing the bump commit
 # uses the default GITHUB_TOKEN, so main must allow the actions bot to push.
 
 on:
@@ -68,7 +68,7 @@ jobs:
         run: pnpm changeset version
 
       # b. Gate the release on the same checks CI runs. Build BEFORE check: the
-      #    @vamp/* packages expose their types only via their built `dist/*.d.mts`
+      #    @vampgg/* packages expose their types only via their built `dist/*.d.mts`
       #    (exports point at `./dist/*.mjs`, no source condition), so the
       #    type-aware `vp check` cannot resolve cross-package `workspace:*`
       #    imports until dist exists. `-r build` topo-sorts deps first.
@@ -108,9 +108,15 @@ jobs:
       # c. Publish to npm (idempotent: skips versions already on the registry)
       #    and create a git tag per newly published package. Capture the output
       #    so we can turn each "New tag:" line into a GitHub Release.
+      #    `set -o pipefail` is REQUIRED: without it the pipeline exit code is
+      #    tee's (always 0), so a failed `changeset publish` (e.g. npm rejects
+      #    the write with E404/E403 because the token can't publish the @vampgg
+      #    scope) is masked and the job goes green having published nothing.
       - name: Publish to npm
         if: steps.cs.outputs.count != '0'
-        run: pnpm changeset publish | tee publish.log
+        run: |
+          set -o pipefail
+          pnpm changeset publish | tee publish.log
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
@@ -127,7 +133,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           grep 'New tag:' publish.log | sed -E 's/.*New tag:[[:space:]]*//' | while read -r tag; do
-            name="${tag%@*}"   # @vamp/ecs
+            name="${tag%@*}"   # @vampgg/ecs
             ver="${tag##*@}"   # 1.0.0
             pj=$(grep -rl "\"name\": \"$name\"" --include=package.json packages tools | head -1)
             dir=$(dirname "$pj")

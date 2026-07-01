@@ -111,13 +111,13 @@ describe("recursive value classification (Case B, 4b)", () => {
 
 // --- Case C/D (resolution half): resolvePoolImport across layouts (4c) ---
 
-/** Lay down a fake @vamp/utils package with a schema/pool.bop at the given node_modules root. */
+/** Lay down a fake @vampgg/utils package with a schema/pool.bop at the given node_modules root. */
 function fakeUtils(nmRoot: string): void {
-  const pkgDir = join(nmRoot, "@vamp", "utils");
+  const pkgDir = join(nmRoot, "@vampgg", "utils");
   mkdirSync(join(pkgDir, "schema"), { recursive: true });
   writeFileSync(
     join(pkgDir, "package.json"),
-    JSON.stringify({ name: "@vamp/utils", version: "0.0.0", files: ["schema"] }),
+    JSON.stringify({ name: "@vampgg/utils", version: "0.0.0", files: ["schema"] }),
     "utf-8",
   );
   writeFileSync(
@@ -147,14 +147,14 @@ describe("pool.bop import resolution (Case C/D, 4c)", () => {
     const schemaDir = join(proj, "schema");
     mkdirSync(schemaDir, { recursive: true });
 
-    // Real package under .pnpm, symlinked into node_modules/@vamp/utils.
-    const pnpmRoot = join(proj, "node_modules", ".pnpm", "@vamp+utils@0.0.0", "node_modules");
+    // Real package under .pnpm, symlinked into node_modules/@vampgg/utils.
+    const pnpmRoot = join(proj, "node_modules", ".pnpm", "@vampgg+utils@0.0.0", "node_modules");
     fakeUtils(pnpmRoot);
-    mkdirSync(join(proj, "node_modules", "@vamp"), { recursive: true });
+    mkdirSync(join(proj, "node_modules", "@vampgg"), { recursive: true });
     try {
       symlinkSync(
-        join(pnpmRoot, "@vamp", "utils"),
-        join(proj, "node_modules", "@vamp", "utils"),
+        join(pnpmRoot, "@vampgg", "utils"),
+        join(proj, "node_modules", "@vampgg", "utils"),
         "dir",
       );
     } catch {
@@ -173,10 +173,10 @@ describe("pool.bop import resolution (Case C/D, 4c)", () => {
     const schemaDir = join(proj, "schema");
     mkdirSync(schemaDir, { recursive: true });
     // Force resolution failure deterministically — relying on the temp dir being
-    // unable to resolve @vamp/utils is environment-dependent (an ancestor
+    // unable to resolve @vampgg/utils is environment-dependent (an ancestor
     // node_modules may still resolve it).
     const importPath = resolvePoolImport(proj, schemaDir, () => null);
-    expect(importPath).toBe("../node_modules/@vamp/utils/schema/pool.bop");
+    expect(importPath).toBe("../node_modules/@vampgg/utils/schema/pool.bop");
   });
 });
 

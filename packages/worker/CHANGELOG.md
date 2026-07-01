@@ -1,4 +1,4 @@
-# @vamp/worker
+# @vampgg/worker
 
 ## 1.0.0-beta.1
 
@@ -6,8 +6,8 @@
 
 - 046a351: Publish 1.0.0-beta.1: exercise the fixed CI/release pipeline (build-before-check, workspace bin linking, changeset-file fmt ignores, unit-only test gate, platform-stable codegen determinism, no-op-safe release commit). No runtime source changes.
 - Updated dependencies [046a351]
-  - @vamp/ecs@1.0.0-beta.1
-  - @vamp/utils@1.0.0-beta.1
+  - @vampgg/ecs@1.0.0-beta.1
+  - @vampgg/utils@1.0.0-beta.1
 
 ## 1.0.0-beta.0
 
@@ -18,5 +18,5 @@
 ### Patch Changes
 
 - Updated dependencies [3961d4d]
-  - @vamp/ecs@1.0.0-beta.0
-  - @vamp/utils@1.0.0-beta.0
+  - @vampgg/ecs@1.0.0-beta.0
+  - @vampgg/utils@1.0.0-beta.0

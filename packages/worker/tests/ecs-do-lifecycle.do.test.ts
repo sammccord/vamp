@@ -1,6 +1,6 @@
 import { ConsoleLogger } from "@tempojs/common";
 import { ServiceRegistry } from "@tempojs/server";
-import { type BaseEntity, createEntitySystem, type ECSOptions } from "@vamp/ecs";
+import { type BaseEntity, createEntitySystem, type ECSOptions } from "@vampgg/ecs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as Y from "yjs";
 import { entitiesMap, writeInsert } from "../src/entity-doc.ts";

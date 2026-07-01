@@ -1,10 +1,10 @@
-# @vamp/ecs
+# @vampgg/ecs
 
-Entity-Component-System runtime for @vamp game state. Archetype-graph storage,
+Entity-Component-System runtime for @vampgg game state. Archetype-graph storage,
 component queries, event-driven behaviors, and transactional mutation scopes.
 
 ```bash
-pnpm add @vamp/ecs
+pnpm add @vampgg/ecs
 ```
 
 ## Concepts
@@ -13,28 +13,28 @@ pnpm add @vamp/ecs
   (entities with the same component+tag set share an archetype, so queries iterate
   a contiguous set instead of scanning the world).
 - **Components & tags** — components are numeric-keyed fields on an entity; tags are
-  numeric markers. Both are generated from your `.bop` schema by `@vamp/cli`.
+  numeric markers. Both are generated from your `.bop` schema by `@vampgg/cli`.
 - **Systems** — run logic over a query each `update()` cycle. Build them with
   `createEntitySystem`, `createArchetypeSystem`, `createEventSystem`, and
   `createLifecycleSystem`.
 - **Behaviors** — event-driven, per-entity reactions with bubbling (see
-  `createBehavior` + `@vamp/ecs` `Actions`).
+  `createBehavior` + `@vampgg/ecs` `Actions`).
 - **Mutation scopes** — `createScope()` / `withScope` batch and coalesce entity
   changes into a `MutationBatch` so they can be observed and synced atomically.
 - **Mutation observers** — `observeMutations()` / `routeMutations()` /
-  `applyMutations()` move batches between worlds (this is how `@vamp/worker` syncs
-  the authoritative world to clients, and how `@vamp/solid` applies them locally).
+  `applyMutations()` move batches between worlds (this is how `@vampgg/worker` syncs
+  the authoritative world to clients, and how `@vampgg/solid` applies them locally).
 
 ## Usage
 
 The world is generic over its context, update args, action union, tag space, and
 entity/delta shapes. You normally get a fully-typed `ECSOptions` from generated
-code (`createECSOptions(...)` emitted by `@vamp/cli`) rather than writing the
+code (`createECSOptions(...)` emitted by `@vampgg/cli`) rather than writing the
 generics by hand:
 
 ```ts
-import { createEntitySystem } from "@vamp/ecs";
-import { components } from "./game.generated"; // emitted by @vamp/cli
+import { createEntitySystem } from "@vampgg/ecs";
+import { components } from "./game.generated"; // emitted by @vampgg/cli
 import { type Entity, type EntityDelta } from "./bebop";
 
 // A system runs over every entity matching its query each update(). The executor
@@ -60,8 +60,8 @@ const players = world.query((q) => q.someTag(Tags.PlayerControlled).every(compon
 world.act(targetId, attackAction); // runs matching behaviors, cascading to children
 ```
 
-Server-side, you typically don't construct `ECS` directly — `@vamp/worker` hosts
-it inside a Durable Object. Client-side, `@vamp/solid` wraps it as a reactive
+Server-side, you typically don't construct `ECS` directly — `@vampgg/worker` hosts
+it inside a Durable Object. Client-side, `@vampgg/solid` wraps it as a reactive
 read-replica. See **`examples/basic/`** for the full end-to-end wiring (schema →
 generated options → systems → worker → solid client).
 

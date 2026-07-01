@@ -1,4 +1,4 @@
-import type { ECS } from "@vamp/ecs";
+import type { ECS } from "@vampgg/ecs";
 import { type Actions, type Entity, Tags } from "./bebop";
 import {
   components,

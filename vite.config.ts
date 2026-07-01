@@ -2,12 +2,12 @@ import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   create: {
-    defaultTemplate: "@vamp",
+    defaultTemplate: "@vampgg",
   },
   staged: {
     "*": "vp check --fix",
   },
-  // Skip generated sources (bebopc output + @vamp/cli emit) from both passes:
+  // Skip generated sources (bebopc output + @vampgg/cli emit) from both passes:
   // they are rewritten on every codegen run, so formatting/linting them only
   // churns diffs and surfaces warnings the generators own.
   //

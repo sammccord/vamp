@@ -5,7 +5,7 @@ import {
   parseMessage,
 } from "../src/generators/parse-bop-source.js";
 
-const ENTITY_SOURCE = `import "../node_modules/@vamp/utils/schema/pool.bop"
+const ENTITY_SOURCE = `import "../node_modules/@vampgg/utils/schema/pool.bop"
 import "./tags.bop"
 
 message Entity {

@@ -1,4 +1,4 @@
-import type { BaseEntity } from "@vamp/ecs";
+import type { BaseEntity } from "@vampgg/ecs";
 import { createStore, produce, reconcile, type Store } from "solid-js/store";
 
 /**

@@ -1,10 +1,10 @@
 ---
-"@vamp/worker": major
-"@vamp/ecs": major
-"@vamp/cli": major
-"@vamp/rot": major
-"@vamp/solid": major
-"@vamp/utils": major
+"@vampgg/worker": major
+"@vampgg/ecs": major
+"@vampgg/cli": major
+"@vampgg/rot": major
+"@vampgg/solid": major
+"@vampgg/utils": major
 ---
 
 initial release

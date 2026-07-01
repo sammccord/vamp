@@ -1,4 +1,4 @@
-# @vamp/rot
+# @vampgg/rot
 
 ## 1.0.0-beta.1
 

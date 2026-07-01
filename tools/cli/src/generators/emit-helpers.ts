@@ -27,9 +27,9 @@ function defaultForField(bf: SchemaField): string {
 }
 
 /**
- * Import of the canonical delta-algebra appliers from `@vamp/ecs`, narrowed to
+ * Import of the canonical delta-algebra appliers from `@vampgg/ecs`, narrowed to
  * exactly the helpers this entity's fields use. The set/add/remove (array) and
- * additive (pool) semantics live in `@vamp/ecs` so `materializeDelta`,
+ * additive (pool) semantics live in `@vampgg/ecs` so `materializeDelta`,
  * `mergeDelta`, and `accumulateDelta` cannot drift; the generated code only
  * dispatches per field. Returns "" when the entity has neither array nor pool
  * fields (so no unused import is emitted).
@@ -39,7 +39,7 @@ export function emitHelperImports(entity: SchemaDefinition, schema: ParsedSchema
   if (needsArrayHelper(entity)) names.push("applyArrayDelta", "accumulateArrayDelta");
   if (needsPoolHelper(entity, schema)) names.push("applyPoolDelta", "accumulatePoolDelta");
   if (names.length === 0) return "";
-  return `import { ${names.join(", ")} } from "@vamp/ecs";`;
+  return `import { ${names.join(", ")} } from "@vampgg/ecs";`;
 }
 
 export function emitHelpers(entity: SchemaDefinition, schema: ParsedSchema): string {

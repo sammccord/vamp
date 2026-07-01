@@ -1,5 +1,5 @@
-import { type BaseEntity } from "@vamp/ecs";
-import { PinoLogger } from "@vamp/utils/pino-logger";
+import { type BaseEntity } from "@vampgg/ecs";
+import { PinoLogger } from "@vampgg/utils/pino-logger";
 import { TempoLogLevel } from "@tempojs/common";
 import { type Env } from "cloudflare:workers";
 import type { YDocStorage } from "y-durablestream";

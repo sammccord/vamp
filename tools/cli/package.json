@@ -1,7 +1,7 @@
 {
-  "name": "@vamp/cli",
+  "name": "@vampgg/cli",
   "version": "1.0.0-beta.1",
-  "description": "ECS code generator CLI for @vamp",
+  "description": "ECS code generator CLI for @vampgg",
   "homepage": "https://github.com/sammccord/vamp/tree/main/tools/cli#readme",
   "bugs": {
     "url": "https://github.com/sammccord/vamp/issues"
@@ -44,9 +44,9 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@vamp/ecs": "workspace:*",
-    "@vamp/utils": "workspace:*",
-    "@vamp/worker": "workspace:*",
+    "@vampgg/ecs": "workspace:*",
+    "@vampgg/utils": "workspace:*",
+    "@vampgg/worker": "workspace:*",
     "bebop-tools": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:",

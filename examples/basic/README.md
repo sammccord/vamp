@@ -1,6 +1,6 @@
 # Basic example
 
-A complete, runnable @vamp game: a Cloudflare Workers Durable Object hosting the
+A complete, runnable @vampgg game: a Cloudflare Workers Durable Object hosting the
 ECS, tempo RPC over hibernatable WebSockets, area-of-interest broadcast, and a
 Solid read-replica client. Use it as the reference wiring for the whole stack.
 
@@ -51,9 +51,9 @@ generate` regenerates `src/game.generated.ts` (and `bebopc` regenerates
 - **`wrangler.jsonc`** — binds two Durable Objects: `GameECS` (the runtime) and
   `GameStorage` (yjs `y-durablestream` persistence), with the `nodejs_compat`
   flag.
-- **Config:** `vamp.json` (schemas → `outFile`) drives `@vamp/cli`;
+- **Config:** `vamp.json` (schemas → `outFile`) drives `@vampgg/cli`;
   `bebop.json` drives `bebopc`.
 
-See the package READMEs for the building blocks: [`@vamp/ecs`](../../packages/ecs),
-[`@vamp/worker`](../../packages/worker), [`@vamp/solid`](../../packages/solid),
-[`@vamp/utils`](../../packages/utils), [`@vamp/cli`](../../tools/cli).
+See the package READMEs for the building blocks: [`@vampgg/ecs`](../../packages/ecs),
+[`@vampgg/worker`](../../packages/worker), [`@vampgg/solid`](../../packages/solid),
+[`@vampgg/utils`](../../packages/utils), [`@vampgg/cli`](../../tools/cli).

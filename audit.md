@@ -15,14 +15,14 @@ The defects cluster into four recurring themes (see §9): **(a)** resources that
 
 ### Production-readiness by package
 
-| Package                                 | Verdict                       | Critical | High | Medium | Low |
-| --------------------------------------- | ----------------------------- | :------: | :--: | :----: | :-: |
-| `@vamp/ecs`                             | Blocked                       |    4     |  5   |   4    |  5  |
-| `@vamp/worker`                          | Blocked                       |    3     |  5   |   4    |  3  |
-| `@vamp/utils` (transports)              | Blocked                       |    3     |  4   |   5    |  3  |
-| `@vamp/utils` (async primitives & misc) | Blocked                       |    3     |  3   |   4    |  3  |
-| `tools/cli`                             | Blocked for untrusted schemas |    2     |  4   |   4    |  5  |
-| `@vamp/rot`                             | 2 vamp-introduced regressions |    2     |  2   |   3    |  2  |
+| Package                                   | Verdict                       | Critical | High | Medium | Low |
+| ----------------------------------------- | ----------------------------- | :------: | :--: | :----: | :-: |
+| `@vampgg/ecs`                             | Blocked                       |    4     |  5   |   4    |  5  |
+| `@vampgg/worker`                          | Blocked                       |    3     |  5   |   4    |  3  |
+| `@vampgg/utils` (transports)              | Blocked                       |    3     |  4   |   5    |  3  |
+| `@vampgg/utils` (async primitives & misc) | Blocked                       |    3     |  3   |   4    |  3  |
+| `tools/cli`                               | Blocked for untrusted schemas |    2     |  4   |   4    |  5  |
+| `@vampgg/rot`                             | 2 vamp-introduced regressions |    2     |  2   |   3    |  2  |
 
 > Counts are indicative; the same root cause sometimes spans multiple files (e.g. the duplex `request.status` bug appears in all three routers).
 
@@ -72,7 +72,7 @@ Severity legend: **CRITICAL** = data loss / crash / leak that breaks production;
 
 ---
 
-## 4. `@vamp/ecs` — Entity-Component-System core
+## 4. `@vampgg/ecs` — Entity-Component-System core
 
 **Assessment:** The archetype-graph design is conceptually sound, but it ships with a failing test, several unbounded-memory leaks that degrade any long-running session, a stale-cache correctness bug, and a pooled-array scheme that hands live recycled arrays to callers. Multiple "optimizations" (whole-graph rescans, per-frame array spreads, the array pool) are net negatives.
 
@@ -108,7 +108,7 @@ Severity legend: **CRITICAL** = data loss / crash / leak that breaks production;
 
 ---
 
-## 5. `@vamp/worker` — Cloudflare Durable Object integration
+## 5. `@vampgg/worker` — Cloudflare Durable Object integration
 
 **Assessment:** The most serious defects are lifecycle-related. The DO accepts hibernatable WebSockets but never re-initializes its runtime on wake, so it is dead after the first eviction; server-stream RPCs and observer sinks are never torn down on disconnect; and the yjs reconciliation has several gaps (no awareness, lost remote updates during the pre-seed window, component deletions not propagated into the archetype graph). There is also no `alarm()`/tick loop despite this being a game runtime.
 
@@ -141,7 +141,7 @@ Severity legend: **CRITICAL** = data loss / crash / leak that breaks production;
 
 ---
 
-## 6. `@vamp/utils` — Transport channels & routers (`ws-*`, `worker-*`)
+## 6. `@vampgg/utils` — Transport channels & routers (`ws-*`, `worker-*`)
 
 **Assessment:** Request/response correlation works on the happy path, but there is **no teardown anywhere**: on socket/worker death, pending unary promises hang forever and their listeners leak; on timeout/abort, unary listeners are never removed; and the worker transport transfers bebop's shared singleton write buffer. The `ws-*` and `worker-*` files are ~80% copy-paste with divergent, divergently-buggy cleanup.
 
@@ -175,7 +175,7 @@ Severity legend: **CRITICAL** = data loss / crash / leak that breaks production;
 
 ---
 
-## 7. `@vamp/utils` — Async primitives, extension transport, logging
+## 7. `@vampgg/utils` — Async primitives, extension transport, logging
 
 **Assessment:** The two async iterators are the highest-leverage code in the repo (every stream flows through them) and both are defective: unbounded buffering, O(n) `shift()`, no `return`/`throw`/error propagation, and — for the duplex variant — a loop that can drop messages and hang permanently. The extension transport layers additional listener leaks and shared-`init` races on top. The three transport variants are ~90% duplicated.
 
@@ -236,13 +236,13 @@ Severity legend: **CRITICAL** = data loss / crash / leak that breaks production;
 - `emit-helpers.ts:46` — pool default `{ field: 0 }` ignores field types (string/bool/nested defaulted to `0`).
 - `emit-delta.ts:3-18` vs `parse-bop.ts` — two independent scalar vocabularies (`byte` vs `uint8`) that can disagree and fall through to an invalid emitted type; single source of truth.
 - `parse-bop-source.ts:68` — nested map/array value types captured as raw strings, never recursively classified.
-- `init.ts` / `templates/entity.bop.ts` — scaffolded `import "../node_modules/@vamp/utils/schema/pool.bop"` is fragile across pnpm/workspace layouts; resolve at generate time.
+- `init.ts` / `templates/entity.bop.ts` — scaffolded `import "../node_modules/@vampgg/utils/schema/pool.bop"` is fragile across pnpm/workspace layouts; resolve at generate time.
 
 > Hand-written example files `examples/basic/src/rpc.service.ts` and `index.ts` are sound for their stated assumptions; the only fragile spots are the documented `delete (entity).encode` and `as unknown as Map` casts that rely on ECS mutation records being wire-compatible with the bebop `MutationRecord` — an intentional, documented coupling.
 
 ---
 
-## 9. `@vamp/rot` — Roguelike toolkit (vendored rot.js port)
+## 9. `@vampgg/rot` — Roguelike toolkit (vendored rot.js port)
 
 **Assessment:** RNG, FOV (precise/recursive/discrete), color, and noise are faithful, correct ports. Two **vamp-introduced** regressions are serious: `MinHeap.remove` corrupts the heap (mis-ordering the turn scheduler), and `Digger` is functionally broken. The A\* open-set and `EventQueue.shift` are the perf hot-spots that will choke a server tick with many entities.
 

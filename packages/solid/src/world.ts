@@ -1,4 +1,4 @@
-import { type BaseEntity, createBaseMutator, ECS, type ECSOptions } from "@vamp/ecs";
+import { type BaseEntity, createBaseMutator, ECS, type ECSOptions } from "@vampgg/ecs";
 import type { AnyECS } from "./types";
 
 /**

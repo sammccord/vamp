@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { ConsoleLogger, TempoLogLevel } from "@tempojs/common";
-import { TempoWSChannel } from "@vamp/utils/ws-channel";
+import { TempoWSChannel } from "@vampgg/utils/ws-channel";
 import { bench, boxplot, run, summary } from "mitata";
 import { afterAll, beforeAll, test } from "vitest";
 import {

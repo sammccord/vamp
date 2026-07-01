@@ -33,7 +33,7 @@ export function resolveBebopImport(specifier: string, fromDir: string): string |
     return existsSync(abs) ? abs : null;
   }
 
-  // Package specifier (e.g. "@vamp/utils/schema/pool.bop").
+  // Package specifier (e.g. "@vampgg/utils/schema/pool.bop").
   const req = createRequire(resolve(fromDir, "noop.js"));
   // 1. Try the full subpath directly (works when there is no `exports` map or
   //    the subpath is exported).
@@ -61,7 +61,7 @@ export function resolveBebopImport(specifier: string, fromDir: string): string |
  * Transitively read the entity source plus every reachable imported `.bop` file,
  * returning their concatenated source text. Used so the lightweight message
  * parser can see component messages and `<Type>Delta` definitions that live in
- * imported files (e.g. `PoolDelta` in `@vamp/utils/schema/pool.bop`).
+ * imported files (e.g. `PoolDelta` in `@vampgg/utils/schema/pool.bop`).
  *
  * Unresolved imports are skipped (the caller fails loudly later if a referenced
  * type is missing). Visited files are de-duplicated to avoid cycles.

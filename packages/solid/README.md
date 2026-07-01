@@ -1,6 +1,6 @@
-# @vamp/solid
+# @vampgg/solid
 
-Solid.js bindings for [`@vamp/ecs`](../ecs) + generated bebop RPC clients. Wrap your
+Solid.js bindings for [`@vampgg/ecs`](../ecs) + generated bebop RPC clients. Wrap your
 app in `<GameProvider>` and read entities through reactive, fine-grained queries
 that update as the server streams mutations.
 
@@ -16,8 +16,8 @@ would double-count. (A prediction overlay is intentionally left out; see the pla
 ## Usage
 
 ```ts
-import { TempoWSChannel } from "@vamp/utils/ws-channel";
-import { GameProvider, createQuery, createWorld, useClient } from "@vamp/solid";
+import { TempoWSChannel } from "@vampgg/utils/ws-channel";
+import { GameProvider, createQuery, createWorld, useClient } from "@vampgg/solid";
 import { MutationScope, RpcClient } from "./bebop";
 import { createECSOptions, components } from "./game.generated";
 

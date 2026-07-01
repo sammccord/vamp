@@ -9,11 +9,11 @@ import {
   type GenericAction,
   MutationRecord,
   MutationType,
-} from "@vamp/ecs";
-import { Message } from "@vamp/utils/bebop";
-import type { ContextLogger } from "@vamp/utils/context-logger";
-import { PinoLogger } from "@vamp/utils/pino-logger";
-import { TempoWsRouter } from "@vamp/utils/ws-router";
+} from "@vampgg/ecs";
+import { Message } from "@vampgg/utils/bebop";
+import type { ContextLogger } from "@vampgg/utils/context-logger";
+import { PinoLogger } from "@vampgg/utils/pino-logger";
+import { TempoWsRouter } from "@vampgg/utils/ws-router";
 import { HookRegistry, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
 import { DurableObject } from "cloudflare:workers";

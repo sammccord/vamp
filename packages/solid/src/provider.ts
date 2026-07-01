@@ -1,4 +1,4 @@
-import { type BaseEntity, MutationType } from "@vamp/ecs";
+import { type BaseEntity, MutationType } from "@vampgg/ecs";
 import {
   batch,
   createComponent,

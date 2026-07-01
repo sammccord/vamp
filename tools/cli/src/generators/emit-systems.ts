@@ -1,6 +1,6 @@
 /**
  * Emits app-typed aliases for the generic system types and factories from
- * `@vamp/ecs` (`System.ts`). Each underlying type is generic over
+ * `@vampgg/ecs` (`System.ts`). Each underlying type is generic over
  * `<State, UpdateArguments, Actions, Tags, E, D>`; this bakes the schema's
  * concrete `Actions`/`Tags`/`Entity`/`EntityDelta` into the last four slots and
  * leaves `State`/`UpdateArguments` open (mirroring `GameECS`/`GameContext`). The

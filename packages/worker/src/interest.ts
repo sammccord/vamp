@@ -5,13 +5,13 @@ import {
   type MutationBatch,
   type MutationRecord,
   MutationType,
-} from "@vamp/ecs";
-import { createEventIterator } from "@vamp/utils/create-event-iterator";
+} from "@vampgg/ecs";
+import { createEventIterator } from "@vampgg/utils/create-event-iterator";
 import {
   encodeServerStreamFrame,
   STREAM_MESSAGE_ID_KEY,
   STREAM_METHOD_ID_KEY,
-} from "@vamp/utils/ws-router";
+} from "@vampgg/utils/ws-router";
 
 /**
  * Interest-managed, hibernation-safe broadcast for an ECS world over a Tempo
@@ -26,7 +26,7 @@ import {
  *
  * The module is intentionally free of `cloudflare:workers` (it never imports
  * `./ecs`) so it loads in the plain node test runner; it depends only on
- * `@vamp/ecs` types, the `@tempojs/server` context, and the `@vamp/utils`
+ * `@vampgg/ecs` types, the `@tempojs/server` context, and the `@vampgg/utils`
  * router/iterator helpers.
  */
 

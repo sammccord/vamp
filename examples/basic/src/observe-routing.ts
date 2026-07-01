@@ -6,7 +6,7 @@ import { createGameInterestBroadcast, type GameContext } from "./game.generated"
  *
  * All the plumbing — per-connection subscription persistence, generator-free
  * framed delivery, hibernation rehydration, teardown — lives in
- * `@vamp/worker/interest` and is bound to this app's generated types by the
+ * `@vampgg/worker/interest` and is bound to this app's generated types by the
  * codegen `createGameInterestBroadcast` wrapper (which also supplies the default
  * bebop codec and first-key viewer resolution). All a developer writes here is
  * the subjective interest policy `canSee`; with no policy at all every observer

@@ -1,4 +1,4 @@
-import { type ECSOptions, MutationRecord } from "@vamp/ecs";
+import { type ECSOptions, MutationRecord } from "@vampgg/ecs";
 import type { WireBatch } from "../src/types.ts";
 
 /** A tiny entity for headless tests: `hp` is additive (pool-like), `faction` replaces. */

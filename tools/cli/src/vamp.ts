@@ -6,7 +6,7 @@ import { initCommand } from "./commands/init";
 const main = defineCommand({
   meta: {
     name: "vamp",
-    description: "ECS code generator for @vamp",
+    description: "ECS code generator for @vampgg",
   },
   subCommands: {
     generate: generateCommand,

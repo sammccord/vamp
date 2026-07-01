@@ -26,7 +26,7 @@ function bebopRuntimeDir(): string {
   return dirname(dirname(main));
 }
 
-/** Minimal ambient stubs for the @vamp/* symbols the generated file references. */
+/** Minimal ambient stubs for the @vampgg/* symbols the generated file references. */
 const ECS_STUB = `
 export interface ECSOptions<E, D> {
   createId: () => string;
@@ -132,9 +132,9 @@ export function defineECSRuntime<
 ): void;
 `;
 
-/** Minimal stub for the `@vamp/worker/interest` subpath the generated wrapper imports. */
+/** Minimal stub for the `@vampgg/worker/interest` subpath the generated wrapper imports. */
 const WORKER_INTEREST_STUB = `
-import type { MutationBatch } from "@vamp/ecs";
+import type { MutationBatch } from "@vampgg/ecs";
 export interface InterestBroadcastConfig<W, Req, E = unknown, D = unknown> {
   encodeBatch: (batch: MutationBatch<E, D>) => Uint8Array;
   canSee?: (world: W, viewerId: string | undefined, targetId: string, target: E) => boolean;
@@ -161,7 +161,7 @@ interface ScratchFiles {
  * Scaffold a scratch project, run the full pipeline
  * (generateMutationSchema -> bebopc build -> generate), then `tsc --noEmit`
  * the emitted game.generated.ts together with the compiled bebop.ts against
- * minimal @vamp/* stubs. Returns nothing; throws on any failure.
+ * minimal @vampgg/* stubs. Returns nothing; throws on any failure.
  */
 function roundtrip(files: ScratchFiles): { dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "vamp-rt-"));
@@ -219,7 +219,7 @@ message PoolDelta {
     "utf-8",
   );
 
-  // node_modules: stubs for @vamp/ecs, @vamp/worker, and the real bebop runtime.
+  // node_modules: stubs for @vampgg/ecs, @vampgg/worker, and the real bebop runtime.
   const nm = join(dir, "node_modules");
   const mkPkg = (name: string, dts: string) => {
     const d = join(nm, ...name.split("/"));
@@ -232,15 +232,15 @@ message PoolDelta {
     writeFileSync(join(d, "index.d.ts"), dts, "utf-8");
     writeFileSync(join(d, "index.js"), "", "utf-8");
   };
-  mkPkg("@vamp/ecs", ECS_STUB);
-  // @vamp/worker exposes both the root and the `./interest` subpath the generated
+  mkPkg("@vampgg/ecs", ECS_STUB);
+  // @vampgg/worker exposes both the root and the `./interest` subpath the generated
   // file imports, so give it an explicit exports map (nodenext subpath resolution).
-  const workerDir = join(nm, "@vamp", "worker");
+  const workerDir = join(nm, "@vampgg", "worker");
   mkdirSync(workerDir, { recursive: true });
   writeFileSync(
     join(workerDir, "package.json"),
     JSON.stringify({
-      name: "@vamp/worker",
+      name: "@vampgg/worker",
       version: "0.0.0",
       exports: {
         ".": { types: "./index.d.ts", default: "./index.js" },

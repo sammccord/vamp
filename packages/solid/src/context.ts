@@ -1,4 +1,4 @@
-import type { BaseEntity } from "@vamp/ecs";
+import type { BaseEntity } from "@vampgg/ecs";
 import { type Accessor, createContext, useContext } from "solid-js";
 import type { QueryRegistry } from "./registry";
 import type { EntityStore } from "./store";
@@ -25,7 +25,7 @@ export function useGame<
 >(): GameContextValue<E, D, C> {
   const ctx = useContext(GameContext);
   if (!ctx) {
-    throw new Error("[@vamp/solid] hooks must be called within a <GameProvider>.");
+    throw new Error("[@vampgg/solid] hooks must be called within a <GameProvider>.");
   }
   return ctx as unknown as GameContextValue<E, D, C>;
 }

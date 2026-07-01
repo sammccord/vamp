@@ -100,7 +100,7 @@ export class RpcService extends BaseRpcService {
   ): AsyncGenerator<MutationScope, void, undefined> {
     // All interest-broadcast plumbing — viewer resolution, subscription
     // persistence, the interest-filtered snapshot, generator-free framed
-    // delivery, and hibernation-safe teardown — lives in `@vamp/worker/interest`
+    // delivery, and hibernation-safe teardown — lives in `@vampgg/worker/interest`
     // (bound to this app's types by the generated `createGameInterestBroadcast`).
     // The RPC method is just the delegation point.
     yield* observe(record, context);

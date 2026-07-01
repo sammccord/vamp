@@ -1,7 +1,7 @@
 {
-  "name": "@vamp/worker",
+  "name": "@vampgg/worker",
   "version": "1.0.0-beta.1",
-  "description": "Cloudflare Workers Durable Object integration for @vamp.",
+  "description": "Cloudflare Workers Durable Object integration for @vampgg.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/worker#readme",
   "bugs": {
     "url": "https://github.com/sammccord/vamp/issues"
@@ -35,8 +35,8 @@
   "dependencies": {
     "@tempojs/common": "catalog:",
     "@tempojs/server": "catalog:",
-    "@vamp/ecs": "workspace:*",
-    "@vamp/utils": "workspace:*",
+    "@vampgg/ecs": "workspace:*",
+    "@vampgg/utils": "workspace:*",
     "pino": "catalog:",
     "tseep": "catalog:",
     "y-durablestream": "catalog:",

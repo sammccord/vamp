@@ -1,7 +1,7 @@
 {
-  "name": "@vamp/solid",
+  "name": "@vampgg/solid",
   "version": "1.0.0-beta.1",
-  "description": "Solid.js context, hooks, and reactive entity queries for @vamp ECS + bebop RPC clients.",
+  "description": "Solid.js context, hooks, and reactive entity queries for @vampgg ECS + bebop RPC clients.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/solid#readme",
   "bugs": {
     "url": "https://github.com/sammccord/vamp/issues"
@@ -32,7 +32,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@vamp/ecs": "workspace:*"
+    "@vampgg/ecs": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

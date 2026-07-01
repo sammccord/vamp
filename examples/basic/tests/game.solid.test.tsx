@@ -2,8 +2,8 @@
 import type { ChildProcess } from "node:child_process";
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { ConsoleLogger, TempoLogLevel } from "@tempojs/common";
-import { createEntity, createQuery, createWorld, GameProvider, useConnection } from "@vamp/solid";
-import { TempoWSChannel } from "@vamp/utils/ws-channel";
+import { createEntity, createQuery, createWorld, GameProvider, useConnection } from "@vampgg/solid";
+import { TempoWSChannel } from "@vampgg/utils/ws-channel";
 import { For } from "solid-js";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Actions, Attack, Entity, MutationScope, RpcClient } from "../src/bebop";
@@ -71,7 +71,7 @@ function HealthList() {
   );
 }
 
-describe("@vamp/solid against a live worker", () => {
+describe("@vampgg/solid against a live worker", () => {
   it("renders a spawned entity through createQuery", async () => {
     const { world, client } = connect(crypto.randomUUID());
 

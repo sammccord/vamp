@@ -1,8 +1,8 @@
-# @vamp/cli
+# @vampgg/cli
 
-ECS code generator CLI for @vamp. Parses Bebop (`.bop`) schemas and emits the
+ECS code generator CLI for @vampgg. Parses Bebop (`.bop`) schemas and emits the
 TypeScript ECS components, factories, deltas, and mutation schemas used by a
-`@vamp` game.
+`@vampgg` game.
 
 ## Usage
 

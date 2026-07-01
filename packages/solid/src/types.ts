@@ -1,4 +1,4 @@
-import type { BaseEntity, ECS, MutationBatch } from "@vamp/ecs";
+import type { BaseEntity, ECS, MutationBatch } from "@vampgg/ecs";
 
 /**
  * The ECS surface the client drives, with the non-essential type parameters
@@ -17,7 +17,7 @@ export type AnyECS<E extends BaseEntity = BaseEntity, D = unknown> = ECS<any, an
  * A stream frame carrying a coalesced `MutationBatch` keyed by entity id — the
  * envelope a generated bebop `observe`-style stream yields (`MutationScope`). This
  * is the transport shape; the batch itself is the ECS's own {@link MutationBatch},
- * applied via `world.applyMutations`. Kept here (not in `@vamp/ecs`) because the
+ * applied via `world.applyMutations`. Kept here (not in `@vampgg/ecs`) because the
  * `{ mutations }` envelope is schema/transport-specific, not universal ECS currency.
  */
 export interface WireBatch<E extends BaseEntity, D> {

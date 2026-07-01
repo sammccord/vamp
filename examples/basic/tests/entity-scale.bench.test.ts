@@ -1,4 +1,4 @@
-import { createBaseMutator, ECS, type ECSOptions } from "@vamp/ecs";
+import { createBaseMutator, ECS, type ECSOptions } from "@vampgg/ecs";
 import { nanoid } from "nanoid";
 import { describe, expect, it } from "vitest";
 import { applyUpdate, Doc, encodeStateAsUpdate, Map as YMap } from "yjs";
@@ -31,7 +31,7 @@ import { type Entity, type EntityDelta, Tags } from "../src/bebop";
  * writers (`entity-doc.ts`), the real example entity shape (`bebop.ts`), and the
  * real ECS, and replicates y-durablestream's frame codec verbatim (its own
  * protocol.test.ts proves the >1MB FrameDecodeError; here we pin the snapshot to
- * that limit). Neither `@vamp/worker` nor `y-durablestream`'s entry can be
+ * that limit). Neither `@vampgg/worker` nor `y-durablestream`'s entry can be
  * imported here — both pull in `cloudflare:workers`.
  */
 
@@ -102,7 +102,7 @@ function reassembleMessageLocal(frames: Uint8Array[], cap: number): Uint8Array {
   return out;
 }
 
-// ── ECS options (pure half of game.generated.ts; that file pulls @vamp/worker) ─
+// ── ECS options (pure half of game.generated.ts; that file pulls @vampgg/worker) ─
 const components = {
   id: 1,
   sk: 2,

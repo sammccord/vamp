@@ -1,7 +1,7 @@
 {
-  "name": "@vamp/rot",
+  "name": "@vampgg/rot",
   "version": "1.0.0-beta.1",
-  "description": "Roguelike toolkit (pathfinding, FOV, map generation, scheduling) for @vamp.",
+  "description": "Roguelike toolkit (pathfinding, FOV, map generation, scheduling) for @vampgg.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/rot#readme",
   "bugs": {
     "url": "https://github.com/sammccord/vamp/issues"

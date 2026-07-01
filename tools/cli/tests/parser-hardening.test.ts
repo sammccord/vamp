@@ -122,7 +122,7 @@ describe("jsonc parse error surfacing (4.8)", () => {
 
 // Fixture 9 — array delta materialize parity (4.5) is asserted in scaffolding/round-trip
 // via emitHelpers; here we assert the generated source IMPORTS the shared applier
-// from `@vamp/ecs` (the canonical algebra now lives there, not inlined) and uses
+// from `@vampgg/ecs` (the canonical algebra now lives there, not inlined) and uses
 // it from materializeDelta.
 describe("materializeDelta array parity (4.5)", () => {
   it("imports and uses the shared applyArrayDelta helper", async () => {
@@ -148,7 +148,7 @@ describe("materializeDelta array parity (4.5)", () => {
     // No longer inlined: the algebra is a runtime import, not a generated function body.
     expect(out).not.toContain("function applyArrayDelta");
     expect(imports).toContain("applyArrayDelta");
-    expect(imports).toContain('from "@vamp/ecs"');
+    expect(imports).toContain('from "@vampgg/ecs"');
     expect(out).toContain("children: applyArrayDelta(base?.children ?? [], delta.children)");
   });
 });

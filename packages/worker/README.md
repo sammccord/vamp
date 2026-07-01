@@ -1,11 +1,11 @@
-# @vamp/worker
+# @vampgg/worker
 
-Cloudflare Workers Durable Object integration for @vamp. Hosts the `@vamp/ecs`
+Cloudflare Workers Durable Object integration for @vampgg. Hosts the `@vampgg/ecs`
 runtime inside a Durable Object, persists/syncs state via yjs (`y-durablestream`),
 and serves tempo RPC over **hibernatable** WebSockets.
 
 ```bash
-pnpm add @vamp/worker
+pnpm add @vampgg/worker
 ```
 
 > Peer/runtime deps: `yjs` + `y-durablestream`, and a Cloudflare Workers project
@@ -58,7 +58,7 @@ export default app;
 export { GameECS, GameStorage } from "./game.generated"; // the bound DO classes
 ```
 
-## `@vamp/worker/interest` — area-of-interest broadcast
+## `@vampgg/worker/interest` — area-of-interest broadcast
 
 `createInterestBroadcast(config)` builds generator-free, per-connection interest
 broadcasting (each client only receives mutations for entities it can see). It
@@ -66,7 +66,7 @@ returns the `observe` delegate for your RPC method plus the `onConnectionClose`
 and `rehydrateConnection` hooks you pass into `defineECSRuntime`:
 
 ```ts
-import { createInterestBroadcast } from "@vamp/worker/interest";
+import { createInterestBroadcast } from "@vampgg/worker/interest";
 
 const { observe, onConnectionClose, rehydrateConnection } = createInterestBroadcast<
   GameWorld,
@@ -85,9 +85,9 @@ without the original `observe` generator (which dies with the isolate).
 
 ## Key exports
 
-`defineECSRuntime`, `ECSDurableObject` (from `@vamp/worker`) · `ECSStorage` (from
-`@vamp/worker`) · `createInterestBroadcast`, `InterestBroadcast`,
-`InterestBroadcastConfig`, `InterestSub` (from `@vamp/worker/interest`).
+`defineECSRuntime`, `ECSDurableObject` (from `@vampgg/worker`) · `ECSStorage` (from
+`@vampgg/worker`) · `createInterestBroadcast`, `InterestBroadcast`,
+`InterestBroadcastConfig`, `InterestSub` (from `@vampgg/worker/interest`).
 
 ## Development
 

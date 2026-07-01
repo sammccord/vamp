@@ -4,12 +4,12 @@ Real-time multiplayer game framework for Cloudflare Workers.
 
 ## Packages
 
-- **@vamp/ecs**: Entity-Component-System runtime for game state management
-- **@vamp/rot**: Roguelike toolkit (pathfinding, FOV, map generation, scheduling)
-- **@vamp/utils**: Tempo RPC, Bebop serialization, transports (ws/worker/extension), async primitives
-- **@vamp/worker**: Cloudflare Workers Durable Object integration, including the `@vamp/worker/interest` area-of-interest broadcast API
-- **@vamp/solid**: Solid.js bindings — `<GameProvider>` + reactive entity queries
-- **@vamp/cli**: ECS code generator CLI (`vamp init` / `vamp generate`) under `tools/cli`
+- **@vampgg/ecs**: Entity-Component-System runtime for game state management
+- **@vampgg/rot**: Roguelike toolkit (pathfinding, FOV, map generation, scheduling)
+- **@vampgg/utils**: Tempo RPC, Bebop serialization, transports (ws/worker/extension), async primitives
+- **@vampgg/worker**: Cloudflare Workers Durable Object integration, including the `@vampgg/worker/interest` area-of-interest broadcast API
+- **@vampgg/solid**: Solid.js bindings — `<GameProvider>` + reactive entity queries
+- **@vampgg/cli**: ECS code generator CLI (`vamp init` / `vamp generate`) under `tools/cli`
 
 ## Setup
 
@@ -20,7 +20,7 @@ Run `vp install` to install dependencies.
 See `examples/basic/` for a complete working example.
 
 1. Define schemas in `schema/` using Bebop format
-2. Define ECS systems using `@vamp/ecs`
+2. Define ECS systems using `@vampgg/ecs`
 3. Run the game worker via Cloudflare Workers
 
 ```bash
