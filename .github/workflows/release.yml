@@ -88,13 +88,22 @@ jobs:
         run: pnpm vp run --filter './packages/*' --filter './tools/*' test
 
       # Commit the bump locally (not pushed yet — see publish-before-push note).
+      # Guard the commit: in prerelease mode (`.changeset/pre.json`) an already-
+      # consumed changeset's `.md` is retained, so "Detect pending changesets"
+      # counts it (> 0) but `changeset version` is a no-op — nothing to commit.
+      # Only commit when something actually changed; otherwise fall through so
+      # publish stays idempotent (it skips versions already on the registry).
       - name: Commit version bump
         if: steps.cs.outputs.count != '0'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "chore: release [skip ci]"
+          if git diff --cached --quiet; then
+            echo "No version changes to commit (already-consumed changeset in pre mode); skipping."
+          else
+            git commit -m "chore: release [skip ci]"
+          fi
 
       # c. Publish to npm (idempotent: skips versions already on the registry)
       #    and create a git tag per newly published package. Capture the output

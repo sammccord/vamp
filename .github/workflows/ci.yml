@@ -66,11 +66,19 @@ jobs:
       #    `tsc --noEmit` has no such exclusion and fails on generated code the
       #    project owns — and since `bebop.ts` is imported by the other sources,
       #    a tsconfig `exclude` cannot silence it.
+      #    Determinism gate excludes `src/bebop.ts`: that file is bebopc output
+      #    embedding a `BEBOP_SCHEMA` byte blob whose type order is NOT
+      #    reproducible across platforms (bebopc emits in a traversal order that
+      #    differs macOS↔Linux — the committed copy is generated on one, CI runs
+      #    the other), so a byte-exact `git diff` on it always fails in CI. It is
+      #    already excluded from type-checking for the same "tool owns it" reason.
+      #    vamp's OWN generated output (`game.generated.ts`, the mutation schema)
+      #    IS deterministic and stays gated.
       - name: Codegen round-trip
         run: |
           pnpm --filter basic run generate
           pnpm vp check examples/basic
-          git diff --exit-code examples/basic/src
+          git diff --exit-code -- examples/basic/src ':(exclude)examples/basic/src/bebop.ts'
 
       # 4. publish-readiness / metadata lint: prove every @vamp/* package packs
       #    cleanly (correct `files`, resolvable `exports`, no missing dist).
