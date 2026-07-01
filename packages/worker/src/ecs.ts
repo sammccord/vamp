@@ -18,7 +18,7 @@ import { HookRegistry, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
 import { DurableObject } from "cloudflare:workers";
 import { YStreamClient } from "y-durablestream";
-import { applyUpdate } from "yjs";
+import { applyUpdate, mergeUpdates } from "yjs";
 import type { Doc, Map as YMap, YMapEvent } from "yjs";
 import { entitiesMap, removeEntity, writeEntityInsert, writeUpdate } from "./entity-doc";
 import { ShardManager } from "./shard-manager";
@@ -271,6 +271,10 @@ export class ECSDurableObject<
   // Roots currently registered for notify-push (gated by players || tick), to
   // keep register/deregister idempotent.
   private _registeredRoots = new Set<string>();
+  // Coalescing window (ms) for forwarding local writes to shard providers: a
+  // burst of flushes merges into one RPC instead of one-per-flush (which
+  // saturates the DO under load). Bounds durability + cross-lobby latency.
+  private _forwardDebounceMs = 16;
   // id → its home shard root. Update/Delete mutation records carry no `root`, so
   // we remember where each entity was inserted to route later writes and to drop
   // a shard's entities on teardown.
@@ -866,9 +870,26 @@ export class ECSDurableObject<
         // changes carry REMOTE_ORIGIN and are deliberately not re-forwarded (no
         // echo loop). Survives across requests because it is a plain doc observer,
         // not a stream read-loop (which a DO cannot keep alive past its request).
+        //
+        // Updates are COALESCED over a short window: a burst of scopes (e.g. many
+        // RPCs/frames in flight) merges into ONE `pushLocalUpdate` RPC instead of
+        // one per flush, which otherwise saturates the DO under load. Bounded
+        // latency (≤ _forwardDebounceMs) to durability + cross-lobby; merged
+        // updates are CRDT-equivalent, and `syncOnce` on the next wake re-pushes
+        // anything a dropped flush left behind, so no durability loss.
+        let pending: Uint8Array[] = [];
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const flushForward = () => {
+          timer = null;
+          if (pending.length === 0) return;
+          const merged = pending.length === 1 ? pending[0] : mergeUpdates(pending);
+          pending = [];
+          this.ctx.waitUntil(client.pushLocalUpdate(merged));
+        };
         const forwarder = (update: Uint8Array, origin: unknown) => {
           if (origin !== ECSDurableObject.LOCAL_ORIGIN) return;
-          this.ctx.waitUntil(client.pushLocalUpdate(update));
+          pending.push(update);
+          if (timer === null) timer = setTimeout(flushForward, this._forwardDebounceMs);
         };
         doc.on("update", forwarder);
         // One-shot initial bidirectional sync (no persistent read-loop): pulls the
@@ -878,6 +899,8 @@ export class ECSDurableObject<
         return {
           disconnect() {
             doc.off("update", forwarder);
+            if (timer !== null) clearTimeout(timer);
+            flushForward(); // flush any buffered writes before tearing down
             client.disconnect();
           },
         };
