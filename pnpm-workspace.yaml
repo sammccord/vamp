@@ -5,6 +5,7 @@ packages:
   - examples/*
 
 catalog:
+  "@changesets/cli": ^2.31.0
   "@cloudflare/vitest-pool-workers": ^0.13.1
   "@tempojs/client": ^0.0.12
   "@tempojs/common": ^0.0.12

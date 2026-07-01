@@ -76,5 +76,11 @@ export function emitDelta(entity: SchemaDefinition, schema: ParsedSchema): strin
       return `  ${f.name}?: ${deltaTypeForField(f, schema)};`;
     })
     .join("\n");
-  return `export type EntityDelta = {\n${fields}\n};`;
+  return `/**
+ * Partial, CRDT-style mutation over an {@link Entity}: scalars are
+ * last-writer-wins, array fields carry \`set\`/\`add\`/\`remove\`, and pool/vector
+ * fields use additive \`*Delta\` counters. Apply with {@link materializeDelta} or
+ * {@link mergeDelta}; combine with {@link accumulateDelta}.
+ */
+export type EntityDelta = {\n${fields}\n};`;
 }

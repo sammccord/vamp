@@ -34,7 +34,7 @@ pnpm run bench     # stress.bench.ts — fixed-timestep ECS throughput benchmark
 ## How it's wired
 
 ```
-schema/*.bop ──(config generate)──▶ src/game.generated.ts + src/bebop.ts
+schema/*.bop ──(vamp generate)──▶ src/game.generated.ts + src/bebop.ts
                                           │
    src/systems.ts        registerGameSystems(world)   ← ECS systems + behaviors
    src/rpc.service.ts    @TempoService RPC impl + interest broadcast hooks
@@ -51,9 +51,9 @@ generate` regenerates `src/game.generated.ts` (and `bebopc` regenerates
 - **`wrangler.jsonc`** — binds two Durable Objects: `GameECS` (the runtime) and
   `GameStorage` (yjs `y-durablestream` persistence), with the `nodejs_compat`
   flag.
-- **Config:** `vamp.json` (schemas → `outFile`) drives `@vamp/config`;
+- **Config:** `vamp.json` (schemas → `outFile`) drives `@vamp/cli`;
   `bebop.json` drives `bebopc`.
 
 See the package READMEs for the building blocks: [`@vamp/ecs`](../../packages/ecs),
 [`@vamp/worker`](../../packages/worker), [`@vamp/solid`](../../packages/solid),
-[`@vamp/utils`](../../packages/utils), [`@vamp/config`](../../tools/config).
+[`@vamp/utils`](../../packages/utils), [`@vamp/cli`](../../tools/cli).

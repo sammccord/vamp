@@ -9,7 +9,7 @@ Real-time multiplayer game framework for Cloudflare Workers.
 - **@vamp/utils**: Tempo RPC, Bebop serialization, transports (ws/worker/extension), async primitives
 - **@vamp/worker**: Cloudflare Workers Durable Object integration, including the `@vamp/worker/interest` area-of-interest broadcast API
 - **@vamp/solid**: Solid.js bindings — `<GameProvider>` + reactive entity queries
-- **@vamp/config**: ECS code generator CLI (`config init` / `config generate`) under `tools/config`
+- **@vamp/cli**: ECS code generator CLI (`vamp init` / `vamp generate`) under `tools/cli`
 
 ## Setup
 

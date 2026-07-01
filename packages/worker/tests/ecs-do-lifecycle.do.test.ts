@@ -83,6 +83,26 @@ const ecsOptions = {
   accumulateDelta: (from: Delta, to: Delta): Delta => ({ ...to, ...from }),
 } as unknown as ECSOptions<Entity, Delta>;
 
+// Registers a system that increments `n` on every entity carrying the `n`
+// component each tick — the observable proof that a tick actually ran.
+function registerNSystem(ecs: unknown) {
+  // biome-ignore lint/suspicious/noExplicitAny: minimal world typing in test
+  const world = ecs as any;
+  world.registerSystem(
+    createEntitySystem(
+      // biome-ignore lint/suspicious/noExplicitAny: see above
+      (entities: string[], w: any) => {
+        for (const id of entities) {
+          const n = w.entity(id)?.n ?? 0;
+          w.put(id, { n: n + 1 });
+        }
+      },
+      // biome-ignore lint/suspicious/noExplicitAny: query builder
+      (q: any) => q.every(ecsOptions.components.n),
+    ),
+  );
+}
+
 class TestRegistry extends ServiceRegistry {
   init(): void {}
   // biome-ignore lint/suspicious/noExplicitAny: no RPC methods exercised here
@@ -281,7 +301,7 @@ describe("ECSDurableObject — bootstrap & persistence", () => {
       x: 10,
       y: 20,
       // The resolved home shard is stamped onto the entity so subscribers see it.
-      root: "game/room1",
+      sk: "game/room1",
     });
   });
 
@@ -291,7 +311,7 @@ describe("ECSDurableObject — bootstrap & persistence", () => {
     await instance.setup("room1");
 
     await instance.ecs.withScope(() =>
-      instance.ecs.insert({ id: "c1", x: 1, y: 2, root: "character/alice" }),
+      instance.ecs.insert({ id: "c1", x: 1, y: 2, sk: "character/alice" }),
     );
 
     // The explicit root opens a second shard; the entity lands in THAT shard's
@@ -377,26 +397,7 @@ describe("ECSDurableObject — connection teardown", () => {
 
 describe("ECSDurableObject — alarm tick loop", () => {
   test("alarm() runs ecs.update through a scope and reschedules", async () => {
-    configureRuntime({
-      tickIntervalMs: 50,
-      registerSystems: (ecs) => {
-        // biome-ignore lint/suspicious/noExplicitAny: minimal world typing in test
-        const world = ecs as any;
-        world.registerSystem(
-          createEntitySystem(
-            // biome-ignore lint/suspicious/noExplicitAny: see above
-            (entities: string[], w: any) => {
-              for (const id of entities) {
-                const n = w.entity(id)?.n ?? 0;
-                w.put(id, { n: n + 1 });
-              }
-            },
-            // biome-ignore lint/suspicious/noExplicitAny: query builder
-            (q: any) => q.every(ecsOptions.components.n),
-          ),
-        );
-      },
-    });
+    configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });
     const storage = makeStorage();
     const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
     await instance.setup("room1");
@@ -408,6 +409,116 @@ describe("ECSDurableObject — alarm tick loop", () => {
 
     // The tick system ran (n incremented) and the next alarm was scheduled.
     expect(instance.ecs.entity("ticker").n).toBe(1);
+    expect(storage._alarm).not.toBeNull();
+  });
+});
+
+describe("ECSDurableObject — runtime tick controls", () => {
+  test("setTickInterval enables + arms a loop booted with ticking disabled", async () => {
+    // No tickIntervalMs in the provider config: the loop starts disabled.
+    configureRuntime({ registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    await instance.setup("room1");
+    expect(storage._alarm).toBeNull();
+
+    await instance.setTickInterval(50);
+
+    // The alarm is armed at once and the override is persisted.
+    expect(storage._alarm).not.toBeNull();
+    expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 50, paused: false });
+
+    // The tick hooks were captured even though the world booted disabled, so the
+    // loop runs when driven.
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
+    await instance.alarm();
+    expect(instance.ecs.entity("ticker").n).toBe(1);
+  });
+
+  test("setTickInterval(0) stops the loop and clears the alarm", async () => {
+    configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    await instance.setup("room1");
+
+    await instance.setTickInterval(100); // deterministically arm
+    expect(storage._alarm).not.toBeNull();
+
+    await instance.setTickInterval(0);
+
+    expect(storage._alarm).toBeNull();
+    expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 0, paused: false });
+  });
+
+  test("pauseTick clears the alarm; resumeTick re-arms at the preserved interval", async () => {
+    configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    await instance.setup("room1");
+    await instance.setTickInterval(50); // deterministically arm
+
+    await instance.pauseTick();
+    expect(storage._alarm).toBeNull();
+    expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 50, paused: true });
+
+    // A stale alarm firing while paused is a no-op: no tick, no reschedule.
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
+    await instance.alarm();
+    expect(instance.ecs.entity("ticker").n).toBe(0);
+    expect(storage._alarm).toBeNull();
+
+    await instance.resumeTick();
+    // Re-armed at the preserved interval (never re-passed to resumeTick).
+    expect(storage._alarm).not.toBeNull();
+    expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 50, paused: false });
+
+    await instance.alarm();
+    expect(instance.ecs.entity("ticker").n).toBe(1);
+  });
+
+  test("stepTick advances one tick regardless of the loop, without scheduling", async () => {
+    // Loop disabled: stepTick still drives the world by hand.
+    configureRuntime({ registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    await instance.setup("room1");
+
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
+    expect(storage._alarm).toBeNull();
+
+    await instance.stepTick();
+    expect(instance.ecs.entity("ticker").n).toBe(1);
+    // The alarm schedule is untouched by a manual step.
+    expect(storage._alarm).toBeNull();
+
+    await instance.stepTick();
+    expect(instance.ecs.entity("ticker").n).toBe(2);
+  });
+
+  test("a runtime tick override survives hibernation wake", async () => {
+    // Provider config leaves the loop disabled; the runtime override enables it.
+    configureRuntime({ registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const instance1 = newDO(makeCtx(storage), makeEnv(makeStub()));
+    await instance1.setup("room1");
+    await instance1.setTickInterval(50);
+    expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 50, paused: false });
+
+    // Hibernation wake: a fresh DO over the SAME storage with a live socket. The
+    // constructor re-bootstraps under blockConcurrencyWhile and re-applies the
+    // persisted override.
+    const ws = makeWs({ userId: "u1" });
+    const ctx2 = makeCtx(storage, [ws]);
+    const instance2 = newDO(ctx2, makeEnv(makeStub()));
+    await ctx2._blocking;
+    expect(instance2.initialized()).toBe(true);
+
+    // The restored world adopted the runtime interval (50), NOT the provider's
+    // disabled default: alarm() runs the tick and reschedules. Had the override
+    // been lost, the interval-0 guard would bail and leave `n` at 0.
+    await instance2.ecs.withScope(() => instance2.ecs.insert({ id: "ticker", n: 0 }));
+    await instance2.alarm();
+    expect(instance2.ecs.entity("ticker").n).toBe(1);
     expect(storage._alarm).not.toBeNull();
   });
 });

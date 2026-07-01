@@ -6,7 +6,7 @@
  */
 export type BaseEntity<Tags extends number = number> = {
   id?: string;
-  root?: string;
+  sk?: string;
   parent?: string;
   children?: Array<string>;
   tags?: Tags[];

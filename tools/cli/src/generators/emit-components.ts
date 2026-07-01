@@ -18,5 +18,10 @@ export function emitComponents(entity: SchemaDefinition): string {
     }
     entries.push(`${f.name}: ${tag}`);
   }
-  return `export const components = { ${entries.join(", ")} } as const satisfies Record<keyof Omit<Entity, "tags">, number>;`;
+  return `/**
+ * Component-id map for this schema, keyed by {@link Entity} field name. Ids come
+ * from the bebop field tag (stable across field reorder), not array position.
+ * Pass these to queries (\`q.every(components.health)\`) and \`world.get\`/\`put\`.
+ */
+export const components = { ${entries.join(", ")} } as const satisfies Record<keyof Omit<Entity, "tags">, number>;`;
 }

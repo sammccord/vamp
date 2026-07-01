@@ -1,8 +1,8 @@
 {
-  "name": "@vamp/config",
+  "name": "@vamp/cli",
   "version": "0.1.0",
   "description": "ECS code generator CLI for @vamp",
-  "homepage": "https://github.com/sammccord/vamp/tree/main/tools/config#readme",
+  "homepage": "https://github.com/sammccord/vamp/tree/main/tools/cli#readme",
   "bugs": {
     "url": "https://github.com/sammccord/vamp/issues"
   },
@@ -11,10 +11,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sammccord/vamp.git",
-    "directory": "tools/config"
+    "directory": "tools/cli"
   },
   "bin": {
-    "config": "./dist/cli.mjs"
+    "vamp": "./dist/vamp.mjs"
   },
   "files": [
     "dist"
@@ -22,7 +22,7 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
-    "./cli": "./dist/cli.mjs",
+    "./vamp": "./dist/vamp.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -34,7 +34,6 @@
     "test": "vp test",
     "typecheck": "tsc --noEmit",
     "codegen:typecheck-fixtures": "vp test --run roundtrip",
-    "release": "bumpp",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {

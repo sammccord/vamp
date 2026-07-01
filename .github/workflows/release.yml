@@ -1,57 +1,128 @@
 name: release
 
-# Publishes every public @vamp/* package to npm on a version tag.
+# Consume pending Changesets on every push to main and publish a release.
 #
 # Flow:
-#   1. bump a package version (`pnpm --filter @vamp/<pkg> run release`, which runs
-#      `bumpp` — it edits package.json, commits, and creates a `v<version>` tag),
-#   2. `git push --follow-tags`,
-#   3. this workflow builds the whole workspace and publishes anything whose
-#      version is not already on the registry.
+#   1. author work + run `pnpm changeset` to add a changeset (a `.changeset/*.md`
+#      describing the bump), commit it, push/merge to main,
+#   2. this workflow detects the pending changeset(s) and, in one run:
+#        a. `changeset version` — bumps versions, writes CHANGELOGs, deletes the
+#           consumed `.md` files,
+#        b. runs the same gates CI runs (check + test + build),
+#        c. `changeset publish` — publishes anything not already on the registry
+#           and creates a git tag per package,
+#        d. pushes the version-bump commit + tags back to main,
+#        e. creates a GitHub Release per new tag from its CHANGELOG entry.
 #
-# Requires an `NPM_TOKEN` repo secret (an npm automation token with publish
-# rights to the @vamp scope). Provenance is attached via OIDC.
+# A push with NO pending changesets is a no-op (nothing to release).
+#
+# Publish happens BEFORE the git push so a failed npm publish leaves main
+# untouched and the changesets intact — a re-run republishes cleanly.
+#
+# Requires an `NPM_TOKEN` repo secret (npm automation token with publish rights
+# to the @vamp scope). Provenance is attached via OIDC. Pushing the bump commit
+# uses the default GITHUB_TOKEN, so main must allow the actions bot to push.
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+
+# Never run two releases against main at once.
+concurrency: release-${{ github.ref }}
 
 permissions:
-  contents: read
+  contents: write # push the version-bump commit + tags, create GitHub Releases
   id-token: write # npm provenance
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # changeset needs full history + tags
 
       - uses: pnpm/action-setup@v4
+        # version is taken from the root package.json `packageManager` field
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22 # engines.node >= 22.12.0
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Gate the release on the same checks CI runs.
+      # Count pending changesets (every `.changeset/*.md` except README.md).
+      - name: Detect pending changesets
+        id: cs
+        run: |
+          n=$(find .changeset -maxdepth 1 -name '*.md' ! -name 'README.md' | wc -l | tr -d ' ')
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+          echo "Found $n pending changeset(s)."
+
+      # a. Consume the changesets: bump versions, write CHANGELOGs, delete .md.
+      - name: Version (consume changesets)
+        if: steps.cs.outputs.count != '0'
+        run: pnpm changeset version
+
+      # b. Gate the release on the same checks CI runs.
       - name: Check (fmt + lint + typecheck)
+        if: steps.cs.outputs.count != '0'
         run: pnpm vp check
 
       - name: Test
+        if: steps.cs.outputs.count != '0'
         run: pnpm vp run -r test
 
       - name: Build
+        if: steps.cs.outputs.count != '0'
         run: pnpm vp run -r build
 
-      # `pnpm -r publish` skips any package whose version already exists on the
-      # registry, so re-running the workflow is safe. `publishConfig.access` in
-      # each package.json makes the scoped packages public.
-      - name: Publish
-        run: pnpm -r publish --access public --provenance --no-git-checks
+      # Commit the bump locally (not pushed yet — see publish-before-push note).
+      - name: Commit version bump
+        if: steps.cs.outputs.count != '0'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: release [skip ci]"
+
+      # c. Publish to npm (idempotent: skips versions already on the registry)
+      #    and create a git tag per newly published package. Capture the output
+      #    so we can turn each "New tag:" line into a GitHub Release.
+      - name: Publish to npm
+        if: steps.cs.outputs.count != '0'
+        run: pnpm changeset publish | tee publish.log
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+
+      # d. Persist the bump commit + tags to main now that npm succeeded.
+      - name: Push commit + tags
+        if: steps.cs.outputs.count != '0'
+        run: git push --follow-tags origin HEAD:main
+
+      # e. One GitHub Release per new tag, notes pulled from the package CHANGELOG.
+      - name: Create GitHub Releases
+        if: steps.cs.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          grep 'New tag:' publish.log | sed -E 's/.*New tag:[[:space:]]*//' | while read -r tag; do
+            name="${tag%@*}"   # @vamp/ecs
+            ver="${tag##*@}"   # 1.0.0
+            pj=$(grep -rl "\"name\": \"$name\"" --include=package.json packages tools | head -1)
+            dir=$(dirname "$pj")
+            notes="$tag"
+            if [ -f "$dir/CHANGELOG.md" ]; then
+              block=$(awk -v v="## $ver" '$0==v{f=1;next} /^## /{f=0} f' "$dir/CHANGELOG.md")
+              [ -n "$block" ] && notes="$block"
+            fi
+            # Mark prerelease when the version carries a semver pre-tag (e.g. -beta.0).
+            pre=""
+            case "$ver" in *-*) pre="--prerelease" ;; esac
+            echo "Creating release $tag $pre"
+            gh release create "$tag" $pre --title "$tag" --notes "$notes" || echo "release $tag already exists, skipping"
+          done

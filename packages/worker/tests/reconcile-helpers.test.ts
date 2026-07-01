@@ -59,9 +59,9 @@ describe("reconcile-helpers: applyKeyChange", () => {
 
 describe("reconcile-helpers: componentKeysToReconcile", () => {
   it("filters out reserved id/tags keys", () => {
-    expect(componentKeysToReconcile(["id", "tags", "health", "root"]).sort()).toEqual([
+    expect(componentKeysToReconcile(["id", "tags", "health", "sk"]).sort()).toEqual([
       "health",
-      "root",
+      "sk",
     ]);
   });
 

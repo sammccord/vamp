@@ -6,7 +6,12 @@
  * `const [ecs, ws] = ctx.getEnvironment<GameContext>()`.
  */
 export function emitGameContext(): string {
-  return `export type GameContext<
+  return `/**
+ * Server environment handed to RPC methods, app-typed for this schema. Retrieve
+ * it inside a method with \`const [ecs, ws] = ctx.getEnvironment<GameContext>()\` —
+ * the \`[ECS, WebSocket]\` tuple carrying the live world.
+ */
+export type GameContext<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],

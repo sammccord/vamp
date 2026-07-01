@@ -13,7 +13,7 @@ const entityDef: SchemaDefinition = {
   fields: [
     { name: "id", typeId: -12, isArray: false, isMap: false, typeName: "guid", constantValue: 1 },
     {
-      name: "root",
+      name: "sk",
       typeId: -12,
       isArray: false,
       isMap: false,
@@ -100,7 +100,7 @@ describe("emitComponents", () => {
     const result = emitComponents(entityDef);
     // Ids derive from the bebop field tag (constantValue), not array position.
     expect(result).toContain("id: 1");
-    expect(result).toContain("root: 2");
+    expect(result).toContain("sk: 2");
     expect(result).toContain("parent: 4");
     expect(result).toContain("children: 5");
     expect(result).toContain("health: 6");
@@ -121,7 +121,7 @@ describe("emitDelta", () => {
   it("generates correct delta types for primitives", () => {
     const result = emitDelta(entityDef, schema);
     expect(result).toContain("id?: string;");
-    expect(result).toContain("root?: string;");
+    expect(result).toContain("sk?: string;");
     expect(result).toContain("tags?: Tags[];");
     expect(result).toContain("parent?: string;");
   });
@@ -200,5 +200,37 @@ describe("emitSystems", () => {
     expect(result).toContain("export function createGameBehavior<");
     expect(result).toContain('handler: GameBehavior<State, UpdateArguments>["handler"],');
     expect(result).toContain("return createBehavior(tag, handler, query, priority);");
+  });
+});
+
+describe("jsdoc on public exports", () => {
+  // Assert every top-level `export <kw> <name>` in `src` is immediately preceded
+  // by a JSDoc block — the line above ends a comment (single- or multi-line).
+  const eachExportHasJsdoc = (src: string): void => {
+    const lines = src.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^export (?:const|type|function|class) (\w+)/.exec(lines[i]!);
+      if (!m) continue;
+      const prev = lines[i - 1]?.trim() ?? "";
+      expect(prev.endsWith("*/"), `export ${m[1]} should be preceded by JSDoc`).toBe(true);
+    }
+  };
+
+  it("documents the component map, delta type, and delta helpers", () => {
+    eachExportHasJsdoc(emitComponents(entityDef));
+    eachExportHasJsdoc(emitDelta(entityDef, schema));
+  });
+
+  it("documents the factory, durable-object classes, and context alias", () => {
+    eachExportHasJsdoc(emitFactory());
+    eachExportHasJsdoc(emitClasses("Tags"));
+    eachExportHasJsdoc(emitGameContext());
+  });
+
+  it("documents every generated system alias and factory", () => {
+    const result = emitSystems();
+    eachExportHasJsdoc(result);
+    // 4 aliases + 3 factories, each with its own block.
+    expect((result.match(/\/\*\*/g) ?? []).length).toBe(7);
   });
 });

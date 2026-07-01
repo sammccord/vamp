@@ -17,10 +17,10 @@ basic 7, solid 3) and `vp check` is clean (192 files formatted, 0 lint warnings,
 
 - **B1 — CI ran zero tests / Ready gate failed.** `ci.yml` test step → `pnpm vp run -r test`; root `ready` script → `vp run -r test`. README + the recursive-flag footgun documented.
 - **B2 — packages couldn't be published.** Added `publishConfig.access: "public"` to all six packages, bumped them to `0.1.0`, and added a tag-triggered `release.yml` (build → `pnpm -r publish` with provenance, gated on check+test) to pair with `bumpp`.
-- **B3 — broken README commands.** Root README commands fixed (`vp run -r test/build`, `vp run dev` repointed; root `dev` script `website#dev` → `basic#dev`); `@vamp/solid` + `@vamp/config` + the `worker/interest` API now listed.
+- **B3 — broken README commands.** Root README commands fixed (`vp run -r test/build`, `vp run dev` repointed; root `dev` script `website#dev` → `basic#dev`); `@vamp/solid` + `@vamp/cli` + the `worker/interest` API now listed.
 - **Docs.** Fleshed out the stub `@vamp/ecs` and `@vamp/worker` READMEs (install + accurate usage from the example); fixed every `@vamp/rot` import example (`rot/…` → `@vamp/rot/…`) + title; removed phantom `@vamp/solid` exports; added the `@vamp/utils/async-queue` section; corrected `vp build` → `vp run build` everywhere; wrote `examples/basic/README.md` (run/test steps + wiring map).
 - **JSDoc.** Documented the core `@vamp/ecs` consumer API (`entity`/`entities`/`upsert`/`insert`/`put`/`delete`/`query`/`subscribe`/`onCreate`/`onDelete`/`registerBehavior`/`act`), the `query` builder factory, the system factories (and fixed `createEventSystem`'s copy-pasted doc), and the error classes.
-- **Code quality.** Removed shipped `console.log` from `@vamp/rot` (`MinHeap`/`features`/`rogue`); deleted the two no-op filler tests; made the env-fragile `tools/config` scaffolding test deterministic (injectable resolver); lint is now 0/0 (the two unicorn warnings were false positives on deliberate buffer-preallocation / iterate-then-delete snapshots — disabled with justification in `vite.config.ts`).
+- **Code quality.** Removed shipped `console.log` from `@vamp/rot` (`MinHeap`/`features`/`rogue`); deleted the two no-op filler tests; made the env-fragile `tools/cli` scaffolding test deterministic (injectable resolver); lint is now 0/0 (the two unicorn warnings were false positives on deliberate buffer-preallocation / iterate-then-delete snapshots — disabled with justification in `vite.config.ts`).
 
 **Test coverage added (2026-06-28, follow-up)**
 
@@ -35,7 +35,7 @@ basic 7, solid 3) and `vp check` is clean (192 files formatted, 0 lint warnings,
 - ~~DO-lifecycle tests and worker/extension transport tests~~ — **done** (see "Test coverage added" above). Remaining gap: end-to-end coverage of the real storage DO + Yjs sync protocol, which needs the (currently incompatible) workers pool.
 - Coverage tooling in CI — needs a `@vitest/coverage-*` build compatible with the `@voidzero-dev/vite-plus-test` fork; not a drop-in.
 - Transport-base extraction and reducing the `@vamp/rot` `@ts-nocheck` surface — structural refactors (the transports are already bug-converged by hand; see §7).
-- **Codegen determinism:** running `config generate` locally (bebopc 3.2.3) reorders `examples/basic/src/bebop.ts`, which would fail CI's `git diff --exit-code` round-trip. Confirm the locked bebopc matches what generated the committed file (regenerate + commit) or pin bebopc. Pre-existing; left untouched here.
+- **Codegen determinism:** running `vamp generate` locally (bebopc 3.2.3) reorders `examples/basic/src/bebop.ts`, which would fail CI's `git diff --exit-code` round-trip. Confirm the locked bebopc matches what generated the committed file (regenerate + commit) or pin bebopc. Pre-existing; left untouched here.
 
 ---
 
@@ -107,7 +107,7 @@ What CI does today (`ci.yml`): checkout → pnpm → `vp check` (fmt+lint+typech
 
 Suite is healthy where it's strong and absent where the risk is highest.
 
-**Strong:** `@vamp/ecs` (152) — archetypes, queries, mutations, tags. `tools/config` (69) — parsers, emitters, codegen round-trip. These are well covered.
+**Strong:** `@vamp/ecs` (152) — archetypes, queries, mutations, tags. `tools/cli` (69) — parsers, emitters, codegen round-trip. These are well covered.
 
 **Gaps (ranked by release risk):**
 
@@ -117,7 +117,7 @@ Suite is healthy where it's strong and absent where the risk is highest.
 4. **`@vamp/rot`: 7 of 36 exported subpaths tested.** All FOV variants, all map generators, noise, lighting, dijkstra, path are untested (vendored rot.js ports — medium risk, but `audit.md` found vamp-introduced regressions in exactly this package).
 5. **Two filler tests** assert nothing: `packages/rot/tests/index.test.ts:3` and `packages/utils/tests/index.test.ts:3` are both `expect(true).toBe(true)`.
 
-**Flaky / environment-dependent:** `tools/config/tests/scaffolding.test.ts:176` asserts `resolvePoolImport` returns the literal fallback `../node_modules/@vamp/utils/schema/pool.bop`, which only holds when `@vamp/utils` is unresolvable from the OS temp dir. When the temp dir sits under (or shares a `node_modules` ancestor with) the repo, real Node resolution finds the workspace symlink and returns a deep machine-specific relative path — the test fails (reproduced locally). The product behavior is fine for real consumers; the **test** is env-fragile. No `.skip`/`.only`/`.todo` anywhere.
+**Flaky / environment-dependent:** `tools/cli/tests/scaffolding.test.ts:176` asserts `resolvePoolImport` returns the literal fallback `../node_modules/@vamp/utils/schema/pool.bop`, which only holds when `@vamp/utils` is unresolvable from the OS temp dir. When the temp dir sits under (or shares a `node_modules` ancestor with) the repo, real Node resolution finds the workspace symlink and returns a deep machine-specific relative path — the test fails (reproduced locally). The product behavior is fine for real consumers; the **test** is env-fragile. No `.skip`/`.only`/`.todo` anywhere.
 
 ---
 
@@ -131,13 +131,13 @@ Suite is healthy where it's strong and absent where the risk is highest.
 
 **READMEs:**
 
-- **Root `README.md`:** lists only 4 of 6 packages (omits `@vamp/solid` and `tools/config`/`@vamp/config`); never mentions the `@vamp/worker` `./interest` API; broken commands (B3).
+- **Root `README.md`:** lists only 4 of 6 packages (omits `@vamp/solid` and `tools/cli`/`@vamp/cli`); never mentions the `@vamp/worker` `./interest` API; broken commands (B3).
 - **`packages/ecs/README.md`:** stub (title + 1 line + dev). No install-as-dependency, no usage, no API — for the flagship package.
 - **`packages/worker/README.md`:** stub. Omits `ECSDurableObject`, `defineECSRuntime`, and `./interest` — the exact things consumers extend/call.
 - **`packages/rot/README.md`:** best prose in the repo, but **every import example is wrong** — uses bare `rot/...` (e.g. `import { RNG } from "rot/rng"`) when the package is `@vamp/rot` (must be `@vamp/rot/rng`). All 32 specifiers unusable. Title `# rot`.
 - **`packages/utils/README.md`:** good/thorough, but no section for the `./async-queue` export.
 - **`packages/solid/README.md`:** good, but documents **phantom exports** that don't exist: `createQueryObservable`, `createEntityObservable`, `defaultApply`.
-- **`examples/basic/`:** **no README** — only a generic `AGENTS.md`. The root README points newcomers here as "a complete working example," but there are zero run steps (`vp install` → `config generate` → `wrangler dev`).
+- **`examples/basic/`:** **no README** — only a generic `AGENTS.md`. The root README points newcomers here as "a complete working example," but there are zero run steps (`vp install` → `vamp generate` → `wrangler dev`).
 - Several READMEs say `vp build` where the build script is `vp pack` / `vp run build` (`vp build` runs Vite build, not the package script).
 - Working docs `audit.md` and `TODO.md` sit in the repo root and probably shouldn't ship in the first public release.
 

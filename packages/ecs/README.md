@@ -13,7 +13,7 @@ pnpm add @vamp/ecs
   (entities with the same component+tag set share an archetype, so queries iterate
   a contiguous set instead of scanning the world).
 - **Components & tags** — components are numeric-keyed fields on an entity; tags are
-  numeric markers. Both are generated from your `.bop` schema by `@vamp/config`.
+  numeric markers. Both are generated from your `.bop` schema by `@vamp/cli`.
 - **Systems** — run logic over a query each `update()` cycle. Build them with
   `createEntitySystem`, `createArchetypeSystem`, `createEventSystem`, and
   `createLifecycleSystem`.
@@ -29,12 +29,12 @@ pnpm add @vamp/ecs
 
 The world is generic over its context, update args, action union, tag space, and
 entity/delta shapes. You normally get a fully-typed `ECSOptions` from generated
-code (`createECSOptions(...)` emitted by `@vamp/config`) rather than writing the
+code (`createECSOptions(...)` emitted by `@vamp/cli`) rather than writing the
 generics by hand:
 
 ```ts
 import { createEntitySystem } from "@vamp/ecs";
-import { components } from "./game.generated"; // emitted by @vamp/config
+import { components } from "./game.generated"; // emitted by @vamp/cli
 import { type Entity, type EntityDelta } from "./bebop";
 
 // A system runs over every entity matching its query each update(). The executor

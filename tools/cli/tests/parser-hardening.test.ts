@@ -22,14 +22,14 @@ describe("nested/inline message stripping (4.1)", () => {
     const source = `message Entity {
   1 -> guid id;
   7 -> message Inline { 1 -> uint32 a; } inline;
-  2 -> guid root;
+  2 -> guid sk;
 }`;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const entity = parseEntityMessage(source);
     // `a` (index 1 from the inline block) must NOT leak in as an Entity field.
     expect(entity.fields.map((f) => f.name)).not.toContain("a");
     expect(entity.fields.map((f) => f.name)).toContain("id");
-    expect(entity.fields.map((f) => f.name)).toContain("root");
+    expect(entity.fields.map((f) => f.name)).toContain("sk");
     // The duplicate index-1 garbage field must be gone.
     const indices = entity.fields.map((f) => f.index);
     expect(indices.filter((i) => i === 1).length).toBe(1);

@@ -21,7 +21,7 @@ The defects cluster into four recurring themes (see §9): **(a)** resources that
 | `@vamp/worker`                          | Blocked                       |    3     |  5   |   4    |  3  |
 | `@vamp/utils` (transports)              | Blocked                       |    3     |  4   |   5    |  3  |
 | `@vamp/utils` (async primitives & misc) | Blocked                       |    3     |  3   |   4    |  3  |
-| `tools/config`                          | Blocked for untrusted schemas |    2     |  4   |   4    |  5  |
+| `tools/cli`                             | Blocked for untrusted schemas |    2     |  4   |   4    |  5  |
 | `@vamp/rot`                             | 2 vamp-introduced regressions |    2     |  2   |   3    |  2  |
 
 > Counts are indicative; the same root cause sometimes spans multiple files (e.g. the duplex `request.status` bug appears in all three routers).
@@ -207,7 +207,7 @@ Severity legend: **CRITICAL** = data loss / crash / leak that breaks production;
 
 ---
 
-## 8. `tools/config` — Bebop → TypeScript code generator
+## 8. `tools/cli` — Bebop → TypeScript code generator
 
 **Assessment:** Works for the narrow hand-shaped example schemas but is **not safe for public/untrusted schemas**. The parser is a regex/brace-walker that silently mis-parses legitimate bebop syntax (inline messages, regex-special names, nested maps), several emitters have latent type bugs, and there is no validation, escaping, or end-to-end "generate → typecheck" gate.
 

@@ -77,16 +77,16 @@ function makeEntityAt(x: number, y: number): Entity {
 }
 
 /**
- * An entity homed in a specific shard via its `root` (the D1b shard key). With
- * no `root` it defaults server-side to the lobby's own `game/${ns}` shard.
+ * An entity homed in a specific shard via its `sk` (the D1b shard key). With
+ * no `sk` it defaults server-side to the lobby's own `game/${ns}` shard.
  */
-function makeShardEntity(root?: string): { id: string; entity: Entity } {
+function makeShardEntity(sk?: string): { id: string; entity: Entity } {
   const id = crypto.randomUUID();
   return {
     id,
     entity: Entity({
       id,
-      root,
+      sk,
       tags: [],
       children: [],
       health: { points: 100, min: 0, max: 100, rate: 0, interval: 0 },

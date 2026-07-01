@@ -10,7 +10,7 @@ import "./tags.bop"
 
 message Entity {
 \t1 -> guid id;
-\t2 -> guid root;
+\t2 -> guid sk;
 \t3 -> Tags[] tags;
 \t4 -> guid parent;
 \t5 -> guid[] children;
@@ -24,7 +24,7 @@ describe("parseEntityMessage", () => {
     expect(entity.name).toBe("Entity");
     expect(entity.fields.map((f) => f.name)).toEqual([
       "id",
-      "root",
+      "sk",
       "tags",
       "parent",
       "children",

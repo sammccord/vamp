@@ -12,18 +12,25 @@
  * inferred at the call site.
  */
 export function emitRuntime(): string {
-  return `export type GameECSRuntimeConfiguration<
+  return `/** App-typed {@link ECSRuntimeConfiguration} — the worker runtime config with this schema's types baked in. */
+export type GameECSRuntimeConfiguration<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
 > = ECSRuntimeConfiguration<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
 
+/** Factory returning a {@link GameECSRuntimeConfiguration}; pass it to {@link defineGameECSRuntime}. */
 export type GameECSRuntimeProvider<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
 > = () => GameECSRuntimeConfiguration<UserSession, Context, UpdateArguments>;
 
+/**
+ * Register the worker's runtime provider with call-site type safety on \`ecs\`,
+ * \`context\`, \`registerSystems\`, \`tickArgs\`, and \`broadcastTick\`. Call once from
+ * the worker entry.
+ */
 export function defineGameECSRuntime<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},

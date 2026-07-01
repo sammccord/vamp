@@ -14,7 +14,12 @@
  * site, mirroring `defineGameECSRuntime`/`GameContext`.
  */
 export function emitInterest(): string {
-  return `export function createGameInterestBroadcast<
+  return `/**
+ * Interest-managed mutation broadcast bound to this schema. Supplies the bebop
+ * \`encodeBatch\` codec and a first-key \`resolveViewer\` default; pass \`canSee\` to
+ * scope what each observer sees, or omit \`config\` for a global broadcast.
+ */
+export function createGameInterestBroadcast<
   UserSession extends {} = {},
   Context extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],

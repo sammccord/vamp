@@ -1,0 +1,14 @@
+{
+  "mode": "pre",
+  "tag": "beta",
+  "initialVersions": {
+    "basic": "0.0.0",
+    "@vamp/ecs": "0.1.0",
+    "@vamp/rot": "0.1.0",
+    "@vamp/solid": "0.1.0",
+    "@vamp/utils": "0.1.0",
+    "@vamp/worker": "0.1.0",
+    "@vamp/cli": "0.1.0"
+  },
+  "changesets": []
+}

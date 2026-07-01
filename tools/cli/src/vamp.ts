@@ -5,7 +5,7 @@ import { initCommand } from "./commands/init";
 
 const main = defineCommand({
   meta: {
-    name: "vamp-config",
+    name: "vamp",
     description: "ECS code generator for @vamp",
   },
   subCommands: {

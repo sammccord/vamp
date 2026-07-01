@@ -2,7 +2,7 @@
  * Per-root subscription lifecycle for the sharded (multi-provider) model.
  *
  * A lobby ({@link ECSDurableObject}) subscribes to a y-durablestream provider
- * DO per **root** (the shard key on `BaseEntity.root`). Which roots a lobby
+ * DO per **root** (the shard key on `BaseEntity.sk`). Which roots a lobby
  * holds is *implicit, refcounted, and persisted*: each reason to keep a root
  * (a connected player whose character lives there, an entity the lobby authored
  * into it, the lobby's own game shard) is a **pin**; the root stays subscribed

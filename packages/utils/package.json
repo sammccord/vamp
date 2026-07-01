@@ -45,7 +45,6 @@
     "dev": "bebopc build && vp pack --watch",
     "test": "vp test",
     "typecheck": "tsc --noEmit",
-    "release": "bumpp",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
@@ -68,7 +67,6 @@
     "@types/webextension-polyfill": "catalog:",
     "@typescript/native-preview": "7.0.0-dev.20260315.1",
     "bebop-tools": "catalog:",
-    "bumpp": "^11.0.0",
     "typescript": "^5.9.3",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

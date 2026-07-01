@@ -1,4 +1,4 @@
-# @vamp/config
+# @vamp/cli
 
 ECS code generator CLI for @vamp. Parses Bebop (`.bop`) schemas and emits the
 TypeScript ECS components, factories, deltas, and mutation schemas used by a
@@ -7,8 +7,8 @@ TypeScript ECS components, factories, deltas, and mutation schemas used by a
 ## Usage
 
 ```bash
-config init        # scaffold schema/ and a vamp.json config
-config generate    # parse the .bop schemas and (re)generate TypeScript output
+vamp init        # scaffold schema/ and a vamp.json config
+vamp generate    # parse the .bop schemas and (re)generate TypeScript output
 ```
 
 ## Development

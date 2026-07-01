@@ -11,7 +11,7 @@ message Vec2 {
 
 message Entity {
 	1 -> string id;
-	2 -> string root;
+	2 -> string sk;
 	3 -> Tags[] tags;
 	4 -> string parent;
 	5 -> string[] children;

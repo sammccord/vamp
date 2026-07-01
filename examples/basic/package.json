@@ -7,7 +7,7 @@
     "dev": "wrangler dev",
     "start": "wrangler dev",
     "cf-typegen": "wrangler types",
-    "generate": "config generate",
+    "generate": "vamp generate",
     "test": "vp test",
     "test:e2e": "vp test run -c vitest.solid.config.mts",
     "bench": "NODE_OPTIONS=--expose-gc vp test run -c vitest.bench.config.mts"
@@ -29,7 +29,7 @@
     "@solidjs/testing-library": "^0.8.10",
     "@types/node": "^25.5.0",
     "@types/ws": "^8.5.12",
-    "@vamp/config": "workspace:*",
+    "@vamp/cli": "workspace:*",
     "bebop-tools": "catalog:",
     "jsdom": "^26.0.0",
     "mitata": "catalog:",

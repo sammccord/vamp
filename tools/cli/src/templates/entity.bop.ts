@@ -8,7 +8,7 @@ import "./tags.bop"
 
 message Entity {
 \t1 -> string id;
-\t2 -> string root;
+\t2 -> string sk;
 \t3 -> Tags[] tags;
 \t4 -> string parent;
 \t5 -> string[] children;

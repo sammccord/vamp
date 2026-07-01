@@ -8,9 +8,9 @@ import { generate } from "../src/generators/codegen.js";
 import { generateMutationSchema } from "../src/generators/generate-mutation-schema.js";
 import { loadBebopConfig, loadVampConfig } from "../src/config/loader.js";
 
-// Anchor resolution at tools/config, which depends on bebop, bebop-tools, and typescript.
-const TOOLS_CONFIG = resolve(__dirname, "..");
-const require = createRequire(join(TOOLS_CONFIG, "noop.js"));
+// Anchor resolution at tools/cli, which depends on bebop, bebop-tools, and typescript.
+const TOOLS_CLI = resolve(__dirname, "..");
+const require = createRequire(join(TOOLS_CLI, "noop.js"));
 
 /** Resolve the bebopc CLI entrypoint from the installed bebop-tools package. */
 function bebopcEntry(): string {
@@ -305,7 +305,7 @@ message Position {
 
 message Entity {
   1 -> guid id;
-  2 -> guid root;
+  2 -> guid sk;
   3 -> Tags[] tags;
   4 -> guid parent;
   5 -> guid[] children;
@@ -324,7 +324,7 @@ import "./tags.bop"
 
 message Entity {
   1 -> guid id;
-  2 -> guid root;
+  2 -> guid sk;
   3 -> Tags[] tags;
   4 -> Pool health;
 }

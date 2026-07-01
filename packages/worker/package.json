@@ -30,7 +30,6 @@
     "dev": "vp pack --watch",
     "test": "vp test",
     "typecheck": "tsc --noEmit",
-    "release": "bumpp",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
@@ -47,7 +46,6 @@
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@types/node": "^25.5.0",
     "@typescript/native-preview": "7.0.0-dev.20260316.1",
-    "bumpp": "^11.0.1",
     "typescript": "^5.9.3",
     "undici-types": "catalog:",
     "vite-plus": "catalog:",

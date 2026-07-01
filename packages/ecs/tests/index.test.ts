@@ -19,7 +19,7 @@ import {
 // Simple test entity type with flat primitive fields
 type Entity = {
   id?: string;
-  root?: string;
+  sk?: string;
   parent?: string;
   children?: string[];
   tags?: number[];
@@ -39,7 +39,7 @@ type EntityDelta = Partial<Entity>;
 // Component IDs
 const components = {
   id: 1,
-  root: 2,
+  sk: 2,
   parent: 3,
   children: 4,
   xp: 5,
@@ -167,7 +167,7 @@ function buildSingleEntityCollection(
 function resolveEntityRoot(entities: Map<string, Entity>, entityId: string): string | undefined {
   let entity = entities.get(entityId);
   if (!entity?.id) return;
-  if (entity.root) return entity.root;
+  if (entity.sk) return entity.sk;
   if (!entity.parent) return entity.id;
   while (entity?.parent) {
     const _entity = entities.get(entity.parent);

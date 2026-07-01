@@ -105,7 +105,7 @@ function reassembleMessageLocal(frames: Uint8Array[], cap: number): Uint8Array {
 // ── ECS options (pure half of game.generated.ts; that file pulls @vamp/worker) ─
 const components = {
   id: 1,
-  root: 2,
+  sk: 2,
   parent: 4,
   children: 5,
   health: 6,

@@ -10,6 +10,7 @@
     "prepare": "vp config"
   },
   "devDependencies": {
+    "@changesets/cli": "catalog:",
     "vite-plus": "catalog:"
   },
   "engines": {

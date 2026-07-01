@@ -75,7 +75,11 @@ function emitMaterializeDelta(entity: SchemaDefinition, schema: ParsedSchema): s
     return `    ${f.name}: delta.${f.name} ? { ...base?.${f.name}, ...delta.${f.name} } as any : base?.${f.name} as any`;
   });
 
-  return `export function materializeDelta(delta: EntityDelta, base?: Partial<Entity>): Entity {
+  return `/**
+ * Build a full {@link Entity} from a {@link EntityDelta} and optional \`base\`,
+ * honoring array set/add/remove and additive pool semantics.
+ */
+export function materializeDelta(delta: EntityDelta, base?: Partial<Entity>): Entity {
   return {
 ${assignments.join(",\n")},
   } as Entity;
@@ -99,7 +103,11 @@ function emitMergeDelta(entity: SchemaDefinition, schema: ParsedSchema): string 
     return `  if (delta.${f.name}) Object.assign(entity.${f.name} ??= {} as any, delta.${f.name});`;
   });
 
-  return `export function mergeDelta(entity: Entity, delta: EntityDelta): void {
+  return `/**
+ * Apply \`delta\` onto \`entity\` in place — same set/add/remove and additive pool
+ * rules as {@link materializeDelta}.
+ */
+export function mergeDelta(entity: Entity, delta: EntityDelta): void {
 ${cases.join("\n")}
 }`;
 }
@@ -121,7 +129,11 @@ function emitAccumulateDelta(entity: SchemaDefinition, schema: ParsedSchema): st
     return `  if (from.${f.name}) to.${f.name} = { ...to.${f.name}, ...from.${f.name} };`;
   });
 
-  return `export function accumulateDelta(from: EntityDelta, to: EntityDelta): EntityDelta {
+  return `/**
+ * Fold \`from\` into \`to\`, collapsing two {@link EntityDelta}s into one equivalent
+ * delta (array/pool deltas combine additively). Returns the mutated \`to\`.
+ */
+export function accumulateDelta(from: EntityDelta, to: EntityDelta): EntityDelta {
 ${cases.join("\n")}
   return to;
 }`;
