@@ -27,11 +27,19 @@ jobs:
       #    points at `./dist/*.mjs`; there is no source condition or path alias).
       #    Consumers (`@vamp/worker`, `@vamp/solid`, `examples/basic`) import
       #    `@vamp/ecs` etc. via `workspace:*`, so without dist the type-aware
-      #    `vp check` and the codegen `tsc --noEmit` below fail with
+      #    `vp check` and the codegen step below fail with
       #    `TS2307: Cannot find module '@vamp/ecs'`. `-r build` topo-sorts, so
       #    ecs/utils build before worker/solid.
-      - name: Build packages
-        run: pnpm vp run -r build
+      #
+      #    Then re-run install to (re)link workspace bins. The first install ran
+      #    with no dist/, so pnpm could not create @vamp/cli's `vamp` bin (its
+      #    target `tools/cli/dist/vamp.mjs` did not exist yet — pnpm warns and
+      #    skips it), and the build alone does not relink. Without this the
+      #    codegen step's `vamp generate` fails with `vamp: not found`.
+      - name: Build packages and link workspace bins
+        run: |
+          pnpm vp run -r build
+          pnpm install --frozen-lockfile
 
       # 1. format + lint + type-check (oxfmt + oxlint typeAware + tsc)
       - name: Check (fmt + lint + typecheck)
