@@ -20,11 +20,12 @@ name: release
 # untouched and the changesets intact — a re-run republishes cleanly.
 #
 # Requires an `NPM_TOKEN` repo secret (npm automation token with publish rights
-# to the @vampgg scope). npm provenance is DISABLED because it requires a public
-# source repository (npm rejects provenance from a private repo with E422
-# "Unsupported ... visibility: private"); re-enable it (set NPM_CONFIG_PROVENANCE
-# + id-token: write) if this repo is ever made public. Pushing the bump commit
-# uses the default GITHUB_TOKEN, so main must allow the actions bot to push.
+# to the @vampgg scope). npm provenance is attached via OIDC (`id-token: write` +
+# NPM_CONFIG_PROVENANCE) — this needs a PUBLIC source repo, which this repo is;
+# if it is ever made private again, npm rejects provenance with E422
+# ("Unsupported ... visibility: private"), so drop both to publish. Pushing the
+# bump commit uses the default GITHUB_TOKEN, so main must allow the actions bot
+# to push.
 
 on:
   push:
@@ -35,7 +36,7 @@ concurrency: release-${{ github.ref }}
 
 permissions:
   contents: write # push the version-bump commit + tags, create GitHub Releases
-  # id-token: write  # only needed for npm provenance — disabled (private repo)
+  id-token: write # npm provenance (public repo)
 
 jobs:
   release:
@@ -115,7 +116,7 @@ jobs:
       #    tee's (always 0), so a failed `changeset publish` (e.g. npm rejects
       #    the write with E404/E403 because the token can't publish the @vampgg
       #    scope) is masked and the job goes green having published nothing.
-      #    Provenance is intentionally NOT set (private repo — see header note).
+      #    Provenance is enabled (public repo — see header note).
       - name: Publish to npm
         if: steps.cs.outputs.count != '0'
         run: |
@@ -123,6 +124,7 @@ jobs:
           pnpm changeset publish | tee publish.log
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
 
       # d. Persist the bump commit + tags to main now that npm succeeded.
       - name: Push commit + tags
