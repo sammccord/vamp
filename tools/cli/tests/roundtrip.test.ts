@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
-import { generate } from "../src/generators/codegen.js";
+import { generate, type GeneratedPaths } from "../src/generators/codegen.js";
 import { generateMutationSchema } from "../src/generators/generate-mutation-schema.js";
 import { loadBebopConfig, loadVampConfig } from "../src/config/loader.js";
 
@@ -161,9 +161,10 @@ interface ScratchFiles {
  * Scaffold a scratch project, run the full pipeline
  * (generateMutationSchema -> bebopc build -> generate), then `tsc --noEmit`
  * the emitted game.generated.ts together with the compiled bebop.ts against
- * minimal @vampgg/* stubs. Returns nothing; throws on any failure.
+ * minimal @vampgg/* stubs. Returns the scratch dir + emitted file paths; throws
+ * on any failure.
  */
-function roundtrip(files: ScratchFiles): { dir: string } {
+function roundtrip(files: ScratchFiles): { dir: string; paths: GeneratedPaths } {
   const dir = mkdtempSync(join(tmpdir(), "vamp-rt-"));
   const schemaDir = join(dir, "schema");
   const srcDir = join(dir, "src");
@@ -264,8 +265,9 @@ message PoolDelta {
   // 2. bebopc build (writes src/bebop.ts).
   execFileSync(process.execPath, [bebopcEntry(), "build"], { cwd: dir, stdio: "pipe" });
 
-  // 3. Emit game.generated.ts.
-  generate(dir, bebopConfig, vampConfig);
+  // 3. Emit the split game.generated.ts (barrel), game.core.generated.ts, and
+  //    game.worker.generated.ts.
+  const paths = generate(dir, bebopConfig, vampConfig);
 
   // 4. tsc --noEmit over the emitted output.
   writeFileSync(join(srcDir, "cloudflare.d.ts"), CF_STUB, "utf-8");
@@ -290,7 +292,7 @@ message PoolDelta {
     stdio: "pipe",
   });
 
-  return { dir };
+  return { dir, paths };
 }
 
 describe("generate -> tsc --noEmit round-trip gate", () => {
@@ -343,5 +345,38 @@ message Entity {
 }
 `;
     expect(() => roundtrip({ entity })).toThrow(/FooDelta/);
+  });
+
+  it("splits output so the core file is free of @vampgg/worker and the barrel re-exports both", () => {
+    const entity = `import "./pool.bop"
+import "./tags.bop"
+
+message Entity {
+  1 -> guid id;
+  2 -> guid sk;
+  3 -> Tags[] tags;
+  4 -> Pool health;
+}
+`;
+    const { paths } = roundtrip({ entity });
+
+    const core = readFileSync(paths.core, "utf-8");
+    const worker = readFileSync(paths.worker, "utf-8");
+    const barrel = readFileSync(paths.barrel, "utf-8");
+
+    // The pure core file must NOT reach for the worker package (that is the whole
+    // point of the split — non-Worker consumers import it without `cloudflare:`).
+    expect(core).not.toContain("@vampgg/worker");
+    expect(core).toContain("export function createECSOptions");
+    expect(core).toContain("export const components");
+
+    // The worker file carries the DO/runtime and imports EntityDelta from core.
+    expect(worker).toContain("@vampgg/worker");
+    expect(worker).toContain("export class GameECS");
+    expect(worker).toContain('from "./game.core.generated.js"');
+
+    // The barrel re-exports both part-files (backward-compatible `./game.generated`).
+    expect(barrel).toContain('export * from "./game.core.generated.js"');
+    expect(barrel).toContain('export * from "./game.worker.generated.js"');
   });
 });

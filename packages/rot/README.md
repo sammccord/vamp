@@ -14,15 +14,55 @@ vp run build      # build the library (outputs to dist/)
 
 ## Import Pattern
 
-All modules are available as subpath exports from the `@vampgg/rot` package:
+All modules are available as subpath exports from the `@vampgg/rot` package.
+`@vampgg/rot` has no root export — always import from the specific subpath.
+
+Most class-based modules use a **default export** (import without braces); the
+function/constant modules (`color`, `constants`, `util`, `text`) and `MinHeap` /
+`map/features` use **named exports** (import with braces):
 
 ```ts
-import { RNG } from "@vampgg/rot/rng";
-import { Digger } from "@vampgg/rot/map/digger";
-import { PreciseShadowcasting } from "@vampgg/rot/fov/precise-shadowcasting";
+import RNG from "@vampgg/rot/rng"; // default: a pre-seeded singleton instance
+import Digger from "@vampgg/rot/map/digger"; // default: the class
+import PreciseShadowcasting from "@vampgg/rot/fov/precise-shadowcasting"; // default: the class
+
+import * as Color from "@vampgg/rot/color"; // named exports (functions)
+import { MinHeap } from "@vampgg/rot/MinHeap"; // named export
+import { Room, Corridor } from "@vampgg/rot/map/features"; // named exports
 ```
 
-`@vampgg/rot` has no root export — always import from the specific subpath.
+---
+
+## Combined Example — Generate, See, Path
+
+The modules compose into the classic roguelike pipeline: seed the RNG once for
+determinism, dig a map, compute what the player can see, and pathfind across it.
+
+```ts
+import RNG from "@vampgg/rot/rng";
+import Digger from "@vampgg/rot/map/digger";
+import RecursiveShadowcasting from "@vampgg/rot/fov/recursive-shadowcasting";
+import AStar from "@vampgg/rot/path/astar";
+
+RNG.setSeed(12345); // determinism: every generator below now reproduces exactly
+
+// 1. Dig a dungeon. Generators deliver cells via callback (0 = floor, 1 = wall).
+const map: number[][] = [];
+new Digger(80, 25).create((x, y, wall) => ((map[x] ??= [])[y] = wall));
+const passable = (x: number, y: number) => map[x]?.[y] === 0;
+
+// 2. Compute field-of-view from the player. `vis` > 0 means the cell is lit.
+const fov = new RecursiveShadowcasting(passable);
+fov.compute(playerX, playerY, 8, (x, y, r, vis) => {
+  if (vis > 0) markVisible(x, y);
+});
+
+// 3. Pathfind from the player to a target. The callback walks the found path;
+//    if no path exists it is never called.
+const astar = new AStar(targetX, targetY, passable, { topology: 8 });
+const path: [number, number][] = [];
+astar.compute(playerX, playerY, (x, y) => path.push([x, y]));
+```
 
 ---
 
@@ -33,7 +73,7 @@ import { PreciseShadowcasting } from "@vampgg/rot/fov/precise-shadowcasting";
 All probabilistic modules share a single `RNG` instance from `@vampgg/rot/rng`. Seed it once at startup to make the entire generation pipeline deterministic:
 
 ```ts
-import { RNG } from "@vampgg/rot/rng";
+import RNG from "@vampgg/rot/rng";
 RNG.setSeed(12345);
 ```
 
@@ -97,7 +137,7 @@ const digger = new Digger(80, 25, {
 Seedable pseudorandom number generator (Alea algorithm). Exported as a singleton.
 
 ```ts
-import { RNG } from "@vampgg/rot/rng";
+import RNG from "@vampgg/rot/rng"; // default export: a pre-seeded singleton instance
 
 RNG.setSeed(42);
 RNG.getUniform(); // float in [0, 1)
@@ -169,7 +209,7 @@ format("Hello %s!", "world"); // 'Hello world!'
 2D simplex noise for terrain, cave thresholds, and procedural variation. Returns values in approximately `[-1, 1]`.
 
 ```ts
-import { Simplex } from "@vampgg/rot/noise/simplex";
+import Simplex from "@vampgg/rot/noise/simplex";
 
 const noise = new Simplex(); // uses global RNG for permutation table
 const value = noise.get(x * 0.1, y * 0.1);
@@ -187,7 +227,7 @@ All generators share the `create(callback)` interface where `callback(x, y, cont
 A single rectangular room with walls on the border. Useful for testing.
 
 ```ts
-import { Arena } from "@vampgg/rot/map/arena";
+import Arena from "@vampgg/rot/map/arena";
 new Arena(40, 20).create((x, y, wall) => {
   /* ... */
 });
@@ -198,7 +238,7 @@ new Arena(40, 20).create((x, y, wall) => {
 Conway's Game of Life variant. Call `create()` multiple times to evolve. Use `connect()` to guarantee full connectivity.
 
 ```ts
-import { Cellular } from "@vampgg/rot/map/cellular";
+import Cellular from "@vampgg/rot/map/cellular";
 
 const map = new Cellular(80, 40, { topology: 8 });
 map.randomize(0.5); // 50% random fill
@@ -213,7 +253,7 @@ map.connect((x, y, wall) => {
 Grows a dungeon outward from a center room by iteratively adding rooms and corridors. Stops when `dugPercentage` of the area is open.
 
 ```ts
-import { Digger } from "@vampgg/rot/map/digger";
+import Digger from "@vampgg/rot/map/digger";
 
 const dungeon = new Digger(80, 25, {
   roomWidth: [4, 10],
@@ -233,7 +273,7 @@ dungeon.getCorridors(); // Corridor[]
 Places rooms independently then connects them with I/L/S-shaped corridors.
 
 ```ts
-import { Uniform } from "@vampgg/rot/map/uniform";
+import Uniform from "@vampgg/rot/map/uniform";
 
 const result = new Uniform(80, 25, { roomDugPercentage: 0.15 }).create(cb);
 // returns null on timeout, 'this' on success
@@ -244,7 +284,7 @@ const result = new Uniform(80, 25, { roomDugPercentage: 0.15 }).create(cb);
 Divides the map into a grid of cells, places one room per cell, then connects them.
 
 ```ts
-import { Rogue } from "@vampgg/rot/map/rogue";
+import Rogue from "@vampgg/rot/map/rogue";
 new Rogue(80, 25, { cellWidth: 3, cellHeight: 3 }).create(cb);
 ```
 
@@ -253,9 +293,9 @@ new Rogue(80, 25, { cellWidth: 3, cellHeight: 3 }).create(cb);
 Three maze algorithms, all producing perfect mazes (no loops, fully connected):
 
 ```ts
-import { DividedMaze } from "@vampgg/rot/map/dividedmaze"; // recursive division
-import { EllerMaze } from "@vampgg/rot/map/ellermaze"; // Eller's row-by-row algorithm
-import { IceyMaze } from "@vampgg/rot/map/iceymaze"; // random walk; regularity=0–N
+import DividedMaze from "@vampgg/rot/map/dividedmaze"; // recursive division
+import EllerMaze from "@vampgg/rot/map/ellermaze"; // Eller's row-by-row algorithm
+import IceyMaze from "@vampgg/rot/map/iceymaze"; // random walk; regularity=0–N
 
 new DividedMaze(40, 20).create(cb);
 new IceyMaze(40, 20, 3).create(cb); // regularity 3 = straighter corridors
@@ -288,7 +328,7 @@ All FOV algorithms take a `lightPassesCallback(x, y): boolean` at construction t
 Best general-purpose FOV for standard square-grid roguelikes. Supports full 360°, 180° (facing + flanks), and 90° (narrow cone) variants.
 
 ```ts
-import { RecursiveShadowcasting } from "@vampgg/rot/fov/recursive-shadowcasting";
+import RecursiveShadowcasting from "@vampgg/rot/fov/recursive-shadowcasting";
 
 const fov = new RecursiveShadowcasting((x, y) => map[x][y] === 0);
 
@@ -306,7 +346,7 @@ fov.compute90(x, y, 8, dir, cb);
 Higher-precision shadowcasting using fractional arcs. The visibility callback receives values in `[0, 1]` for partial occlusion.
 
 ```ts
-import { PreciseShadowcasting } from "@vampgg/rot/fov/precise-shadowcasting";
+import PreciseShadowcasting from "@vampgg/rot/fov/precise-shadowcasting";
 
 const fov = new PreciseShadowcasting((x, y) => isTransparent(x, y));
 fov.compute(x, y, 10, (x, y, r, visibility) => {
@@ -325,8 +365,8 @@ Simpler, older algorithm. Integer-degree precision. Prefer `RecursiveShadowcasti
 Computes light contributions from multiple sources using FOV form factors. Supports optional radiosity-like light bouncing via multiple passes.
 
 ```ts
-import { Lighting } from "@vampgg/rot/lighting";
-import { PreciseShadowcasting } from "@vampgg/rot/fov/precise-shadowcasting";
+import Lighting from "@vampgg/rot/lighting";
+import PreciseShadowcasting from "@vampgg/rot/fov/precise-shadowcasting";
 
 const fov = new PreciseShadowcasting((x, y) => isTransparent(x, y));
 const lighting = new Lighting((x, y) => (map[x][y] === 0 ? 0.3 : 0), {
@@ -357,7 +397,7 @@ All pathfinders are constructed with a target (`toX, toY`) and a `passableCallba
 Single-pair shortest path. Use when computing one path per query.
 
 ```ts
-import { AStar } from "@vampgg/rot/path/astar";
+import AStar from "@vampgg/rot/path/astar";
 
 const astar = new AStar(targetX, targetY, (x, y) => isPassable(x, y), { topology: 8 });
 astar.compute(fromX, fromY, (x, y) => path.push([x, y]));
@@ -368,7 +408,7 @@ astar.compute(fromX, fromY, (x, y) => path.push([x, y]));
 Builds a BFS tree from the target. Efficient when computing paths from many different start points to the same target (the tree is cached and extended lazily).
 
 ```ts
-import { Dijkstra } from "@vampgg/rot/path/dijkstra";
+import Dijkstra from "@vampgg/rot/path/dijkstra";
 
 const dijkstra = new Dijkstra(targetX, targetY, (x, y) => isPassable(x, y));
 // Compute from multiple start points cheaply:
@@ -385,7 +425,7 @@ dijkstra.compute(x2, y2, cb2);
 All actors take turns in equal rotation. Classic roguelike scheduling.
 
 ```ts
-import { Simple } from "@vampgg/rot/scheduler/simple";
+import Simple from "@vampgg/rot/scheduler/simple";
 
 const scheduler = new Simple<Actor>();
 scheduler.add(player, true); // true = repeating
@@ -398,7 +438,7 @@ const next = scheduler.next(); // next actor
 Actors must implement `getSpeed(): number`. Faster actors act more frequently.
 
 ```ts
-import { Speed } from "@vampgg/rot/scheduler/speed";
+import Speed from "@vampgg/rot/scheduler/speed";
 
 // Actor must have getSpeed()
 class Monster {
@@ -417,7 +457,7 @@ scheduler.add(fastMonster, true);
 Each actor declares its action cost during its turn via `scheduler.setDuration(n)`.
 
 ```ts
-import { Action } from "@vampgg/rot/scheduler/action";
+import Action from "@vampgg/rot/scheduler/action";
 
 const scheduler = new Action<Actor>();
 scheduler.add(player, true, 1);
@@ -431,7 +471,7 @@ scheduler.setDuration(isRunning ? 0.5 : 1);
 Drives actors through a scheduler. Supports asynchronous actors (return a Promise from `act()` to pause the loop, e.g. while waiting for player input).
 
 ```ts
-import { Engine } from "@vampgg/rot/engine";
+import Engine from "@vampgg/rot/engine";
 
 class Player {
   async act() {
@@ -457,7 +497,7 @@ engine.unlock(); // resume
 Schedules events at relative time offsets. Useful for implementing timers, cooldowns, and non-uniform-speed simulations directly.
 
 ```ts
-import { EventQueue } from "@vampgg/rot/eventqueue";
+import EventQueue from "@vampgg/rot/eventqueue";
 
 const queue = new EventQueue<string>();
 queue.add("heal", 10); // schedule 'heal' 10 time units from now
@@ -475,7 +515,7 @@ queue.remove("spawn"); // cancel
 Learns from a training corpus and generates statistically similar strings. Character-level (default) or word-level.
 
 ```ts
-import { StringGenerator } from "@vampgg/rot/stringgenerator";
+import StringGenerator from "@vampgg/rot/stringgenerator";
 
 const gen = new StringGenerator({ order: 3, words: false });
 ["Aragorn", "Legolas", "Gimli", "Boromir"].forEach((n) => gen.observe(n));

@@ -164,6 +164,11 @@ describe("pool.bop import resolution (Case C/D, 4c)", () => {
 
     const importPath = resolvePoolImport(proj, schemaDir);
     expect(importPath).toContain("pool.bop");
+    // Must resolve to the stable symlinked node_modules path, NOT the realpath
+    // through pnpm's version-pinned `.pnpm/<pkg>@<version>` store (which would
+    // break on any version bump).
+    expect(importPath).not.toContain(".pnpm");
+    expect(importPath).toContain("node_modules/@vampgg/utils/schema/pool.bop");
     const abs = join(schemaDir, importPath);
     expect(readFileSync(abs, "utf-8")).toContain("message Pool");
   });

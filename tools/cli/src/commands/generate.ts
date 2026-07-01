@@ -109,8 +109,10 @@ export const generateCommand = defineCommand({
       }
 
       console.log("Generating ECS types...");
-      const outPath = generate(cwd, bebopConfig, vampConfig);
-      console.log(`Generated ${outPath}`);
+      const { core, worker, barrel } = generate(cwd, bebopConfig, vampConfig);
+      console.log(`Generated ${core}`);
+      console.log(`Generated ${worker}`);
+      console.log(`Generated ${barrel}`);
       return true;
     };
 

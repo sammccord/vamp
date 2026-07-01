@@ -1,6 +1,25 @@
-import { createRequire } from "node:module";
+import { createRequire, type createRequire as CreateRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+
+type NodeRequire = ReturnType<typeof CreateRequire>;
+
+/**
+ * Resolve a package specifier to its *symlinked* `node_modules` path rather than
+ * the realpath. `require.resolve` runs `fs.realpathSync` on its result, which under
+ * pnpm points into the version-pinned `.pnpm/<pkg>@<version>/…` store — a path that
+ * breaks the moment the version bumps. Walking the module search dirs and joining
+ * the specifier keeps the stable `node_modules/<pkg>/<subpath>` symlink instead.
+ */
+function resolveStablePath(req: NodeRequire, specifier: string): string | null {
+  const searchDirs = req.resolve.paths(specifier);
+  if (!searchDirs) return null;
+  for (const dir of searchDirs) {
+    const candidate = join(dir, specifier);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 /**
  * Extract the import paths from a bebop source file. Bebop imports look like
@@ -35,8 +54,13 @@ export function resolveBebopImport(specifier: string, fromDir: string): string |
 
   // Package specifier (e.g. "@vampgg/utils/schema/pool.bop").
   const req = createRequire(resolve(fromDir, "noop.js"));
+  // 0. Prefer the stable, symlinked node_modules path so the scaffolded import
+  //    survives dependency version bumps under pnpm (see resolveStablePath).
+  const stable = resolveStablePath(req, specifier);
+  if (stable) return stable;
   // 1. Try the full subpath directly (works when there is no `exports` map or
-  //    the subpath is exported).
+  //    the subpath is exported). Falls back to the realpath when the stable
+  //    walk misses (e.g. a subpath only reachable via the package `exports` map).
   try {
     const direct = req.resolve(specifier);
     if (existsSync(direct)) return direct;

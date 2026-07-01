@@ -65,6 +65,125 @@ it inside a Durable Object. Client-side, `@vampgg/solid` wraps it as a reactive
 read-replica. See **`examples/basic/`** for the full end-to-end wiring (schema →
 generated options → systems → worker → solid client).
 
+### Building a world without codegen
+
+`createECSOptions` (from `@vampgg/cli`) is just a convenience — you can wire an
+`ECS` by hand. You supply the entity map, a `mutate` function (how a
+`MutationRecord` lands in your store), a context, and `ECSOptions` (component-id
+map + the three delta functions). Note that **numeric deltas are additive**:
+`put(id, { hp: -30 })` on `hp: 100` yields `70`.
+
+```ts
+import { ECS, type ECSOptions, type EntityMutator, MutationType } from "@vampgg/ecs";
+
+type Entity = { id?: string; tags?: number[]; hp?: number; faction?: number };
+type EntityDelta = { hp?: number; faction?: number };
+
+const components = { id: 1, hp: 2, faction: 3 } as const;
+
+const materializeDelta = (d: EntityDelta, base?: Partial<Entity>): Entity => ({
+  id: base?.id,
+  hp: (base?.hp ?? 0) + (d.hp ?? 0), // additive
+  faction: d.faction ?? base?.faction, // last-writer-wins
+});
+const mergeDelta = (e: Entity, d: EntityDelta) => {
+  if (d.hp !== undefined) e.hp = (e.hp ?? 0) + d.hp; // additive
+  if (d.faction !== undefined) e.faction = d.faction; // replace
+};
+const accumulateDelta = (from: EntityDelta, to: EntityDelta) => {
+  if (from.hp !== undefined) to.hp = (to.hp ?? 0) + from.hp;
+  if (from.faction !== undefined) to.faction = from.faction;
+  return to;
+};
+
+const entities = new Map<string, Entity>();
+const mutate: EntityMutator<Entity, EntityDelta> = (id, m) => {
+  switch (m.tag) {
+    case MutationType.Insert:
+      entities.set(id, m.value.entity);
+      return;
+    case MutationType.Update: {
+      const e = entities.get(id);
+      if (!e) entities.set(id, materializeDelta(m.value.delta, { id }));
+      else mergeDelta(e, m.value.delta);
+      return;
+    }
+    case MutationType.Delete:
+      entities.delete(id);
+  }
+};
+
+const options: ECSOptions<Entity, EntityDelta> = {
+  createId: () => crypto.randomUUID(),
+  components: components as unknown as Record<keyof Entity, number>,
+  materializeDelta,
+  mergeDelta,
+  accumulateDelta,
+};
+
+const world = new ECS(entities, mutate, {}, options);
+world.initialize();
+world.insert({ id: "goblin", hp: 100, tags: [] });
+world.put("goblin", { hp: -30 }); // hp is now 70
+```
+
+### Behaviors
+
+Behaviors are event-driven, per-entity reactions selected by an action tag. Build
+them with `createBehavior(tag, handler, query, priority?)`, register with
+`registerBehavior`, then dispatch with `act`. `act` runs the matching behaviors on
+the target **and propagates the same action down to its children**; use
+`actWithBubbling` to travel up through ancestors and `actBatch` for many targets.
+Call `event.preventDefault()` to halt propagation.
+
+```ts
+import { createBehavior } from "@vampgg/ecs";
+
+const onAttack = createBehavior<Context, [], Actions, Tags, Entity, EntityDelta>(
+  1, // action tag
+  (world, entity, event) => {
+    const dmg = (event.detail.value as { damage?: number }).damage ?? 0;
+    if (entity.id && dmg) world.put(entity.id, { hp: -dmg });
+  },
+  (q) => q.every(components.hp),
+  10, // priority — higher runs first
+);
+world.registerBehavior(onAttack);
+
+await world.act("goblin", { tag: 1, value: { damage: 5 } }); // + every child
+```
+
+### Mutation scopes & syncing worlds
+
+`withScope(fn)` batches every change made inside `fn` into one coalesced
+`MutationBatch` (insert+update ⇒ insert, insert+delete ⇒ nothing, etc.) and returns
+`{ result, mutations }`. Observers registered with `observeMutations` receive each
+committed batch — this is exactly how `@vampgg/worker` streams the authoritative
+world to clients and how `@vampgg/solid` applies it into a read-replica.
+
+```ts
+// Authoritative world: observe committed batches and ship interested ones.
+const unobserve = world.observeMutations({
+  interested: (id, mutation) => canClientSee(id),
+  deliver: (batch) => sendToClient(batch), // MutationBatch = Map<id, MutationRecord>
+});
+
+const { result, mutations } = await world.withScope(() => world.insert(entity));
+
+// Replica world: ingest a snapshot of matching entities, then live batches.
+const snapshot = world.snapshotMutations((id, e) => (e.hp ?? 0) > 0);
+await replica.withScope(() => replica.applyMutations(snapshot));
+```
+
+## Performance
+
+The ECS is exercised by a full-stack end-to-end benchmark (see
+[`@vampgg/worker`](../worker#performance) for the numbers table and how to
+reproduce it). Highlights on the reference machine: a server frame running **all**
+registered systems over **1,024 entities** takes ~2.0 ms (≈492 FPS), and a
+single-behavior `act` round-trips in ~100 µs across the whole stack (ws → ECS →
+CRDT write → broadcast). A single Durable Object holds **~18k rich entities**.
+
 ## Key exports
 
 `ECS`, `ECSOptions`, `MutationBatch`, `MutationObserver` · `createEntitySystem`,

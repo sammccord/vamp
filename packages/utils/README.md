@@ -213,7 +213,7 @@ import { createEventIterator } from "@vampgg/utils/create-event-iterator";
 import type { Subscriber, Context, CleanupFn } from "@vampgg/utils/create-event-iterator";
 ```
 
-Converts any push-based event source (EventEmitter, WebSocket messages, browser events) into an `AsyncGenerator`. The subscriber receives `{ emit, cancel }` and returns an optional cleanup function.
+Converts any push-based event source (EventEmitter, WebSocket messages, browser events) into an `AsyncGenerator`. The subscriber receives `{ emit, cancel, error }` (`error(e)` surfaces a failure at the consumer instead of a clean end) and returns an optional cleanup function.
 
 ```ts
 const stream = createEventIterator<MyEvent>(({ emit, cancel }) => {
@@ -291,6 +291,25 @@ await channel.waitForOpen();
 ```
 
 All four tempo method types (unary, server-stream, client-stream, duplex) are supported with deadline and retry policy propagation.
+
+**Full client round-trip.** In practice you connect, obtain a tempo-generated client stub from the channel, and call RPC methods directly — the channel handles encoding, correlation, and streaming:
+
+```ts
+import { TempoWSChannel } from "@vampgg/utils/ws-channel";
+import { RpcClient, MutationScope } from "./bebop"; // your tempo-generated client + types
+
+const channel = TempoWSChannel.forAddress("wss://host/v1/game?ns=room1", { maxRetries: 3 });
+await channel.waitForOpen();
+
+const client = channel.getClient(RpcClient);
+
+const spawned = await client.spawn(entity); // unary
+for await (const scope of await client.observe(MutationScope({}))) {
+  // server-stream: each frame is a decoded record
+}
+
+channel.close();
+```
 
 ---
 

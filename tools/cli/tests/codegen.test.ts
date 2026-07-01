@@ -159,6 +159,20 @@ describe("emitTypedClasses", () => {
     const result = emitClasses();
     expect(result).toMatch(/,(\s*)number,/);
   });
+
+  it("exposes an overridable Env generic defaulting to Cloudflare.Env", () => {
+    const result = emitClasses("Tags");
+    expect(result).toContain("Env = Cloudflare.Env,");
+    // Env is threaded through to ECSDurableObject (not the literal Cloudflare.Env).
+    expect(result).toMatch(/EntityDelta,\s*Env\s*>\s*\{\}/);
+    expect(result).not.toContain("EntityDelta,\n    Cloudflare.Env");
+  });
+
+  it("uses a custom env type when provided", () => {
+    const result = emitClasses("Tags", "unknown");
+    expect(result).toContain("Env = unknown,");
+    expect(result).not.toContain("Cloudflare.Env,");
+  });
 });
 
 describe("emitGameContext", () => {
