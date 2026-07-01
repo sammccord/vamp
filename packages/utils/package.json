@@ -1,6 +1,6 @@
 {
   "name": "@vamp/utils",
-  "version": "0.1.0",
+  "version": "1.0.0-beta.0",
   "description": "Tempo RPC, Bebop serialization, transports, and async primitives for @vamp.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/utils#readme",
   "bugs": {

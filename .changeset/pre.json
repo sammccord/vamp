@@ -10,5 +10,7 @@
     "@vamp/worker": "0.1.0",
     "@vamp/cli": "0.1.0"
   },
-  "changesets": []
+  "changesets": [
+    "cozy-houses-clap"
+  ]
 }
