@@ -1,5 +1,14 @@
 # @vampgg/worker
 
+## 1.0.0-beta.2
+
+### Patch Changes
+
+- bacbe16: Publish 1.0.0-beta.2 with npm provenance re-enabled now that the source repository is public. No runtime source changes.
+- Updated dependencies [bacbe16]
+  - @vampgg/ecs@1.0.0-beta.2
+  - @vampgg/utils@1.0.0-beta.2
+
 ## 1.0.0-beta.1
 
 ### Patch Changes

@@ -12,6 +12,7 @@
   },
   "changesets": [
     "beta-1-release",
+    "beta-2-provenance",
     "cozy-houses-clap"
   ]
 }

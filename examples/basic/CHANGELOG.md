@@ -1,5 +1,15 @@
 # basic
 
+## 0.0.1-beta.2
+
+### Patch Changes
+
+- Updated dependencies [bacbe16]
+  - @vampgg/worker@1.0.0-beta.2
+  - @vampgg/ecs@1.0.0-beta.2
+  - @vampgg/solid@1.0.0-beta.2
+  - @vampgg/utils@1.0.0-beta.2
+
 ## 0.0.1-beta.1
 
 ### Patch Changes

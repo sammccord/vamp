@@ -1,6 +1,6 @@
 {
   "name": "@vampgg/cli",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "description": "ECS code generator CLI for @vampgg",
   "homepage": "https://github.com/sammccord/vamp/tree/main/tools/cli#readme",
   "bugs": {
