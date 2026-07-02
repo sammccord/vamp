@@ -21,30 +21,29 @@ export default class PreciseShadowcasting extends FOV {
     /* list of all shadows */
     let SHADOWS: Arc[] = [];
 
-    let cx, cy, blocks, A1, A2, visibility;
-
     /* analyze surrounding cells in concentric rings, starting from the center */
     for (let r = 1; r <= R; r++) {
-      let neighbors = this._getCircle(x, y, r);
-      let neighborCount = neighbors.length;
+      const neighborCount = this._circleSize(r);
 
-      for (let i = 0; i < neighborCount; i++) {
-        cx = neighbors[i][0];
-        cy = neighbors[i][1];
+      /* walk the ring without materializing it (no per-ring array). The A1/A2
+       * arc tuples still allocate per cell — _checkVisibility splices them
+       * into SHADOWS, so they cannot be reused scratch. */
+      const completed = this._walkCircle(x, y, r, (cx, cy, i) => {
         /* shift half-an-angle backwards to maintain consistency of 0-th cells */
-        A1 = [i ? 2 * i - 1 : 2 * neighborCount - 1, 2 * neighborCount];
-        A2 = [2 * i + 1, 2 * neighborCount];
+        const A1: Arc = [i ? 2 * i - 1 : 2 * neighborCount - 1, 2 * neighborCount];
+        const A2: Arc = [2 * i + 1, 2 * neighborCount];
 
-        blocks = !this._lightPasses(cx, cy);
-        visibility = this._checkVisibility(A1 as Arc, A2 as Arc, blocks, SHADOWS);
+        const blocks = !this._lightPasses(cx, cy);
+        const visibility = this._checkVisibility(A1, A2, blocks, SHADOWS);
         if (visibility) {
           callback(cx, cy, r, visibility);
         }
 
         if (SHADOWS.length == 2 && SHADOWS[0][0] == 0 && SHADOWS[1][0] == SHADOWS[1][1]) {
-          return;
+          return false;
         } /* cutoff? */
-      } /* for all cells in this ring */
+      });
+      if (!completed) return;
     } /* for all rings */
   }
 

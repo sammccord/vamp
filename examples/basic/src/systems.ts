@@ -6,7 +6,7 @@ import {
   createGameBehavior,
   createGameEntitySystem,
   type EntityDelta,
-} from "./game.generated";
+} from "./game.core.generated";
 
 /**
  * The concrete ECS world the basic example runs. `UpdateArguments` is `[]`

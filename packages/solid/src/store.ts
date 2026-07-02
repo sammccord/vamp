@@ -1,4 +1,4 @@
-import type { BaseEntity } from "@vampgg/ecs";
+import { type BaseEntity, clonePlainValue } from "@vampgg/ecs";
 import { createStore, produce, reconcile, type Store } from "solid-js/store";
 
 /**
@@ -25,7 +25,7 @@ export function createEntityStore<E extends BaseEntity>(): EntityStore<E> {
       // against itself, detect no change, and never notify (stale UI). Cloning
       // decouples the store's value; reconcile then produces minimal,
       // identity-preserving path updates (rows in `<For>` stay stable).
-      setState(id, reconcile(structuredClone(entity), { key: "id", merge: false }));
+      setState(id, reconcile(clonePlainValue(entity), { key: "id", merge: false }));
     },
     remove(id) {
       setState(

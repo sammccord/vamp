@@ -29,10 +29,13 @@ export default class EventQueue<T = any> {
 
   /**
    * @param {?} event
-   * @param {number} time
+   * @param {number} time - Delay relative to the current queue time.
+   *
+   * Stored internally as an absolute timestamp (`_time + time`) so advancing
+   * the clock in {@link get} is O(1) instead of rekeying the whole heap.
    */
   add(event: T, time: number) {
-    this._events.push(event, time);
+    this._events.push(event, this._time + time);
   }
 
   /**
@@ -44,26 +47,24 @@ export default class EventQueue<T = any> {
       return null;
     }
 
-    let { key: time, value: event } = this._events.pop();
-    if (time > 0) {
+    const { key: time, value: event } = this._events.pop();
+    if (time > this._time) {
       /* advance */
-      this._time += time;
-      this._events.shift(-time);
+      this._time = time;
     }
 
     return event;
   }
 
   /**
-   * Get the time associated with the given event
+   * Get the time remaining until the given event fires
    * @param {?} event
    * @returns {number} time
    */
   getEventTime(event: T) {
     const r = this._events.find(event);
     if (r) {
-      const { key } = r;
-      return key;
+      return r.key - this._time;
     }
     return undefined;
   }

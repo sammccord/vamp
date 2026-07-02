@@ -1,5 +1,5 @@
 import type { Entity } from "./bebop";
-import { createGameInterestBroadcast, type GameContext } from "./game.generated";
+import { createGameInterestBroadcast, type GameContext } from "./game.worker.generated";
 
 /**
  * Interest-managed broadcast policy for the basic example.

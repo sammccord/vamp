@@ -16,6 +16,13 @@ export interface ArrayDelta<T> {
 }
 
 /**
+ * Below this combined size the O(n·m) `includes` loops beat building a Set;
+ * above it the Set-based paths keep large arrays (e.g. `children` on a crowded
+ * parent) from going quadratic.
+ */
+const SET_THRESHOLD = 32;
+
+/**
  * Resolve an array delta against a base array (entity-level). `set` replaces;
  * otherwise `add` appends de-duplicated members and `remove` filters them out.
  * Returns a new array and never mutates `base`.
@@ -24,8 +31,27 @@ export function applyArrayDelta<T>(base: T[], d?: ArrayDelta<T>): T[] {
   if (!d) return base;
   if (d.set) return d.set;
   let out = base.slice();
-  if (d.add) for (const x of d.add) if (!out.includes(x)) out.push(x);
-  if (d.remove) out = out.filter((x) => !d.remove!.includes(x));
+  if (d.add) {
+    if (out.length + d.add.length > SET_THRESHOLD) {
+      const seen = new Set(out);
+      for (const x of d.add) {
+        if (!seen.has(x)) {
+          seen.add(x);
+          out.push(x);
+        }
+      }
+    } else {
+      for (const x of d.add) if (!out.includes(x)) out.push(x);
+    }
+  }
+  if (d.remove) {
+    if (out.length + d.remove.length > SET_THRESHOLD) {
+      const rm = new Set(d.remove);
+      out = out.filter((x) => !rm.has(x));
+    } else {
+      out = out.filter((x) => !d.remove!.includes(x));
+    }
+  }
   return out;
 }
 
@@ -55,8 +81,11 @@ export function accumulateArrayDelta<T>(
 ): ArrayDelta<T> {
   if (from.set) return from;
   const out: ArrayDelta<T> = to ?? {};
-  if (from.add) out.add = [...(out.add ?? []), ...from.add];
-  if (from.remove) out.remove = [...(out.remove ?? []), ...from.remove];
+  // Dedupe while concatenating so repeated adds/removes of the same member
+  // across a scope's coalesced updates don't grow the lists without bound.
+  if (from.add) out.add = out.add ? [...new Set([...out.add, ...from.add])] : [...from.add];
+  if (from.remove)
+    out.remove = out.remove ? [...new Set([...out.remove, ...from.remove])] : [...from.remove];
   return out;
 }
 

@@ -1,11 +1,6 @@
 import {
-  BaseChannel,
   type CallCredential,
-  type CallOptions,
-  type ClientContext,
   InsecureChannelCredential,
-  type MethodInfo,
-  type RetryPolicy,
   type TempoChannelOptions,
 } from "@tempojs/client";
 import {
@@ -13,19 +8,13 @@ import {
   ConsoleLogger,
   type Credential,
   Deadline,
-  type MethodType,
   parseCredential,
   TempoError,
   TempoStatusCode,
-  TempoUtil,
-  TempoVersion,
 } from "@tempojs/common";
-import type { BebopRecord } from "bebop";
-import { EventEmitter } from "tseep";
 import { Websocket, WebsocketEvent, type WebsocketOptions } from "websocket-ts";
 import { Message } from "./bebop";
-import { createDuplexIterator } from "./create-duplex-iterator";
-import { createEventIterator } from "./create-event-iterator";
+import { CoreChannel } from "./channel-core";
 
 export type TempoWSChannelOptions = TempoChannelOptions & {
   binaryType?: BinaryType;
@@ -73,7 +62,7 @@ class ExistingWebSocket extends Websocket {
 /**
  * Represents a Tempo channel for communication with a remote server.
  */
-export class TempoWSChannel extends BaseChannel {
+export class TempoWSChannel extends CoreChannel {
   public static readonly defaultMaxRetryAttempts: number = 5;
   public static readonly defaultMaxReceiveMessageSize: number = 1024 * 1024 * 4; // 4 MB
   public static readonly defaultMaxSendMessageSize: number = 1024 * 1024 * 4; // 4 MB
@@ -81,16 +70,12 @@ export class TempoWSChannel extends BaseChannel {
   public static readonly defaultContentType: BebopContentType = "bebop";
 
   public ws!: Websocket;
-  public readonly events = new EventEmitter<Record<string, (message: Message) => void>>();
 
-  // Reject callbacks for in-flight unary / client-stream calls, keyed by
-  // messageId. Lets close()/error() settle parked requests instead of hanging.
-  public readonly pending = new Map<string, (e: unknown) => void>();
-  private closed = false;
+  /** Teardown of a duplex consumer must tell the server to stop streaming. */
+  protected override readonly cancelDuplexOnCleanup: boolean = true;
 
   private readonly isSecure: boolean;
   private readonly credential: CallCredential;
-  private readonly userAgent: string;
   private readonly maxReceiveMessageSize: number;
   private readonly maxSendMessageSize: number;
 
@@ -131,9 +116,6 @@ export class TempoWSChannel extends BaseChannel {
       options.maxReceiveMessageSize ?? TempoWSChannel.defaultMaxReceiveMessageSize;
     this.maxSendMessageSize =
       options.maxSendMessageSize ?? TempoWSChannel.defaultMaxSendMessageSize;
-    this.userAgent = TempoUtil.buildUserAgent("javascript", TempoVersion, undefined, {
-      runtime: TempoUtil.getEnvironmentName(),
-    });
 
     this._setupWebSocket(target);
 
@@ -233,351 +215,31 @@ export class TempoWSChannel extends BaseChannel {
     return await this.credential.getCredential();
   }
 
-  /**
-   * Executes a function with retries according to the provided retry policy.
-   * The function will be retried if it fails with a TempoError and its status code is included in the retryableStatusCodes of the retry policy.
-   * If a deadline is provided, the deadline for each attempt will be managed by the provided deadline, but the deadline will not be reset upon each retry.
-   *
-   * @template T - The type of the result returned by the function.
-   * @param {((retryAttempt: number) => Promise<T>)} func - A function that returns a Promise with a result. The function will receive a number indicating the current retry attempt.
-   * @param {RetryPolicy} retryPolicy - An object defining the retry policy, including maxAttempts, initialBackoff, maxBackoff, backoffMultiplier, and retryableStatusCodes.
-   * @param {Deadline} [deadline] - An optional deadline object that manages the timeout for each attempt.
-   * @param {AbortController} [abortController] - An optional AbortController instance to cancel the function execution.
-   * @returns {Promise<T>} - A Promise that resolves with the result of the function if it completes within the deadline and retry policy constraints.
-   * @throws {Error} - If the function execution fails and the error does not match the retry policy, or if the maximum number of attempts is reached without a successful result.
-   */
-  async executeWithRetry<T>(
-    func: (retryAttempt: number) => Promise<T>,
-    retryPolicy: RetryPolicy,
-    deadline?: Deadline,
-    abortController?: AbortController,
-  ): Promise<T> {
-    let attempt = 0;
-    let lastError: Error | undefined;
-
-    const execute = deadline
-      ? (retryAttempt: number) =>
-          deadline.executeWithinDeadline(async () => await func(retryAttempt), abortController)
-      : (retryAttempt: number) => func(retryAttempt);
-
-    while (attempt < retryPolicy.maxAttempts) {
-      try {
-        // Attempt to execute the function within the deadline, if provided.
-        const result = await execute(attempt);
-        return result;
-      } catch (error) {
-        if (!(error instanceof Error)) {
-          throw new TempoError(TempoStatusCode.UNKNOWN, `unexpected error`, {
-            data: error,
-          });
-        }
-        lastError = error;
-        // If error is not an instance of TempoError or the status code is not in retryableStatusCodes, throw the error.
-        if (
-          !(error instanceof TempoError) ||
-          !retryPolicy.retryableStatusCodes.includes(error.status)
-        ) {
-          throw error;
-        }
-
-        // Calculate the backoff time for this attempt.
-        const backoffTime = Math.min(
-          retryPolicy.initialBackoff.multiply(Math.pow(retryPolicy.backoffMultiplier, attempt))
-            .totalMilliseconds,
-          retryPolicy.maxBackoff.totalMilliseconds,
-        );
-
-        // Add some jitter to the backoff time.
-        const backoffWithJitter = backoffTime * (Math.random() * 0.5 + 0.75);
-
-        // Wait for the backoff duration.
-        await new Promise<void>((resolve) => setTimeout(resolve, backoffWithJitter));
-
-        // Increment the attempt counter.
-        attempt++;
-      }
-    }
-
-    if (
-      abortController &&
-      lastError !== undefined &&
-      !(lastError instanceof Error && lastError.name === "AbortError") &&
-      !(lastError instanceof TempoError && lastError.status === TempoStatusCode.ABORTED)
-    ) {
-      abortController.abort();
-    }
-
-    return Promise.reject(
-      lastError ||
-        new TempoError(
-          TempoStatusCode.DEADLINE_EXCEEDED,
-          "Failed to execute function with retry policy",
-        ),
-    );
+  /** Every RPC waits for the socket to open before sending. */
+  protected override async beforeCall(): Promise<void> {
+    await this.waitForOpen();
   }
 
-  private async fetchUnary(init: Message, options?: CallOptions): Promise<Message> {
-    const messageId = init.messageId!;
-    let listener!: (message: Message) => void;
-    let onAbort: (() => void) | undefined;
-    // Single idempotent cleanup runs on EVERY settlement (resolve, reject,
-    // abort, timeout/deadline) via .finally — fixes the listener/pending leak.
-    const cleanup = () => {
-      this.events.off(messageId, listener);
-      if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
-      this.pending.delete(messageId);
-    };
-    const promise = new Promise<Message>((resolve, reject) => {
-      listener = (message: Message) => resolve(message);
-      this.pending.set(messageId, reject); // close()/error() can reject a parked request
-      if (options?.controller) {
-        onAbort = () => reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
-        options.controller.signal.addEventListener("abort", onAbort, { once: true });
-      }
-      this.events.on(messageId, listener);
-      this.send(init);
-    });
-    return await promise.finally(cleanup);
-  }
-
-  // should loop over generator, send all, and resolve on one response
-  private async fetchClientStream(
-    init: Message,
-    method: MethodInfo<BebopRecord, BebopRecord>,
-    generator: () => AsyncGenerator<BebopRecord, void, undefined>,
-    options?: CallOptions,
-  ): Promise<Message> {
-    const messageId = init.messageId!;
-    let listener!: (message: Message) => void;
-    let onAbort: (() => void) | undefined;
-    const cleanup = () => {
-      this.events.off(messageId, listener);
-      if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
-      this.pending.delete(messageId);
-    };
-    const promise = new Promise<Message>((resolve, reject) => {
-      listener = (message: Message) => resolve(message);
-      this.pending.set(messageId, reject);
-      if (options?.controller) {
-        onAbort = () => reject(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
-        options.controller.signal.addEventListener("abort", onAbort, { once: true });
-      }
-      this.events.on(messageId, listener);
-      // A generator-side failure must settle (and therefore clean up) the call
-      // rather than hang waiting for a server response that will never come.
-      runGenerator.call(this).catch(reject);
-      async function runGenerator(this: TempoWSChannel) {
-        // Fresh Message per frame (never mutate the shared `init`) so concurrent
-        // sends cannot alias and a terminal CANCELLED cannot leak into a later frame.
-        for await (const value of generator()) {
-          this.send(Message({ ...init, data: new Uint8Array(method.serialize(value)) }));
-        }
-        this.send(Message({ ...init, status: TempoStatusCode.CANCELLED, data: new Uint8Array() }));
-      }
-    });
-    return await promise.finally(cleanup);
-  }
-
-  // should send message, then return a createEventIterator from incoming events, stopping on CANCEL
-  // TODO should cancel on server side when done?
-  private fetchServerStream(
-    init: Message,
-    context: ClientContext,
-    method: MethodInfo<BebopRecord, BebopRecord>,
-    options?: CallOptions,
-  ): AsyncGenerator<BebopRecord, void, undefined> {
-    const messageId = init.messageId!;
-    return createEventIterator<BebopRecord>(({ emit, cancel, error }) => {
-      let terminated = false;
-      let onAbort: (() => void) | undefined;
-      const eventHandler = async (message: Message) => {
-        try {
-          if (message.status === TempoStatusCode.CANCELLED) {
-            terminated = true; // server ended the stream; do not echo CANCELLED back
-            cancel();
-            return;
-          }
-          await this.processResponseHeaders(message, context, method.type);
-          const requestData = message.data;
-          const record = method.deserialize(requestData!);
-          if (this.hooks !== undefined) {
-            await this.hooks.executeDecodeHooks(context, record);
-          }
-          emit(record);
-        } catch (e) {
-          // Surface transport/decode failures at the consumer instead of letting
-          // the EventEmitter swallow them.
-          error(e);
-        }
-      };
-      if (options?.controller) {
-        // Route abort through the iterator error channel; never throw inside a listener.
-        onAbort = () => error(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
-        options.controller.signal.addEventListener("abort", onAbort, { once: true });
-      }
-      this.events.on(messageId, eventHandler);
-      this.send(init);
-      return () => {
-        this.events.off(messageId, eventHandler);
-        if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
-        // Tell the server to stop streaming (fresh message — never mutate init).
-        if (!terminated && !this.closed) {
-          this.send(
-            Message({
-              messageId,
-              methodId: init.methodId,
-              status: TempoStatusCode.CANCELLED,
-              data: new Uint8Array(),
-              timestamp: new Date(),
-            }),
-          );
-        }
-      };
-    });
-  }
-
-  // should do both client and server stream logic
-  private fetchDuplexStream(
-    init: Message,
-    context: ClientContext,
-    method: MethodInfo<BebopRecord, BebopRecord>,
-    generator: () => AsyncGenerator<BebopRecord, void, undefined>,
-    options?: CallOptions,
-  ): AsyncGenerator<BebopRecord, void, undefined> {
-    const messageId = init.messageId!;
-    const iterator = createDuplexIterator<BebopRecord>(
-      generator(),
-      (value) => {
-        this.send(Message({ ...init, data: new Uint8Array(method.serialize(value)) }));
-      },
-      ({ emit, cancel, error }) => {
-        let terminated = false;
-        let onAbort: (() => void) | undefined;
-        const eventHandler = async (message: Message) => {
-          try {
-            if (message.status === TempoStatusCode.CANCELLED) {
-              terminated = true;
-              cancel();
-              return;
-            }
-            await this.processResponseHeaders(message, context, method.type);
-            const requestData = message.data!;
-            const record = method.deserialize(requestData);
-            if (this.hooks !== undefined) {
-              await this.hooks.executeDecodeHooks(context, record);
-            }
-            emit(record);
-          } catch (e) {
-            error(e);
-          }
-        };
-        if (options?.controller) {
-          onAbort = () => error(new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", {}));
-          options.controller.signal.addEventListener("abort", onAbort, { once: true });
-        }
-        this.events.on(messageId, eventHandler);
-        return () => {
-          this.events.off(messageId, eventHandler);
-          if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
-          if (!terminated && !this.closed) {
-            this.send(
-              Message({
-                messageId,
-                methodId: init.methodId,
-                status: TempoStatusCode.CANCELLED,
-                data: new Uint8Array(),
-                timestamp: new Date(),
-              }),
-            );
-          }
-        };
-      },
-    );
-
-    return iterator;
-  }
-
-  /**
-   * Creates a `RequestInit` object for a given payload, context, method and optional call options.
-   * This object can be used to make an HTTP request using the Fetch API.
-   *
-   * @private
-   * @param {Uint8Array} payload - The payload to be sent in the request.
-   * @param {ClientContext} context - The context of the client making the request.
-   * @param {MethodInfo<BebopRecord, BebopRecord>} method - Information about the method being called.
-   * @param {CallOptions | undefined} options - Optional configuration for the call.
-   * @returns {Promise<RequestInit>} A Promise resolving to the created `RequestInit` object.
-   * @throws {TempoError} Throws an error if there's a problem while getting the credential header.
-   */
-  private async createRequest(
-    payload: Uint8Array,
-    _context: ClientContext,
-    method: MethodInfo<BebopRecord, BebopRecord>,
-    options?: CallOptions,
-  ): Promise<Message> {
-    const messageId = crypto.randomUUID();
-    const requestInit: Message = {
-      messageId,
-      methodId: method.id,
-      // `method.serialize` returns a view into bebop's shared static write
-      // buffer; the subsequent `Message.encode` (in `send`) reuses that same
-      // buffer and would clobber these bytes before they reach the wire. Copy
-      // the payload so the framed envelope is stable. The streaming send sites
-      // and the server router (`ws-router.ts`) copy for the same reason.
-      data: new Uint8Array(payload),
-      timestamp: new Date(),
-    };
-    if (options?.deadline) {
-      requestInit.deadline = new Date(options.deadline.toUnixTimestamp());
-    }
+  /** {@inheritDoc CoreChannel.getAuthorizationValue} */
+  protected override async getAuthorizationValue(): Promise<string | undefined> {
     const credentialHeader = await this.credential.getHeader();
-    if (credentialHeader) {
-      requestInit.authorization = credentialHeader.value;
-    }
-    return Message(requestInit);
+    return credentialHeader ? credentialHeader.value : undefined;
   }
 
   /**
-   * Processes the headers of the response from the server, validating their integrity and correctness.
-   * Also sets the incoming metadata from the response headers to the provided context.
+   * {@inheritDoc CoreChannel.storeResponseCredential}
    *
-   * @private
-   * @param {Response} response - The response received from the server.
-   * @param {ClientContext} context - The context of the client making the request.
-   * @param {MethodType} methodType - The type of method being called.
-   * @throws {TempoError} Throws an error if any validation checks fail or if there's a problem parsing or storing credentials.
+   * @throws {TempoError} If the credential received on the response cannot be parsed.
    */
-  private async processResponseHeaders(
-    response: Message,
-    _context: ClientContext,
-    _methodType: MethodType,
-  ) {
-    // Validate response headers
-    const statusCode: TempoStatusCode | undefined = response.status;
-    if (statusCode === undefined) {
-      throw new TempoError(TempoStatusCode.UNKNOWN, "tempo-status missing from response.");
+  protected override async storeResponseCredential(responseCredential: string): Promise<void> {
+    const credential = parseCredential(responseCredential);
+    if (!credential) {
+      throw new TempoError(
+        TempoStatusCode.INVALID_ARGUMENT,
+        "unable to parse credentials received on 'tempo-credential' header",
+      );
     }
-
-    if (statusCode !== TempoStatusCode.OK && statusCode !== TempoStatusCode.CANCELLED) {
-      let tempoMessage = response.msg;
-      if (!tempoMessage) {
-        tempoMessage = "unknown error";
-      }
-      throw new TempoError(statusCode, tempoMessage);
-    }
-
-    // Set incoming metadata from response headers
-    const responseCredential = response.credential;
-    if (responseCredential) {
-      const credential = parseCredential(responseCredential);
-      if (!credential) {
-        throw new TempoError(
-          TempoStatusCode.INVALID_ARGUMENT,
-          "unable to parse credentials received on 'tempo-credential' header",
-        );
-      }
-      await this.credential.storeCredential(credential);
-    }
+    await this.credential.storeCredential(credential);
   }
 
   public async waitForOpen(): Promise<void> {
@@ -661,254 +323,17 @@ export class TempoWSChannel extends BaseChannel {
     this.ws.send(frame);
   }
 
-  /**
-   * Tear down the channel: reject every in-flight unary/client-stream call,
-   * remove all event listeners, and close the socket. Idempotent and safe to
-   * invoke from the socket `close`/`error` events or by an explicit caller.
-   */
-  public close(reason?: TempoError): void {
-    if (this.closed) return;
-    this.closed = true;
-    const err = reason ?? new TempoError(TempoStatusCode.CANCELLED, "channel disposed");
-    for (const reject of this.pending.values()) reject(err);
-    this.pending.clear();
-    this.events.removeAllListeners();
+  /** {@inheritDoc CoreChannel.sendFrame} */
+  protected override sendFrame(message: Message): void {
+    this.send(message);
+  }
+
+  /** Close the socket on {@link CoreChannel.close}. */
+  protected override closeTransport(): void {
     try {
       this.ws.close();
     } catch {
       /* already closed */
-    }
-  }
-
-  /**
-   * {@inheritDoc BaseChannel.startUnary}
-   */
-  public override async startUnary<TRequest extends BebopRecord, TResponse extends BebopRecord>(
-    request: TRequest,
-    context: ClientContext,
-    method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions,
-  ): Promise<TResponse> {
-    try {
-      await this.waitForOpen();
-      // Prepare request data based on content type
-      const requestData: Uint8Array = method.serialize(request);
-      if (this.hooks !== undefined) {
-        await this.hooks.executeRequestHooks(context);
-      }
-      const requestInit = await this.createRequest(requestData, context, method, options);
-      let response: Message;
-      // If the retry policy is set, execute the request with retries
-      if (options?.retryPolicy) {
-        response = await this.executeWithRetry(
-          async (retryAttempt: number) => {
-            if (retryAttempt > 0) {
-              requestInit.previousAttempts = retryAttempt;
-            }
-            return await this.fetchUnary(requestInit);
-          },
-          options.retryPolicy,
-          options.deadline,
-          options.controller,
-        );
-        // If the deadline is set, execute the request within the deadline
-      } else if (options?.deadline) {
-        response = await options.deadline.executeWithinDeadline(async () => {
-          return await this.fetchUnary(requestInit, options);
-        }, options.controller);
-      } else {
-        // Otherwise, just execute the request indefinitely
-        response = await this.fetchUnary(requestInit, options);
-      }
-      // Validate response headers
-      await this.processResponseHeaders(response, context, method.type);
-      if (this.hooks !== undefined) {
-        await this.hooks.executeResponseHooks(context);
-      }
-      // Deserialize the response based on the content type
-      const record: TResponse = method.deserialize(response.data!);
-      if (this.hooks !== undefined) {
-        await this.hooks.executeDecodeHooks(context, record);
-      }
-      // Return the deserialized response object
-      return record;
-    } catch (e) {
-      if (this.hooks !== undefined && e instanceof Error) {
-        void this.hooks.executeErrorHooks(context, e);
-      }
-      if (e instanceof TempoError) {
-        throw e;
-      }
-      if (e instanceof Error) {
-        if (e.name === "AbortError") {
-          throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", e);
-        } else {
-          throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", e);
-        }
-      }
-      throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", { data: e });
-    }
-  }
-
-  /**
-   * {@inheritDoc BaseChannel.startClientStream}
-   */
-  public override async startClientStream<
-    TRequest extends BebopRecord,
-    TResponse extends BebopRecord,
-  >(
-    generator: () => AsyncGenerator<TRequest, void, undefined>,
-    context: ClientContext,
-    method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions,
-  ): Promise<TResponse> {
-    try {
-      await this.waitForOpen();
-      if (this.hooks !== undefined) {
-        await this.hooks.executeRequestHooks(context);
-      }
-      const requestInit = await this.createRequest(new Uint8Array(), context, method, options);
-      let response: Message;
-      if (options?.deadline) {
-        response = await options.deadline.executeWithinDeadline(async () => {
-          return await this.fetchClientStream(requestInit, method, generator, options);
-        }, options.controller);
-      } else {
-        // Otherwise, just execute the request indefinitely
-        response = await this.fetchClientStream(requestInit, method, generator, options);
-      }
-      // Validate response headers
-      await this.processResponseHeaders(response, context, method.type);
-      // Deserialize the response based on the content type
-      const record: TResponse = this.deserializeResponse(response.data!, method);
-      if (this.hooks !== undefined) {
-        await this.hooks.executeDecodeHooks(context, record);
-      }
-      // Return the deserialized response object
-      return record;
-    } catch (e) {
-      if (this.hooks !== undefined && e instanceof Error) {
-        void this.hooks.executeErrorHooks(context, e);
-      }
-      if (e instanceof TempoError) {
-        throw e;
-      }
-      if (e instanceof Error) {
-        if (e.name === "AbortError") {
-          throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", e);
-        } else {
-          throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", e);
-        }
-      }
-      throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", { data: e });
-    }
-  }
-  /**
-   * {@inheritDoc BaseChannel.startServerStream}
-   */
-  public override async startServerStream<
-    TRequest extends BebopRecord,
-    TResponse extends BebopRecord,
-  >(
-    request: TRequest,
-    context: ClientContext,
-    method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions,
-  ): Promise<AsyncGenerator<TResponse, void, undefined>> {
-    try {
-      await this.waitForOpen();
-      // Prepare request data based on content type
-      const requestData: Uint8Array = method.serialize(request);
-      if (this.hooks !== undefined) {
-        await this.hooks.executeRequestHooks(context);
-      }
-      const requestInit = await this.createRequest(requestData, context, method, options);
-      let response: AsyncGenerator<BebopRecord, void, undefined>;
-      // If the retry policy is set, execute the request with retries
-      if (options?.retryPolicy) {
-        response = await this.executeWithRetry(
-          async (retryAttempt: number) => {
-            if (retryAttempt > 0) {
-              requestInit.previousAttempts = retryAttempt;
-            }
-            // todo this.fetchStreams returns readablestream
-            return this.fetchServerStream(requestInit, context, method, options);
-          },
-          options.retryPolicy,
-          options.deadline,
-          options.controller,
-        );
-        // If the deadline is set, execute the request within the deadline
-      } else if (options?.deadline) {
-        response = await options.deadline.executeWithinDeadline(async () => {
-          return this.fetchServerStream(requestInit, context, method, options);
-        }, options.controller);
-      } else {
-        // Otherwise, just execute the request indefinitely
-        response = this.fetchServerStream(requestInit, context, method, options);
-      }
-      return response as AsyncGenerator<TResponse, void, undefined>;
-    } catch (e) {
-      if (this.hooks !== undefined && e instanceof Error) {
-        void this.hooks.executeErrorHooks(context, e);
-      }
-      if (e instanceof TempoError) {
-        throw e;
-      }
-      if (e instanceof Error) {
-        if (e.name === "AbortError") {
-          throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", e);
-        } else {
-          throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", e);
-        }
-      }
-      throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", { data: e });
-    }
-  }
-  /**
-   * {@inheritDoc BaseChannel.startDuplexStream}
-   */
-  public override async startDuplexStream<
-    TRequest extends BebopRecord,
-    TResponse extends BebopRecord,
-  >(
-    generator: () => AsyncGenerator<TRequest, void, undefined>,
-    context: ClientContext,
-    method: MethodInfo<TRequest, TResponse>,
-    options?: CallOptions,
-  ): Promise<AsyncGenerator<TResponse, void, undefined>> {
-    try {
-      await this.waitForOpen();
-      if (this.hooks !== undefined) {
-        await this.hooks.executeRequestHooks(context);
-      }
-      const requestInit = await this.createRequest(new Uint8Array(), context, method, options);
-      let response: AsyncGenerator<BebopRecord, void, undefined>;
-      if (options?.deadline) {
-        response = await options.deadline.executeWithinDeadline(async () => {
-          return this.fetchDuplexStream(requestInit, context, method, generator, options);
-        }, options.controller);
-      } else {
-        // Otherwise, just execute the request indefinitely
-        response = this.fetchDuplexStream(requestInit, context, method, generator, options);
-      }
-      // Validate response headers
-      return response as AsyncGenerator<TResponse, void, undefined>;
-    } catch (e) {
-      if (this.hooks !== undefined && e instanceof Error) {
-        await this.hooks.executeErrorHooks(context, e);
-      }
-      if (e instanceof TempoError) {
-        throw e;
-      }
-      if (e instanceof Error) {
-        if (e.name === "AbortError") {
-          throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", e);
-        } else {
-          throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", e);
-        }
-      }
-      throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", { data: e });
     }
   }
 }

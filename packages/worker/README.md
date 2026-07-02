@@ -81,22 +81,35 @@ Only `serviceRegistry` and `ecs` are required:
 | `lobbyBinding`        | This DO's own binding name, so shard providers can `onShardUpdate` back.   |
 | `onConnectionClose`   | Tear down per-connection interest observers on socket close/error.         |
 | `rehydrateConnection` | Rebuild a live socket's observer after a hibernation wake.                 |
-| `tickIntervalMs`      | Run a server-driven tick loop every N ms (omit for reactive-only worlds).  |
+| `tickIntervalMs`      | Request-scoped tick cadence in ms (omit/`0` for reactive-only worlds).     |
 | `broadcastTick`       | `(mutations) => void` — hook fired with each tick's coalesced mutations.   |
 | `compactEveryNTicks`  | Compact the persisted Yjs doc every N ticks.                               |
 | `maxFrameSize`        | Sync frame cap (vamp defaults to 8 MB; chunking removes the 1 MB ceiling). |
 
-### Tick controls
+### Ticking
+
+Ticking is **request-scoped, not alarm-driven**. When `tickIntervalMs` is set, the
+world catches up on each **inbound player message**: it advances
+`floor(elapsed / tickIntervalMs)` frames (capped at a small burst limit) to reach
+real time, then applies the player's action. There is **no alarm**, so an idle lobby
+still hibernates — no continuous duration charges, no per-tick `setAlarm` writes (see
+[`BILLING.md`](./BILLING.md)).
+
+> **Tradeoff:** a connected-but-idle lobby (no messages arriving) does not advance —
+> time-based systems run on activity, not wall-clock. Omit `tickIntervalMs` for a
+> purely reactive world; use it when the acting player is the one who needs the
+> simulation stepped. For continuous simulation regardless of input, drive `stepTick`
+> from your own external scheduler.
 
 `ECSDurableObject` bootstraps via the RPC-safe `setup(ns, seed)` (idempotent;
 resolves once the ECS is seeded + initialized) — `ready()` awaits that separately.
-For server-driven simulation, drive the tick loop at runtime:
+Adjust ticking at runtime (all persisted across hibernation, no alarm involved):
 
 ```ts
-await stub.setTickInterval(50); // 20 Hz fixed timestep
-await stub.pauseTick(); // freeze the simulation
+await stub.setTickInterval(50); // ~20 Hz catch-up cadence
+await stub.pauseTick(); // stop advancing on messages
 await stub.resumeTick();
-await stub.stepTick(); // advance exactly one frame (e.g. turn-based)
+await stub.stepTick(); // advance exactly one frame now (e.g. turn-based / external loop)
 ```
 
 `ECSStorage` backs persistence; call `compact()` (or configure `maxBytes` /
@@ -183,6 +196,15 @@ effective room capacity scales with the number of interest zones.
 ~5.7 KB/entity; chunked sync removed the 1 MB frame ceiling). Shard across DOs for a
 larger global store — a lobby's working set is the union of the shards it subscribes
 to.
+
+## Cost
+
+See [`BILLING.md`](./BILLING.md) for a code-grounded Cloudflare cost model — compute
+(requests + duration), SQLite storage (rows + bytes), and the front Worker — with
+per-operation cost tables, parameterized formulas, and worked scenarios. Headline:
+because ticking is request-scoped (no alarm), a lobby hibernates whenever idle — a
+small game runs on the free tier, and enabling a server tick adds only the cost of the
+extra flushes it produces while players are active (no continuous duration).
 
 ## Development
 

@@ -42,28 +42,12 @@ export function applyKeyChange(
 }
 
 /**
- * Doc-level Y.Map names for the shared, cross-namespace entity model.
- *
- * Entities are **global**: a given id maps to one nested `Y.Map` of components
- * that any namespace (lobby) may read and mutate, so changes propagate across
- * lobbies. Two side indexes track lobby membership for scoping and refcounted
- * garbage collection (a numeric counter can't be used — Y.Map values are
- * last-write-wins, so concurrent increments would be lost; membership is
- * therefore modeled as a set of referencing namespaces, whose size is the
- * refcount).
- *
- * All names are prefixed so they never collide with entity ids (used as keys
- * inside these maps) or the legacy per-namespace `Y.Array` (named by the bare
- * namespace), keeping migration free of same-name type conflicts.
+ * The doc-level Y.Map name for a shard's entity set: `id → Y.Map` of
+ * components. In the root-keyed sharding model this one map is both the
+ * entity data and the shard's membership — an entity exists in a shard iff
+ * its id is a key here. Prefixed so it never collides with entity ids.
  */
-/** Global store: `id → Y.Map` of components. Shared by every namespace. */
 export const GLOBAL_ENTITIES_KEY = "__vamp:entities";
-/** Refcount index: `id → Y.Map<namespace, true>` (size = number of referencing lobbies). */
-export const ENTITY_REFS_KEY = "__vamp:refs";
-/** Per-namespace membership set: `id → true` for entities this lobby tracks. */
-export function membershipKey(namespace: string): string {
-  return `__vamp:members:${namespace}`;
-}
 
 /**
  * The component keys (added/removed) that must be routed through
@@ -77,24 +61,6 @@ export function componentKeysToReconcile(keys: Iterable<string>): string[] {
     if (!RESERVED_RECONCILE_KEYS.has(key)) out.push(key);
   }
   return out;
-}
-
-/**
- * Next absolute alarm time for a tick loop. Returns `null` when ticking is
- * disabled (`intervalMs <= 0`).
- */
-export function nextAlarmTime(now: number, intervalMs: number): number | null {
-  if (!intervalMs || intervalMs <= 0) return null;
-  return now + intervalMs;
-}
-
-/**
- * Whether to set a new alarm given the currently-pending alarm time. A new alarm
- * is only scheduled when none is pending, so the tick loop never clobbers an
- * already-scheduled alarm (the single-alarm-per-DO constraint).
- */
-export function shouldScheduleAlarm(existing: number | null | undefined): boolean {
-  return existing == null;
 }
 
 /**

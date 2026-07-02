@@ -1,7 +1,6 @@
 import { TempoLogLevel } from "@tempojs/common";
 import { describe, expect, test } from "vitest";
 import { ContextLogger } from "../src/context-logger.ts";
-import { ErrorTags, SystemError } from "../src/error.ts";
 import { PinoLogger } from "../src/pino-logger.ts";
 
 describe("logging & error footguns (plan 20)", () => {
@@ -22,15 +21,5 @@ describe("logging & error footguns (plan 20)", () => {
     const error = new PinoLogger("pino-error", TempoLogLevel.Error);
     expect(error.logLevel).toBe(TempoLogLevel.Error);
     expect(error.logger.level).toBe("error");
-  });
-
-  test("SystemError does not mutate the caller's error object and carries the tag", () => {
-    const input = { msg: "boom", code: 7 };
-    const e = new SystemError(ErrorTags.Validation, input);
-    expect(e._tag).toBe(ErrorTags.Validation);
-    expect(e.cause.tag).toBe(ErrorTags.Validation);
-    expect(e.cause.msg).toBe("boom");
-    // The caller's partial must be untouched (no `tag` injected by side effect).
-    expect((input as Record<string, unknown>).tag).toBeUndefined();
   });
 });

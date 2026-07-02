@@ -3,7 +3,7 @@ import { ServiceRegistry } from "@tempojs/server";
 import { type BaseEntity, createEntitySystem, type ECSOptions } from "@vampgg/ecs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as Y from "yjs";
-import { entitiesMap, writeInsert } from "../src/entity-doc.ts";
+import { entitiesMap, writeEntityInsert } from "../src/entity-doc.ts";
 
 /**
  * Durable Object lifecycle tests, run in plain Node (see vite.config.ts, which
@@ -114,27 +114,14 @@ class TestRegistry extends ServiceRegistry {
 // ── Fakes for the Durable Object runtime ────────────────────────────────────
 function makeStorage(initial: Record<string, unknown> = {}) {
   const _map = new Map<string, unknown>(Object.entries(initial));
-  let _alarm: number | null = null;
   return {
     _map,
-    get _alarm() {
-      return _alarm;
-    },
     async get(key: string) {
       return _map.get(key);
     },
     async put(entries: Record<string, unknown> | string, value?: unknown) {
       if (typeof entries === "string") _map.set(entries, value);
       else for (const [k, v] of Object.entries(entries)) _map.set(k, v);
-    },
-    async getAlarm() {
-      return _alarm;
-    },
-    async setAlarm(t: number) {
-      _alarm = t;
-    },
-    async deleteAlarm() {
-      _alarm = null;
     },
   };
 }
@@ -219,7 +206,7 @@ function makeEnv(stub: any) {
 function seedDoc(namespace: string, entities: Array<Entity & { id: string }>): Uint8Array {
   const doc = new Y.Doc();
   doc.transact(() => {
-    for (const e of entities) writeInsert(doc, namespace, e.id, e as Record<string, unknown>);
+    for (const e of entities) writeEntityInsert(doc, e.id, e as Record<string, unknown>);
   });
   return Y.encodeStateAsUpdate(doc);
 }
@@ -395,111 +382,163 @@ describe("ECSDurableObject — connection teardown", () => {
   });
 });
 
-describe("ECSDurableObject — alarm tick loop", () => {
-  test("alarm() runs ecs.update through a scope and reschedules", async () => {
+describe("ECSDurableObject — request-scoped catch-up tick", () => {
+  test("_maybeTick advances catch-up frames while a player is connected", async () => {
     configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });
     const storage = makeStorage();
-    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    const instance = newDO(makeCtx(storage, [makeWs()]), makeEnv(makeStub()));
     await instance.setup("room1");
-
     await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
+
+    // First call anchors the clock (no back-fill of history), so no tick yet.
+    await instance._maybeTick();
     expect(instance.ecs.entity("ticker").n).toBe(0);
 
-    await instance.alarm();
+    // 220 ms elapsed at a 50 ms cadence → floor(220/50) = 4 catch-up frames.
+    instance._lastTickAt = Date.now() - 220;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(4);
+  });
 
-    // The tick system ran (n incremented) and the next alarm was scheduled.
-    expect(instance.ecs.entity("ticker").n).toBe(1);
-    expect(storage._alarm).not.toBeNull();
+  test("catch-up is capped at MAX_CATCHUP_TICKS after a long gap", async () => {
+    configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const instance = newDO(makeCtx(storage, [makeWs()]), makeEnv(makeStub()));
+    await instance.setup("room1");
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
+    await instance._maybeTick(); // anchor
+
+    // 5000 ms → 100 frames due, capped to the 8-frame burst limit.
+    instance._lastTickAt = Date.now() - 5000;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(8);
+  });
+
+  test("no tick when no player is connected", async () => {
+    configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const instance = newDO(makeCtx(storage, []), makeEnv(makeStub())); // no sockets
+    await instance.setup("room1");
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
+
+    instance._lastTickAt = Date.now() - 220;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(0);
+  });
+
+  test("no tick when ticking is disabled (interval 0) or paused", async () => {
+    configureRuntime({ registerSystems: registerNSystem }); // interval 0 (disabled)
+    const storage = makeStorage();
+    const instance = newDO(makeCtx(storage, [makeWs()]), makeEnv(makeStub()));
+    await instance.setup("room1");
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
+
+    instance._lastTickAt = Date.now() - 220;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(0); // disabled → no tick
+
+    await instance.setTickInterval(50);
+    await instance.pauseTick();
+    instance._lastTickAt = Date.now() - 220;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(0); // paused → no tick
+  });
+
+  test("webSocketMessage drives a catch-up tick before processing the message", async () => {
+    configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const ws = makeWs();
+    const instance = newDO(makeCtx(storage, [ws]), makeEnv(makeStub()));
+    await instance.setup("room1");
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
+
+    instance._lastTickAt = Date.now() - 120; // 2 frames due at 50 ms
+    // An undecodable frame is fine: the tick runs BEFORE router.process, and the
+    // decode error is caught + framed back to the client. We assert the tick ran.
+    await instance.webSocketMessage(ws, new Uint8Array([0, 0, 0]).buffer);
+    expect(instance.ecs.entity("ticker").n).toBe(2);
   });
 });
 
-describe("ECSDurableObject — runtime tick controls", () => {
-  test("setTickInterval enables + arms a loop booted with ticking disabled", async () => {
-    // No tickIntervalMs in the provider config: the loop starts disabled.
+describe("ECSDurableObject — runtime tick controls (no alarm)", () => {
+  test("setTickInterval enables ticking booted disabled; persists the override", async () => {
+    // No tickIntervalMs in the provider config: ticking starts disabled.
     configureRuntime({ registerSystems: registerNSystem });
     const storage = makeStorage();
-    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    const instance = newDO(makeCtx(storage, [makeWs()]), makeEnv(makeStub()));
     await instance.setup("room1");
-    expect(storage._alarm).toBeNull();
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
+
+    // Disabled: no catch-up even with elapsed time.
+    instance._lastTickAt = Date.now() - 120;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(0);
 
     await instance.setTickInterval(50);
-
-    // The alarm is armed at once and the override is persisted.
-    expect(storage._alarm).not.toBeNull();
+    // Persisted; no alarm involved (storage has no alarm API anymore).
     expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 50, paused: false });
 
-    // The tick hooks were captured even though the world booted disabled, so the
-    // loop runs when driven.
-    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
-    await instance.alarm();
-    expect(instance.ecs.entity("ticker").n).toBe(1);
+    // Now ticking is enabled and the captured hooks drive catch-up.
+    instance._lastTickAt = Date.now() - 120;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(2);
   });
 
-  test("setTickInterval(0) stops the loop and clears the alarm", async () => {
+  test("setTickInterval(0) disables ticking; persists the override", async () => {
     configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });
     const storage = makeStorage();
-    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    const instance = newDO(makeCtx(storage, [makeWs()]), makeEnv(makeStub()));
     await instance.setup("room1");
-
-    await instance.setTickInterval(100); // deterministically arm
-    expect(storage._alarm).not.toBeNull();
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
 
     await instance.setTickInterval(0);
-
-    expect(storage._alarm).toBeNull();
     expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 0, paused: false });
+
+    instance._lastTickAt = Date.now() - 220;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(0);
   });
 
-  test("pauseTick clears the alarm; resumeTick re-arms at the preserved interval", async () => {
+  test("pauseTick then resumeTick preserves the interval; persists paused flag", async () => {
     configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });
     const storage = makeStorage();
-    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    const instance = newDO(makeCtx(storage, [makeWs()]), makeEnv(makeStub()));
     await instance.setup("room1");
-    await instance.setTickInterval(50); // deterministically arm
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
 
     await instance.pauseTick();
-    expect(storage._alarm).toBeNull();
     expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 50, paused: true });
-
-    // A stale alarm firing while paused is a no-op: no tick, no reschedule.
-    await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
-    await instance.alarm();
-    expect(instance.ecs.entity("ticker").n).toBe(0);
-    expect(storage._alarm).toBeNull();
+    instance._lastTickAt = Date.now() - 220;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(0); // paused → no tick
 
     await instance.resumeTick();
-    // Re-armed at the preserved interval (never re-passed to resumeTick).
-    expect(storage._alarm).not.toBeNull();
+    // Resumed at the preserved interval (never re-passed to resumeTick).
     expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 50, paused: false });
-
-    await instance.alarm();
-    expect(instance.ecs.entity("ticker").n).toBe(1);
+    instance._lastTickAt = Date.now() - 220;
+    await instance._maybeTick();
+    expect(instance.ecs.entity("ticker").n).toBe(4);
   });
 
-  test("stepTick advances one tick regardless of the loop, without scheduling", async () => {
-    // Loop disabled: stepTick still drives the world by hand.
+  test("stepTick advances exactly one tick, independent of interval/socket", async () => {
+    // Ticking disabled AND no socket: stepTick still drives the world by hand.
     configureRuntime({ registerSystems: registerNSystem });
     const storage = makeStorage();
-    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    const instance = newDO(makeCtx(storage, []), makeEnv(makeStub()));
     await instance.setup("room1");
-
     await instance.ecs.withScope(() => instance.ecs.insert({ id: "ticker", n: 0 }));
-    expect(storage._alarm).toBeNull();
 
     await instance.stepTick();
     expect(instance.ecs.entity("ticker").n).toBe(1);
-    // The alarm schedule is untouched by a manual step.
-    expect(storage._alarm).toBeNull();
-
     await instance.stepTick();
     expect(instance.ecs.entity("ticker").n).toBe(2);
   });
 
   test("a runtime tick override survives hibernation wake", async () => {
-    // Provider config leaves the loop disabled; the runtime override enables it.
+    // Provider config leaves ticking disabled; the runtime override enables it.
     configureRuntime({ registerSystems: registerNSystem });
     const storage = makeStorage();
-    const instance1 = newDO(makeCtx(storage), makeEnv(makeStub()));
+    const instance1 = newDO(makeCtx(storage, [makeWs()]), makeEnv(makeStub()));
     await instance1.setup("room1");
     await instance1.setTickInterval(50);
     expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 50, paused: false });
@@ -514,11 +553,11 @@ describe("ECSDurableObject — runtime tick controls", () => {
     expect(instance2.initialized()).toBe(true);
 
     // The restored world adopted the runtime interval (50), NOT the provider's
-    // disabled default: alarm() runs the tick and reschedules. Had the override
-    // been lost, the interval-0 guard would bail and leave `n` at 0.
+    // disabled default: catch-up ticks run. Had the override been lost, the
+    // interval-0 guard would bail and leave `n` at 0.
     await instance2.ecs.withScope(() => instance2.ecs.insert({ id: "ticker", n: 0 }));
-    await instance2.alarm();
-    expect(instance2.ecs.entity("ticker").n).toBe(1);
-    expect(storage._alarm).not.toBeNull();
+    instance2._lastTickAt = Date.now() - 120;
+    await instance2._maybeTick();
+    expect(instance2.ecs.entity("ticker").n).toBe(2);
   });
 });

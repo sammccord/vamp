@@ -552,6 +552,12 @@ export class ECS<
    * Return the ids of every entity matching the query — either a {@link Query} or
    * a builder callback, e.g. `query((q) => q.every(A, B).someTag(T))`. The result
    * is a fresh array owned by the caller (never a recycled/pooled buffer).
+   *
+   * Cost note: every call re-walks the full archetype graph and allocates the
+   * result array. For a query evaluated every frame, register a system
+   * ({@link registerSystem}) or a membership tracker
+   * ({@link createQueryMembershipTracker}) instead — both maintain their match
+   * set incrementally as archetypes appear.
    */
   public query(_query: Query | ((builder: QueryBuilder) => QueryBuilder)): string[] {
     const q = typeof _query === "function" ? query(_query) : _query;

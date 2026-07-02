@@ -19,28 +19,25 @@ export default class DiscreteShadowcasting extends FOV {
     /* start and end angles */
     const DATA: number[] = [];
 
-    let A, B, cx, cy, blocks;
-
     /* analyze surrounding cells in concentric rings, starting from the center */
     for (let r = 1; r <= R; r++) {
-      const neighbors = this._getCircle(x, y, r);
-      const angle = 360 / neighbors.length;
+      const angle = 360 / this._circleSize(r);
 
-      for (let i = 0; i < neighbors.length; i++) {
-        cx = neighbors[i][0];
-        cy = neighbors[i][1];
-        A = angle * (i - 0.5);
-        B = A + angle;
+      /* walk the ring without materializing it (no per-ring array) */
+      const completed = this._walkCircle(x, y, r, (cx, cy, i) => {
+        const A = angle * (i - 0.5);
+        const B = A + angle;
 
-        blocks = !this._lightPasses(cx, cy);
+        const blocks = !this._lightPasses(cx, cy);
         if (this._visibleCoords(Math.floor(A), Math.ceil(B), blocks, DATA)) {
           callback(cx, cy, r, 1);
         }
 
         if (DATA.length == 2 && DATA[0] == 0 && DATA[1] == 360) {
-          return;
+          return false;
         } /* cutoff? */
-      } /* for all cells in this ring */
+      });
+      if (!completed) return;
     } /* for all rings */
   }
 

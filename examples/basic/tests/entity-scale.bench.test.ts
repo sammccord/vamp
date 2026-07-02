@@ -3,13 +3,7 @@ import { nanoid } from "nanoid";
 import { describe, expect, it } from "vitest";
 import { applyUpdate, Doc, encodeStateAsUpdate, Map as YMap } from "yjs";
 
-import {
-  addRef,
-  entitiesMap,
-  membersMap,
-  writeEntityInsert,
-  writeInsert,
-} from "../../../packages/worker/src/entity-doc";
+import { entitiesMap, writeEntityInsert } from "../../../packages/worker/src/entity-doc";
 import { type Entity, type EntityDelta, Tags } from "../src/bebop";
 
 /**
@@ -184,17 +178,36 @@ function buildDoc(n: number, make: (i: number) => Entity): Doc {
   return doc;
 }
 
+// The pre-D1b refcount/membership layout was removed from entity-doc.ts with
+// the sharded model; these local replicas keep the apples-to-apples comparison
+// (what the entity-data-only model SAVES) benchmarkable against real Y.Docs.
+function legacyAddRef(doc: Doc, namespace: string, id: string): void {
+  const refs = doc.getMap<YMap<boolean>>("__vamp:refs");
+  let set = refs.get(id);
+  if (!set) {
+    set = new YMap<boolean>();
+    refs.set(id, set);
+  }
+  set.set(namespace, true);
+}
+
+function legacyMembers(doc: Doc, namespace: string): YMap<boolean> {
+  return doc.getMap<boolean>(`__vamp:members:${namespace}`);
+}
+
 /**
  * Pre-D1b layout for an apples-to-apples delta: the flat shared doc with the
- * cross-namespace refcount + membership index (`writeInsert`). Used to quantify
- * the per-entity bytes the sharded entity-data-only model SAVES by dropping it.
+ * cross-namespace refcount + membership index. Used to quantify the per-entity
+ * bytes the sharded entity-data-only model SAVES by dropping it.
  */
 function buildWithIndex(n: number, make: (i: number) => Entity): Doc {
   const doc = new Doc();
   doc.transact(() => {
     for (let i = 0; i < n; i++) {
       const e = make(i);
-      writeInsert(doc, A, e.id as string, e as Record<string, unknown>);
+      writeEntityInsert(doc, e.id as string, e as Record<string, unknown>);
+      legacyAddRef(doc, A, e.id as string);
+      legacyMembers(doc, A).set(e.id as string, true);
     }
   });
   return doc;
@@ -220,8 +233,8 @@ function buildOldScheme(n: number, make: (i: number) => Entity): Doc {
       const map = new YMap<unknown>();
       entities.set(e.id as string, map);
       for (const k in e) if (e[k] !== undefined) map.set(k, e[k]); // INCLUDING id
-      addRef(doc, A, e.id as string);
-      membersMap(doc, A).set(e.id as string, true);
+      legacyAddRef(doc, A, e.id as string);
+      legacyMembers(doc, A).set(e.id as string, true);
     }
   });
   return doc;

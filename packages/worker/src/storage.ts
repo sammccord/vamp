@@ -34,8 +34,8 @@ interface LobbyNamespace {
  *
  * The threshold crossings only compact incrementally; a single large flush can
  * land as one uncompacted row and a quiet-but-large world is never folded down.
- * The DO's `alarm()` tick loop drives {@link compact} on a slower cadence
- * (`compactEveryNTicks`) as the time-based backstop for both cases.
+ * The ECS DO's request-scoped tick drives {@link compact} on a slower cadence
+ * (`compactEveryNTicks`) as the backstop for both cases.
  */
 export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvider<Env> {
   private static log = new PinoLogger("ecs-storage", TempoLogLevel.Info);
@@ -100,8 +100,8 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
   /**
    * Force the world document to compact into a snapshot, regardless of whether
    * the byte/update thresholds have been crossed. Exposed on the provider's RPC
-   * surface so the ECS DO's `alarm()` tick loop can drive periodic compaction
-   * (the time-based backstop the incremental thresholds cannot provide). Safe to
+   * surface so the ECS DO's request-scoped tick can drive periodic compaction
+   * (the backstop the incremental thresholds cannot provide). Safe to
    * run concurrently with reads — it snapshots the current state.
    */
   async compact(): Promise<void> {

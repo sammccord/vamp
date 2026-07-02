@@ -101,6 +101,25 @@ describe("ShardManager: teardown + hysteresis", () => {
     m.reap(0);
     expect(f.disconnected).toEqual(["r"]);
   });
+
+  it("pinned() distinguishes a pinned shard from one coasting through grace", () => {
+    const f = mockFactory();
+    const m = new ShardManager({ ...f, gracePeriodMs: 1000 });
+    m.acquire("r");
+    expect(m.pinned("r")).toBe(true);
+
+    m.release("r", 0);
+    // Open (grace period) but no longer pinned — the entity-emptiness release
+    // driver uses exactly this state to decide whether a re-appearing entity
+    // must re-pin.
+    expect(m.has("r")).toBe(true);
+    expect(m.pinned("r")).toBe(false);
+
+    m.acquire("r"); // re-pin cancels the pending teardown
+    expect(m.pinned("r")).toBe(true);
+    m.reap(2000);
+    expect(m.has("r")).toBe(true);
+  });
 });
 
 describe("ShardManager: persistence / restore", () => {

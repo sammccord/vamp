@@ -3,6 +3,7 @@
 import {
   applyMutation,
   type BaseEntity,
+  clonePlainValue,
   createBaseMutator,
   ECS,
   type ECSOptions,
@@ -25,10 +26,8 @@ import { ShardManager } from "./shard-manager";
 import {
   applyKeyChange,
   componentKeysToReconcile,
-  nextAlarmTime,
   raceWithBoundedTimer,
   shouldCompactThisTick,
-  shouldScheduleAlarm,
 } from "./reconcile-helpers";
 
 export type RuntimeContext<UserSession extends {}, Context extends {}> = Context & {
@@ -118,9 +117,10 @@ export interface ECSRuntimeConfiguration<
   // safe because the provider↔subscriber stream is trusted DO-to-DO. Raise
   // further if entities are small / worlds are huge (bounded by DO memory).
   maxFrameSize?: number;
-  // Opt-in server-authoritative tick loop. When set (> 0), an `alarm()` runs
-  // `ecs.update(...)` inside a scope on this cadence and reschedules itself.
-  // Unset/zero keeps the DO purely reactive (and fully hibernatable).
+  // Opt-in server-authoritative ticking. When set (> 0), the world catches up by
+  // `floor(elapsed / tickIntervalMs)` frames (capped) on each inbound player
+  // message while a socket is connected — request-scoped, no alarm, so the DO
+  // still hibernates when idle. Unset/zero keeps the world purely reactive.
   tickIntervalMs?: number;
   // Provider of the `update(...)` arguments for each tick (e.g. `[dt]`).
   tickArgs?: () => UpdateArguments;
@@ -279,6 +279,15 @@ export class ECSDurableObject<
   // we remember where each entity was inserted to route later writes and to drop
   // a shard's entities on teardown.
   private _entityRoot = new Map<string, string>();
+
+  /**
+   * root → number of local entities living in that shard. Maintained by
+   * {@link _trackEntityRoot}/{@link _untrackEntityRoot} so the release driver
+   * (shard becomes entity-empty) is O(1) per entity change instead of an
+   * O(entities) scan. The default root is pinned for the lobby's lifetime and
+   * is never released regardless of this count.
+   */
+  private _rootEntityCount = new Map<string, number>();
   // The lobby's own shard (`game/${ns}`); locally-spawned entities default here.
   private _defaultRoot = "";
   // Hysteresis (ms) before an unpinned shard is torn down; the alarm reaps.
@@ -310,7 +319,8 @@ export class ECSDurableObject<
   // Defaults to 8 MB; the whole global doc syncs as one frame, so this caps the
   // syncable world size (≈ maxFrameSize / per-entity-bytes).
   private _maxFrameSize = 8 * 1024 * 1024;
-  // Tick loop (alarm) configuration, populated from the runtime configuration.
+  // Request-scoped tick configuration, populated from the runtime configuration.
+  // `tickIntervalMs` is the catch-up cadence (see `_maybeTick`); there is no alarm.
   private _tickIntervalMs = 0;
   private _tickArgsProvider: (() => UpdateArguments) | undefined;
   private _broadcastTick:
@@ -318,10 +328,18 @@ export class ECSDurableObject<
     | undefined;
   private _compactEveryNTicks = 0;
   private _tickCount = 0;
-  // Whether the tick loop is paused at runtime (pauseTick). Distinct from a zero
+  // Whether ticking is paused at runtime (pauseTick). Distinct from a zero
   // interval: pause preserves the configured cadence so resumeTick can restart it
   // without the caller remembering it. Persisted with the interval (see setup).
   private _tickPaused = false;
+  // Wall-clock (ms) of the last catch-up tick. Not persisted: a hibernation wake
+  // resets it to 0, so `_maybeTick` re-anchors on the first message (no backlog
+  // burst). Advanced in `_maybeTick` only.
+  private _lastTickAt = 0;
+  // Max frames a single `_maybeTick` may advance, bounding the burst after a long
+  // idle gap or a wake (the world catches up to at most this many frames, then
+  // snaps its clock to now).
+  private static readonly MAX_CATCHUP_TICKS = 8;
   // App-level per-connection close hook (e.g. to unsubscribe observer sinks).
   private _onConnectionClose: ((ws: WebSocket) => void) | undefined;
   // App-level per-connection rehydrate hook, invoked on hibernation wake for each
@@ -398,9 +416,9 @@ export class ECSDurableObject<
           // Re-subscribe the persisted shard set so a hibernation-recreated DO
           // re-aggregates the same multi-provider world. setup()/initialize()
           // already re-opened the lobby's own default shard; restore re-opens the
-          // additional players' shards (character/* etc.). Live players re-pin on
-          // reconnect; provisional pins that no player re-confirms fall back out
-          // via the alarm reap once released (D2/D3 refines the release drivers).
+          // additional players' shards (character/* etc.). A restored shard's pin
+          // is released once it proves entity-empty (_untrackEntityRoot →
+          // _maybeReleaseShard), after which the reap cycle tears it down.
           const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
           if (persistedShards && this.shards) this.shards.restore(persistedShards);
           // Re-register restored shards for notify-push (the wake was triggered by
@@ -630,7 +648,7 @@ export class ECSDurableObject<
               // and the shadow (the flush handler copies the shadow into the
               // store, so a shared reference stays consistent and we avoid the
               // previous double clone).
-              const cloned = structuredClone(entity);
+              const cloned = clonePlainValue(entity);
               scope.mutations.set(
                 id,
                 MutationRecord.fromInsert<Entity, EntityDelta>({ entity: cloned }),
@@ -646,7 +664,7 @@ export class ECSDurableObject<
               // by the flush handler). Using the live `entity` reference here
               // would let a later remote observer event mutate the value that a
               // pending broadcast still holds.
-              const cloned = structuredClone(entity);
+              const cloned = clonePlainValue(entity);
               scope.mutations.set(
                 id,
                 MutationRecord.fromUpdate<Entity, EntityDelta>({
@@ -709,21 +727,18 @@ export class ECSDurableObject<
     this._acquireShard(this._defaultRoot);
     this._persistActiveShards();
 
-    // Capture the tick-loop hooks UNCONDITIONALLY (even when the loop starts
-    // disabled) so a world booted with `tickIntervalMs: 0` can still be enabled at
-    // runtime via `setTickInterval` — the arg/broadcast hooks must already be
-    // present when the loop later starts. Only the first-alarm scheduling is gated
-    // on a configured interval. A persisted runtime override (see `setup`) is
-    // applied after bootstrap and wins over this setup-time interval.
+    // Capture the tick hooks UNCONDITIONALLY (even when ticking starts disabled)
+    // so a world booted with `tickIntervalMs: 0` can still be enabled at runtime
+    // via `setTickInterval` — the arg/broadcast hooks must already be present. A
+    // persisted runtime override (see `setup`) is applied after bootstrap and wins
+    // over this setup-time interval. There is no alarm to arm: ticks are driven
+    // from request scope by `_maybeTick` (called from `webSocketMessage`).
     this._tickIntervalMs = configuration.tickIntervalMs ?? 0;
     this._tickArgsProvider = configuration.tickArgs as (() => UpdateArguments) | undefined;
     this._broadcastTick = configuration.broadcastTick as
       | ((mutations: Map<string, MutationRecord<Entity, EntityDelta>>) => void)
       | undefined;
     this._compactEveryNTicks = configuration.compactEveryNTicks ?? 0;
-    if (this._tickIntervalMs > 0) {
-      this.ctx.waitUntil(this._scheduleNextTick());
-    }
   }
 
   /**
@@ -819,10 +834,9 @@ export class ECSDurableObject<
       if (tickOverride) {
         this._tickIntervalMs = tickOverride.intervalMs;
         this._tickPaused = tickOverride.paused;
-        // Force the alarm to match the override, overwriting whatever initialize()
-        // armed from the setup-time interval; also re-sync notify-push gating.
+        // Re-sync notify-push gating for the overridden cadence. No alarm to arm:
+        // the next player message drives ticking via `_maybeTick`.
         this._syncRegistrations();
-        await this._armTick();
       }
     }
     await this.ready();
@@ -869,64 +883,61 @@ export class ECSDurableObject<
   }
 
   // ── Runtime tick controls (public DO-stub RPC) ───────────────
-  // Override the setup-time tick configuration at runtime for advanced developers
-  // driving the server-authoritative loop by hand. All arguments are
+  // Override the setup-time tick configuration at runtime. All arguments are
   // structured-clone serializable, so these are safe to call across the DO stub
   // boundary (e.g. `stub.setTickInterval(50)`, mirroring `setup`/`onShardUpdate`).
   // The function-valued setup-time hooks (`tickArgs`/`broadcastTick`) are NOT
   // settable here — they cannot cross the RPC boundary — but `stepTick` accepts a
   // serializable args override. Overrides are persisted (`__vamp:tick`) and
   // re-applied on bootstrap (see `setup`), so a runtime change survives hibernation.
+  // These change the catch-up cadence used by `_maybeTick`; there is no alarm.
 
   /**
-   * Set (or change) the server tick cadence at runtime. `0` stops the loop and
-   * clears any pending alarm; a positive value (re)arms the loop at that cadence,
-   * overwriting a pending alarm so the new interval takes effect immediately, and
-   * clears a prior pause. Works on a world booted with the loop disabled.
+   * Set (or change) the request-scoped catch-up cadence at runtime. `0` disables
+   * ticking; a positive value enables it at that cadence (and clears a prior
+   * pause) — taking effect on the next player message. Works on a world booted
+   * with ticking disabled.
    */
   async setTickInterval(intervalMs: number): Promise<void> {
     this._tickIntervalMs = Math.max(0, Math.floor(intervalMs) || 0);
     if (this._tickIntervalMs > 0) this._tickPaused = false;
     this._persistTickConfig();
-    // Enabling/disabling the loop flips the notify-push gate (an idle-but-ticking
-    // lobby must still receive live shard updates); reconcile registrations.
+    // Enabling/disabling ticking does not change the notify-push gate anymore
+    // (that is now purely player-driven), but registrations may still need a
+    // reconcile if this is the first configuration; cheap + idempotent.
     this._syncRegistrations();
-    await this._armTick();
   }
 
   /**
-   * Pause the tick loop, preserving the configured interval so {@link resumeTick}
-   * can restart it without the caller remembering the cadence. Clears the pending
-   * alarm. No-op if already paused or the loop is not running.
+   * Pause request-scoped ticking, preserving the configured interval so
+   * {@link resumeTick} can restart it without the caller remembering the cadence.
+   * No-op if already paused or ticking is not configured.
    */
   async pauseTick(): Promise<void> {
     if (this._tickPaused || this._tickIntervalMs <= 0) return;
     this._tickPaused = true;
     this._persistTickConfig();
     this._syncRegistrations();
-    await this._armTick();
   }
 
   /**
-   * Resume a paused tick loop at its preserved interval, re-arming the alarm.
-   * No-op if the loop is not paused.
+   * Resume paused ticking at its preserved interval. No-op if not paused.
    */
   async resumeTick(): Promise<void> {
     if (!this._tickPaused) return;
     this._tickPaused = false;
     this._persistTickConfig();
     this._syncRegistrations();
-    await this._armTick();
   }
 
   /**
-   * Manually advance the world by one tick right now, independent of the loop:
-   * runs `ecs.update(...)` through a scope and broadcasts exactly like the alarm
-   * tick, but does NOT touch the alarm schedule. Works whether the loop is
-   * running, stopped (interval 0), or paused — the low-level driver for advanced
-   * developers stepping the simulation by hand. `args` overrides the setup-time
-   * `tickArgs` provider for this call (must be serializable to cross the RPC
-   * boundary); when omitted, the setup-time provider is used.
+   * Manually advance the world by exactly one tick right now, independent of the
+   * request-scoped catch-up: runs `ecs.update(...)` through a scope and broadcasts.
+   * Works whether ticking is enabled, disabled (interval 0), or paused — the
+   * low-level driver for advanced developers stepping the simulation by hand (or
+   * from an external scheduler). `args` overrides the setup-time `tickArgs`
+   * provider for this call (must be serializable to cross the RPC boundary); when
+   * omitted, the setup-time provider is used.
    */
   async stepTick(args?: UpdateArguments): Promise<void> {
     await this.ready();
@@ -1012,6 +1023,54 @@ export class ECSDurableObject<
   }
 
   /**
+   * Record `id` as living in `root` and keep the per-root entity count + the
+   * shard pin consistent. An entity landing in a shard that is coasting through
+   * its teardown grace period (open but unpinned) re-pins it, cancelling the
+   * pending teardown. Handles an entity moving between roots.
+   */
+  private _trackEntityRoot(id: string, root: string): void {
+    const prev = this._entityRoot.get(id);
+    if (prev === root) return;
+    if (prev !== undefined) this._decrementRootCount(prev);
+    this._entityRoot.set(id, root);
+    this._rootEntityCount.set(root, (this._rootEntityCount.get(root) ?? 0) + 1);
+    if (this.shards && !this.shards.pinned(root)) this._acquireShard(root);
+  }
+
+  /** Forget `id`'s home shard, releasing the shard's pin if it became entity-empty. */
+  private _untrackEntityRoot(id: string): void {
+    const root = this._entityRoot.get(id);
+    if (root === undefined) return;
+    this._entityRoot.delete(id);
+    this._decrementRootCount(root);
+  }
+
+  private _decrementRootCount(root: string): void {
+    const next = (this._rootEntityCount.get(root) ?? 1) - 1;
+    if (next > 0) {
+      this._rootEntityCount.set(root, next);
+      return;
+    }
+    this._rootEntityCount.delete(root);
+    this._maybeReleaseShard(root);
+  }
+
+  /**
+   * Release the pin on an entity-empty `root` so the reap cycle can tear the
+   * shard down after its grace period. The lobby's own (default) root is
+   * exempt — it stays pinned for the lobby's lifetime. Deregisters notify-push
+   * immediately (the released root leaves the active set); a re-acquire during
+   * the grace period re-registers.
+   */
+  private _maybeReleaseShard(root: string): void {
+    if (!this.shards || root === this._defaultRoot) return;
+    if (!this.shards.pinned(root)) return;
+    this.shards.release(root, Date.now());
+    this._persistActiveShards();
+    this._syncRegistrations();
+  }
+
+  /**
    * Persist the currently-subscribed root set so a hibernation-recreated
    * constructor can re-subscribe (see the constructor's wake path). Fire-and-
    * forget; cheap + idempotent.
@@ -1028,9 +1087,9 @@ export class ECSDurableObject<
    * receive iff a player is connected OR a server tick is configured.
    */
   private _shouldReceive(excludeWs?: WebSocket): boolean {
-    // A running (non-paused) tick loop must receive live shard updates even with
-    // no players; a stopped or paused loop with no players may hibernate.
-    if (this._tickIntervalMs > 0 && !this._tickPaused) return true;
+    // Receive live shard updates iff a player is connected. Ticking is now purely
+    // request-scoped (driven by player messages), so there is no ticking-but-empty
+    // lobby to keep registered — a player-less lobby deregisters and hibernates.
     const sockets = this.ctx.getWebSockets();
     // On the close path the closing socket may still be listed; exclude it so the
     // last player leaving correctly gates the lobby off.
@@ -1188,9 +1247,12 @@ export class ECSDurableObject<
           this.ecs.delete(entity);
           this._pendingReconcile.set(id, { type: "delete", entity });
         }
+        // Plain delete (not _untrackEntityRoot): the shard is already tearing
+        // down, so there is no pin left to release for it.
         this._entityRoot.delete(id);
       }
     }
+    this._rootEntityCount.delete(root);
     this._persistActiveShards();
   }
 
@@ -1198,7 +1260,7 @@ export class ECSDurableObject<
     if (!this.ecs) return;
     const map = entitiesMap(doc).get(id);
     if (!map) return;
-    this._entityRoot.set(id, root);
+    this._trackEntityRoot(id, root);
     const raw = map.toJSON() as Entity;
     // ensure id is set (it is the map key, dropped from the component data)
     if (!raw.id) (raw as Record<string, unknown>).id = id;
@@ -1226,7 +1288,7 @@ export class ECSDurableObject<
       this._pendingReconcile.set(id, { type: "delete", entity });
     }
     this._unobserveEntity(id);
-    this._entityRoot.delete(id);
+    this._untrackEntityRoot(id);
   }
 
   /// ── Per-entity Y.Map observers ───────────────────────────────
@@ -1351,7 +1413,7 @@ export class ECSDurableObject<
         // later read) see where it lives; defaults the lobby's own shard.
         if (entity.sk === undefined) entity.sk = root;
         writeEntityInsert(doc, id, entity);
-        this._entityRoot.set(id, root);
+        this._trackEntityRoot(id, root);
         // Observe so a co-subscriber's mutation to this entity reconciles here,
         // even though this insert originated locally.
         this._observeEntity(id, doc);
@@ -1366,7 +1428,7 @@ export class ECSDurableObject<
         // delete is an app-level policy; cross-shard ops are eventually consistent.
         removeEntity(doc, id);
         this._unobserveEntity(id);
-        this._entityRoot.delete(id);
+        this._untrackEntityRoot(id);
         break;
       }
     }
@@ -1412,6 +1474,10 @@ export class ECSDurableObject<
         this._sendFramedError(ws, "uninitialized");
         return;
       }
+      // Request-scoped tick: advance the world to ~now (catch-up, capped) before
+      // applying this player's action. No-op unless `tickIntervalMs` is configured
+      // and a socket is connected. This is what replaces the alarm loop.
+      await this._maybeTick();
       // Provide the ecs instance and underlying websocket as context to the service.
       await this.router.process(message as ArrayBuffer, Message({}), [this.ecs, ws]);
     } catch (err) {
@@ -1484,28 +1550,43 @@ export class ECSDurableObject<
   }
 
   /**
-   * The `alarm()` tick loop. Runs `ecs.update(...)` inside a scope (so tick
-   * mutations flow through the same flush/broadcast pipeline as RPC mutations),
-   * optionally forces a periodic `commit`/compaction, and reschedules itself.
-   * Opt-in: only fires when `tickIntervalMs` is configured.
+   * Request-scoped catch-up tick. Called at the top of {@link webSocketMessage},
+   * so the simulation advances only while the lobby is awake handling a player
+   * message AND has a connected socket — no alarm, so an idle lobby hibernates
+   * (no continuous duration, no per-tick `setAlarm` row-write).
+   *
+   * `tickIntervalMs` governs the CADENCE: each call advances
+   * `floor((now - lastTick) / tickIntervalMs)` frames to catch the world up to
+   * real time, capped at {@link MAX_CATCHUP_TICKS} so a long idle gap (or a
+   * hibernation wake, where `_lastTickAt` resets to 0) can never trigger a huge
+   * burst. `_lastTickAt` is advanced BEFORE awaiting, so a concurrently-delivered
+   * message sees `due === 0` and does not double-tick.
+   *
+   * Tradeoff (by design): a connected-but-idle lobby does not advance — time-based
+   * systems run on activity, not wall-clock. A world booted with `tickIntervalMs: 0`
+   * never ticks here.
    */
-  async alarm(): Promise<void> {
-    // With hibernation re-bootstrap, a recreated DO re-initializes in the
-    // constructor before alarm() runs. Still guard: if not initialized, do not
-    // throw — reschedule and bail (liveness, not crash).
-    if (!this.ecs?.initialized) {
-      await this._scheduleNextTick();
+  private async _maybeTick(): Promise<void> {
+    if (this._tickIntervalMs <= 0 || this._tickPaused) return;
+    if (!this.ecs?.initialized) return;
+    if (this.ctx.getWebSockets().length === 0) return;
+
+    const now = Date.now();
+    // First activity after boot/wake: anchor the clock, do not back-fill history.
+    if (this._lastTickAt === 0) {
+      this._lastTickAt = now;
       return;
     }
+    const due = Math.floor((now - this._lastTickAt) / this._tickIntervalMs);
+    if (due <= 0) return;
 
-    // The loop may have been stopped (setTickInterval(0)) or paused (pauseTick)
-    // at runtime after this alarm was armed. Bail WITHOUT rescheduling so a stale
-    // alarm cannot resurrect a disabled loop.
-    if (this._tickIntervalMs <= 0 || this._tickPaused) return;
+    const count = Math.min(due, ECSDurableObject.MAX_CATCHUP_TICKS);
+    // Advance the clock first (reentrancy guard). If we capped a long gap, snap to
+    // `now` so we don't keep trying to catch up an unbounded backlog (spiral).
+    this._lastTickAt = count < due ? now : this._lastTickAt + count * this._tickIntervalMs;
 
-    await this._runTick((this._tickArgsProvider?.() ?? []) as UpdateArguments);
-
-    await this._scheduleNextTick();
+    const args = (this._tickArgsProvider?.() ?? []) as UpdateArguments;
+    for (let i = 0; i < count; i++) await this._runTick(args);
   }
 
   /**
@@ -1546,17 +1627,6 @@ export class ECSDurableObject<
     }
   }
 
-  /** Schedule the next tick alarm, without clobbering an already-pending alarm. */
-  private async _scheduleNextTick(): Promise<void> {
-    if (this._tickPaused) return; // paused at runtime; do not self-reschedule
-    const next = nextAlarmTime(Date.now(), this._tickIntervalMs);
-    if (next === null) return; // tick disabled (purely-reactive app)
-    const existing = await this.ctx.storage.getAlarm();
-    if (shouldScheduleAlarm(existing)) {
-      await this.ctx.storage.setAlarm(next);
-    }
-  }
-
   /** Persist the runtime tick override so it survives hibernation (see `setup`). */
   private _persistTickConfig(): void {
     this.ctx.waitUntil(
@@ -1565,20 +1635,6 @@ export class ECSDurableObject<
         paused: this._tickPaused,
       }),
     );
-  }
-
-  /**
-   * Force the alarm to match the current tick state, OVERWRITING any pending
-   * alarm — unlike {@link _scheduleNextTick}, which never clobbers. Arms at the
-   * configured interval when running; deletes the alarm when stopped or paused.
-   * Used by the runtime tick setters, where the change must take effect at once.
-   */
-  private async _armTick(): Promise<void> {
-    if (this._tickIntervalMs > 0 && !this._tickPaused) {
-      await this.ctx.storage.setAlarm(nextAlarmTime(Date.now(), this._tickIntervalMs)!);
-    } else {
-      await this.ctx.storage.deleteAlarm();
-    }
   }
 
   /**

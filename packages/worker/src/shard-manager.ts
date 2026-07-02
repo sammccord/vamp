@@ -90,6 +90,16 @@ export class ShardManager {
     return this.shards.has(root);
   }
 
+  /**
+   * Whether `root` currently holds ≥1 pin. A shard can be open but unpinned
+   * while it coasts through its teardown grace period — callers that create a
+   * new reason to keep the shard (e.g. an entity appearing in it) should
+   * re-{@link acquire} when this is `false`.
+   */
+  pinned(root: string): boolean {
+    return this.subs.has(root);
+  }
+
   /** Currently-pinned roots — the set to persist for hibernation re-subscribe. */
   activeRoots(): string[] {
     return this.subs.active();

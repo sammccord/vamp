@@ -7,7 +7,14 @@
 
 const FRAC = 2.3283064365386963e-10; /* 2^-32 */
 
-class RNG {
+/**
+ * Alea PRNG. The default export is a shared singleton (seeded from the clock)
+ * used by the map generators, color randomization, simplex noise, and the
+ * string generator — `setSeed` it for reproducible output. Construct your own
+ * `new RNG().setSeed(seed)` for an isolated, per-world stream that the shared
+ * consumers can't perturb.
+ */
+export class RNG {
   _seed = 0;
   _s0 = 0;
   _s1 = 0;

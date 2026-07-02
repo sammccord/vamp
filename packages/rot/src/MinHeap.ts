@@ -16,13 +16,6 @@ export class MinHeap<T> {
   lessThan(a: HeapWrapper<T>, b: HeapWrapper<T>) {
     return a.key == b.key ? a.timestamp < b.timestamp : a.key < b.key;
   }
-  shift(v: number) {
-    // Mutate keys in place: relative-key semantics preserved (EventQueue.get
-    // relies on shift(-time) after advancing), but no array/wrapper allocation.
-    for (let i = 0; i < this.heap.length; i++) {
-      this.heap[i].key += v;
-    }
-  }
   len() {
     return this.heap.length;
   }

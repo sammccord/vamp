@@ -15,12 +15,10 @@ interface LightingCallback {
   (x: number, y: number, color: LightColor): void;
 }
 
-interface LightingMap {
-  [key: string]: LightColor;
-}
-interface NumberMap {
-  [key: string]: number;
-}
+const STRIDE = 1 << 16;
+
+type LightingMap = Map<number, LightColor>;
+type NumberMap = Map<number, number>;
 
 interface Options {
   /** Number of passes. 1 equals to simple FOV of all light sources, >1 means a *highly simplified* radiosity-like algorithm. Default = 1 */
@@ -40,7 +38,7 @@ export default class Lighting {
   private _fov!: FOV;
   private _lights: LightingMap;
   private _reflectivityCache: NumberMap;
-  private _fovCache: { [key: string]: NumberMap };
+  private _fovCache: Map<number, NumberMap>;
 
   constructor(reflectivityCallback: ReflectivityCallback, options: Partial<Options> = {}) {
     this._reflectivityCallback = reflectivityCallback;
@@ -54,9 +52,9 @@ export default class Lighting {
       options,
     );
 
-    this._lights = {};
-    this._reflectivityCache = {};
-    this._fovCache = {};
+    this._lights = new Map();
+    this._reflectivityCache = new Map();
+    this._fovCache = new Map();
 
     this.setOptions(options);
   }
@@ -77,7 +75,7 @@ export default class Lighting {
    */
   setFOV(fov: FOV) {
     this._fov = fov;
-    this._fovCache = {};
+    this._fovCache = new Map();
     return this;
   }
 
@@ -85,13 +83,15 @@ export default class Lighting {
    * Set (or remove) a light source
    */
   setLight(x: number, y: number, color: null | string | LightColor) {
-    let key = x + "," + y;
+    let key = y * STRIDE + x;
 
     if (color) {
-      this._lights[key] =
-        typeof color == "string" ? (Color.fromString(color) as LightColor) : color;
+      this._lights.set(
+        key,
+        typeof color == "string" ? (Color.fromString(color) as LightColor) : color,
+      );
     } else {
-      delete this._lights[key];
+      this._lights.delete(key);
     }
     return this;
   }
@@ -100,15 +100,15 @@ export default class Lighting {
    * Remove all light sources
    */
   clearLights() {
-    this._lights = {};
+    this._lights = new Map();
   }
 
   /**
    * Reset the pre-computed topology values. Call whenever the underlying map changes its light-passability.
    */
   reset() {
-    this._reflectivityCache = {};
-    this._fovCache = {};
+    this._reflectivityCache = new Map();
+    this._fovCache = new Map();
 
     return this;
   }
@@ -117,15 +117,15 @@ export default class Lighting {
    * Compute the lighting
    */
   compute(lightingCallback: LightingCallback) {
-    let doneCells: { [key: string]: number } = {};
-    let emittingCells: LightingMap = {};
-    let litCells: LightingMap = {};
+    let doneCells: NumberMap = new Map();
+    let emittingCells: LightingMap = new Map();
+    let litCells: LightingMap = new Map();
 
-    for (let key in this._lights) {
+    for (let [key, light] of this._lights) {
       /* prepare emitters for first pass */
-      let light = this._lights[key];
-      emittingCells[key] = [0, 0, 0];
-      Color.add_(emittingCells[key], light);
+      let emitting: LightColor = [0, 0, 0];
+      emittingCells.set(key, emitting);
+      Color.add_(emitting, light);
     }
 
     for (let i = 0; i < this._options.passes; i++) {
@@ -137,12 +137,11 @@ export default class Lighting {
       emittingCells = this._computeEmitters(litCells, doneCells);
     }
 
-    for (let litKey in litCells) {
+    for (let [litKey, color] of litCells) {
       /* let the user know what and how is lit */
-      let parts = litKey.split(",");
-      let x = parseInt(parts[0]);
-      let y = parseInt(parts[1]);
-      lightingCallback(x, y, litCells[litKey]);
+      let x = litKey % STRIDE;
+      let y = (litKey - x) / STRIDE;
+      lightingCallback(x, y, color);
     }
 
     return this;
@@ -154,17 +153,12 @@ export default class Lighting {
    * @param litCells Add projected light to these
    * @param doneCells These already emitted, forbid them from further calculations
    */
-  private _emitLight(
-    emittingCells: LightingMap,
-    litCells: LightingMap,
-    doneCells: { [key: string]: number },
-  ) {
-    for (let key in emittingCells) {
-      let parts = key.split(",");
-      let x = parseInt(parts[0]);
-      let y = parseInt(parts[1]);
-      this._emitLightFromCell(x, y, emittingCells[key], litCells);
-      doneCells[key] = 1;
+  private _emitLight(emittingCells: LightingMap, litCells: LightingMap, doneCells: NumberMap) {
+    for (let [key, color] of emittingCells) {
+      let x = key % STRIDE;
+      let y = (key - x) / STRIDE;
+      this._emitLightFromCell(x, y, color, litCells);
+      doneCells.set(key, 1);
     }
     return this;
   }
@@ -172,25 +166,22 @@ export default class Lighting {
   /**
    * Prepare a list of emitters for next pass
    */
-  private _computeEmitters(litCells: LightingMap, doneCells: { [key: string]: number }) {
-    let result: LightingMap = {};
+  private _computeEmitters(litCells: LightingMap, doneCells: NumberMap) {
+    let result: LightingMap = new Map();
 
-    for (let key in litCells) {
-      if (key in doneCells) {
+    for (let [key, color] of litCells) {
+      if (doneCells.has(key)) {
         continue;
       } /* already emitted */
 
-      let color = litCells[key];
-
       let reflectivity;
-      if (key in this._reflectivityCache) {
-        reflectivity = this._reflectivityCache[key];
+      if (this._reflectivityCache.has(key)) {
+        reflectivity = this._reflectivityCache.get(key);
       } else {
-        let parts = key.split(",");
-        let x = parseInt(parts[0]);
-        let y = parseInt(parts[1]);
+        let x = key % STRIDE;
+        let y = (key - x) / STRIDE;
         reflectivity = this._reflectivityCallback(x, y);
-        this._reflectivityCache[key] = reflectivity;
+        this._reflectivityCache.set(key, reflectivity);
       }
 
       if (reflectivity == 0) {
@@ -206,7 +197,7 @@ export default class Lighting {
         intensity += part;
       }
       if (intensity > this._options.emissionThreshold) {
-        result[key] = emission;
+        result.set(key, emission);
       }
     }
 
@@ -217,25 +208,23 @@ export default class Lighting {
    * Compute one iteration from one cell
    */
   private _emitLightFromCell(x: number, y: number, color: LightColor, litCells: LightingMap) {
-    let key = x + "," + y;
+    let key = y * STRIDE + x;
     let fov: NumberMap;
-    if (key in this._fovCache) {
-      fov = this._fovCache[key];
+    if (this._fovCache.has(key)) {
+      fov = this._fovCache.get(key);
     } else {
       fov = this._updateFOV(x, y);
     }
 
-    for (let fovKey in fov) {
-      let formFactor = fov[fovKey];
-
+    for (let [fovKey, formFactor] of fov) {
       let result: LightColor;
-      if (fovKey in litCells) {
+      if (litCells.has(fovKey)) {
         /* already lit */
-        result = litCells[fovKey];
+        result = litCells.get(fovKey);
       } else {
         /* newly lit */
         result = [0, 0, 0];
-        litCells[fovKey] = result;
+        litCells.set(fovKey, result);
       }
 
       for (let i = 0; i < 3; i++) {
@@ -250,17 +239,17 @@ export default class Lighting {
    * Compute FOV ("form factor") for a potential light source at [x,y]
    */
   private _updateFOV(x: number, y: number) {
-    let key1 = x + "," + y;
-    let cache: NumberMap = {};
-    this._fovCache[key1] = cache;
+    let key1 = y * STRIDE + x;
+    let cache: NumberMap = new Map();
+    this._fovCache.set(key1, cache);
     let range = this._options.range;
     function cb(x: number, y: number, r: number, vis: number) {
-      let key2 = x + "," + y;
+      let key2 = y * STRIDE + x;
       let formFactor = vis * (1 - r / range);
       if (formFactor == 0) {
         return;
       }
-      cache[key2] = formFactor;
+      cache.set(key2, formFactor);
     }
     this._fov.compute(x, y, range, cb.bind(this));
 

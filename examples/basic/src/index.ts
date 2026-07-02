@@ -2,7 +2,8 @@ import { ConsoleLogger } from "@tempojs/common";
 import { Hono } from "hono/quick";
 import { nanoid } from "nanoid";
 import { TempoServiceRegistry } from "./bebop";
-import { createECSOptions, defineGameECSRuntime } from "./game.generated";
+import { createECSOptions } from "./game.core.generated";
+import { defineGameECSRuntime } from "./game.worker.generated";
 // Importing the service module runs its `@TempoServiceRegistry.register` decorator,
 // registering the RPC service implementation in this (and the durable object's) isolate.
 // The named imports additionally give us the interest-broadcast lifecycle hooks so
@@ -108,4 +109,4 @@ app.get("/v1/game", async (c) => {
 
 export default app;
 
-export { GameECS, GameStorage } from "./game.generated";
+export { GameECS, GameStorage } from "./game.worker.generated";

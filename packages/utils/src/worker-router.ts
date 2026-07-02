@@ -1,35 +1,16 @@
-import {
-  type BebopContentType,
-  Deadline,
-  Metadata,
-  MethodType,
-  stringifyCredential,
-  TempoError,
-  type TempoLogger,
-  TempoStatusCode,
-  TempoUtil,
-} from "@tempojs/common";
+import { TempoError, type TempoLogger, TempoStatusCode } from "@tempojs/common";
 import {
   type AuthInterceptor,
   BaseRouter,
-  type BebopMethodAny,
-  type IncomingContext,
-  ServerContext,
   type ServiceRegistry,
   TempoRouterConfiguration,
 } from "@tempojs/server";
 import type { BebopRecord } from "bebop";
-import { EventEmitter } from "tseep";
 import { Message } from "./bebop";
-import { createEventIterator } from "./create-event-iterator";
+import { RouterCore } from "./router-core";
 
 export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
-  private readonly events = new EventEmitter<Record<string, (message: Message) => void>>();
-  private readonly clientStreams: Map<
-    string,
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    Promise<any>
-  > = new Map();
+  private readonly core: RouterCore;
   // Track server stream generators so they can be cancelled
   private readonly serverStreams: Map<
     string,
@@ -46,167 +27,18 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
     authInterceptor?: AuthInterceptor,
   ) {
     super(logger, registry, configuration, authInterceptor);
-  }
-
-  private async setAuthContext(request: Message, context: ServerContext): Promise<void> {
-    const authHeader = request.authorization;
-    if (authHeader !== undefined && this.authInterceptor !== undefined) {
-      const authContext = await this.authInterceptor.intercept(context, authHeader);
-      if (authContext !== undefined) context.authContext = authContext;
-    }
-  }
-
-  private async invokeUnaryMethod(
-    request: Message,
-    context: ServerContext,
-    method: BebopMethodAny,
-    contentType: BebopContentType,
-  ): Promise<BebopRecord> {
-    await this.setAuthContext(request, context);
-    if (this.hooks !== undefined) {
-      await this.hooks.executeRequestHooks(context);
-    }
-    // `request.data` is already an isolated Uint8Array from decode; pass it
-    // straight to the synchronous deserializer instead of re-copying it.
-    const requestData = request.data!;
-    const record = this.deserializeRequest(requestData, method, contentType);
-    if (this.hooks !== undefined) {
-      await this.hooks.executeDecodeHooks(context, record);
-    }
-    return await method.invoke(record, context);
-  }
-
-  private async invokeClientStreamMethod(
-    request: Message,
-    context: ServerContext,
-    method: BebopMethodAny,
-    contentType: BebopContentType,
-  ): Promise<BebopRecord> {
-    await this.setAuthContext(request, context);
-    if (this.hooks !== undefined) {
-      await this.hooks.executeRequestHooks(context);
-    }
-    const messageId = request.messageId!;
-    const isStreaming = this.clientStreams.has(messageId);
-    if (isStreaming) {
-      const invocation = this.clientStreams.get(messageId)!;
-      this.events.emit(messageId, request);
-      return await invocation;
-    }
-    const generator = () => {
-      return createEventIterator<BebopRecord>(({ emit, cancel }) => {
-        const eventHandler = async (message: Message) => {
-          if (this.hooks !== undefined) {
-            await this.hooks.executeRequestHooks(context);
-          }
-          if (message.status === TempoStatusCode.CANCELLED) {
-            cancel();
-            return;
-          }
-          const requestData = message.data!;
-          const record = this.deserializeRequest(requestData, method, contentType);
-          if (this.hooks !== undefined) {
-            await this.hooks.executeDecodeHooks(context, record);
-          }
-          emit(record);
-        };
-
-        this.events.on(messageId, eventHandler);
-
-        return () => {
-          this.events.off(messageId, eventHandler);
-          this.clientStreams.delete(messageId);
-        };
-      });
-    };
-    const invocation = method.invoke(generator, context);
-    this.clientStreams.set(messageId, invocation);
-    this.events.emit(messageId, request);
-    return await (invocation as Promise<BebopRecord>).finally(() => {
-      this.clientStreams.delete(messageId);
+    this.core = new RouterCore({
+      logger,
+      maxRetryAttempts: this.maxRetryAttempts,
+      transmitInternalErrors: this.transmitInternalErrors,
+      authInterceptor,
+      getMethod: (methodId) => this.registry.getMethod(methodId),
+      getHooks: () => this.hooks,
+      deserializeRequest: (data, method, contentType) =>
+        this.deserializeRequest(data, method, contentType),
+      serializeResponse: (record, method, contentType) =>
+        this.serializeResponse(record, method, contentType),
     });
-  }
-
-  private async invokeServerStreamMethod(
-    request: Message,
-    context: ServerContext,
-    method: BebopMethodAny,
-    contentType: BebopContentType,
-  ): Promise<AsyncGenerator<BebopRecord, void, unknown>> {
-    await this.setAuthContext(request, context);
-    if (this.hooks !== undefined) {
-      await this.hooks.executeRequestHooks(context);
-    }
-    const requestData = request.data!;
-    const record = this.deserializeRequest(requestData, method, contentType);
-    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))) {
-      throw new TempoError(
-        TempoStatusCode.INTERNAL,
-        "service method incorrect: method must be async generator",
-      );
-    }
-    if (this.hooks !== undefined) {
-      await this.hooks.executeDecodeHooks(context, record);
-    }
-    const invocation = method.invoke(record, context);
-    // persist the stream
-    return invocation;
-  }
-
-  private async invokeDuplexStreamMethod(
-    request: Message,
-    context: ServerContext,
-    method: BebopMethodAny,
-    contentType: BebopContentType,
-  ): Promise<AsyncGenerator<BebopRecord, void, unknown>> {
-    await this.setAuthContext(request, context);
-    if (this.hooks !== undefined) {
-      await this.hooks.executeRequestHooks(context);
-    }
-    const messageId = request.messageId!;
-    const isStreaming = this.clientStreams.has(messageId);
-    if (isStreaming) {
-      const invocation = this.clientStreams.get(messageId)!;
-      this.events.emit(messageId, request);
-      return invocation;
-    }
-
-    if (!TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))) {
-      throw new TempoError(
-        TempoStatusCode.INTERNAL,
-        "service method incorrect: method must be async generator",
-      );
-    }
-
-    const generator = () => {
-      return createEventIterator<BebopRecord>(({ emit, cancel }) => {
-        const eventHandler = async (message: Message) => {
-          if (this.hooks !== undefined) {
-            await this.hooks.executeRequestHooks(context);
-          }
-          // Check the CURRENT frame's status, not the original captured request.
-          if (message.status === TempoStatusCode.CANCELLED) {
-            cancel();
-            return;
-          }
-          const requestData = message.data!;
-          const record = this.deserializeRequest(requestData, method, contentType);
-          if (this.hooks !== undefined) {
-            await this.hooks.executeDecodeHooks(context, record);
-          }
-          emit(record);
-        };
-        this.events.on(messageId, eventHandler);
-        this.events.emit(messageId, request);
-        return () => {
-          this.events.off(messageId, eventHandler);
-          this.clientStreams.delete(messageId);
-        };
-      });
-    };
-    const invocation = method.invoke(generator, context);
-    this.clientStreams.set(messageId, invocation);
-    return invocation;
   }
 
   /**
@@ -220,21 +52,12 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
       await info.generator.return(undefined).catch(() => {});
       this.serverStreams.delete(id);
     }
-    for (const id of [...this.clientStreams.keys()]) {
-      this.events.emit(
-        id,
-        Message({ messageId: id, status: TempoStatusCode.CANCELLED, data: new Uint8Array() }),
-      );
-      this.clientStreams.delete(id);
-    }
-    this.events.removeAllListeners();
+    this.core.cancelClientStreams();
+    this.core.removeAllListeners();
   }
 
   public override async process(req: Uint8Array, response: Message, env: TEnv) {
-    let request = Message.decode(req);
-    let context: ServerContext;
-    // console.log("request", request)
-    const contentType = "bebop";
+    const request = Message.decode(req);
 
     // Handle cancellation messages for server streams
     if (request.status === TempoStatusCode.CANCELLED && request.messageId) {
@@ -248,186 +71,33 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
       return;
     }
 
-    try {
-      const methodId = request.methodId!;
-      const method = this.registry.getMethod(methodId);
-      if (!method) {
-        throw new TempoError(
-          TempoStatusCode.NOT_FOUND,
-          `no service is registered which contains a method of '${methodId}'`,
-        );
-      }
-      //@ts-expect-error
-      const metadataHeader = request.customMetadata;
-      const metadata = metadataHeader ? Metadata.fromHttpHeader(metadataHeader) : new Metadata();
-
-      // Read the retry counter from the top-level Message field that the channel
-      // actually writes (worker-channel sets `requestInit.previousAttempts`),
-      // not from metadata — otherwise the guard never fires. Matches ws-router.
-      const previousAttempts = request.previousAttempts;
-      if (previousAttempts !== undefined && previousAttempts > this.maxRetryAttempts) {
-        throw new TempoError(TempoStatusCode.RESOURCE_EXHAUSTED, "max retry attempts exceeded");
-      }
-
-      let deadline: Deadline | undefined;
-      const deadlineHeader = request.deadline;
-      if (deadlineHeader !== undefined) {
-        deadline = Deadline.fromUnixTimestamp(deadlineHeader.valueOf());
-      }
-      if (deadline !== undefined && deadline.isExpired()) {
-        throw new TempoError(
-          TempoStatusCode.DEADLINE_EXCEEDED,
-          "incoming request has already exceeded its deadline",
-        );
-      }
-      const outgoingMetadata = new Metadata();
-      const incomingContext: IncomingContext = {
-        headers: new Headers(),
-        metadata: metadata,
-      };
-      if (deadline !== undefined) {
-        incomingContext.deadline = deadline;
-      }
-      context = new ServerContext(
-        incomingContext,
-        {
-          metadata: outgoingMetadata,
-        },
-        env,
-      );
-      const handleRequest = async () => {
-        let recordGenerator: AsyncGenerator<BebopRecord, void, undefined> | undefined = undefined;
-        let record: BebopRecord | undefined;
-        switch (method.type) {
-          case MethodType.Unary:
-            record = await this.invokeUnaryMethod(request, context, method, contentType);
-            break;
-          case MethodType.ClientStream:
-            record = await this.invokeClientStreamMethod(request, context, method, contentType);
-            break;
-          case MethodType.ServerStream:
-            recordGenerator = await this.invokeServerStreamMethod(
-              request,
-              context,
-              method,
-              contentType,
-            );
-            break;
-          case MethodType.DuplexStream:
-            recordGenerator = await this.invokeDuplexStreamMethod(
-              request,
-              context,
-              method,
-              contentType,
-            );
-            break;
-          default:
-            throw new TempoError(
-              TempoStatusCode.INTERNAL,
-              "service method incorrect: unknown method type",
-            );
-        }
-        const outgoingCredential = context.outgoingCredential;
-        if (outgoingCredential) {
-          response.credential = stringifyCredential(outgoingCredential);
-        }
-        response.methodId = request.methodId;
-        response.messageId = request.messageId;
-        response.status = TempoStatusCode.OK;
-        response.timestamp = new Date();
-        // response.topic = request.topic
-        if (this.hooks !== undefined) {
-          await this.hooks.executeResponseHooks(context);
-        }
-        outgoingMetadata.freeze();
-        if (outgoingMetadata.size() > 0) {
-          //@ts-expect-error
-          response.customMetadata = outgoingMetadata.data;
-        }
-        if (recordGenerator !== undefined) {
-          const messageId = request.messageId!;
-          const streamInfo = { generator: recordGenerator, cancelled: false };
-          this.serverStreams.set(messageId, streamInfo);
-
-          const writeFrames = async () => {
-            try {
-              for await (const value of recordGenerator) {
-                // Check if cancelled before sending
-                if (streamInfo.cancelled) {
-                  break;
-                }
-                const responseData = this.serializeResponse(value, method, "bebop");
-                response.data = new Uint8Array(responseData);
-                const encoded = Message.encode(response).slice();
-                postMessage(encoded, [encoded.buffer]);
-              }
-            } finally {
-              // Clean up and send cancellation
-              this.serverStreams.delete(messageId);
-              response.data = new Uint8Array();
-              response.status = TempoStatusCode.CANCELLED;
-              const encoded = Message.encode(response).slice();
-              postMessage(encoded, [encoded.buffer]);
-            }
-          };
-
-          if (deadline) {
-            await deadline.executeWithinDeadline(writeFrames);
-          } else {
-            await writeFrames();
-          }
-        } else {
-          if (record === undefined) {
-            throw new TempoError(
-              TempoStatusCode.INTERNAL,
-              "service method did not return a record",
-            );
-          }
-          const responseData = this.serializeResponse(record, method, contentType);
-          response.data = new Uint8Array(responseData);
-          const encoded = Message.encode(response).slice();
-          postMessage(encoded, [encoded.buffer]);
-        }
-      };
-      if (deadline !== undefined) {
-        await deadline.executeWithinDeadline(handleRequest);
-      } else {
-        await handleRequest();
-      }
-    } catch (e) {
-      let status = TempoStatusCode.UNKNOWN;
-      let message = "unknown error";
-      if (e instanceof TempoError) {
-        status = e.status;
-        message = e.message;
-        // dont expose internal error messages to the client
-        if (e.status === TempoStatusCode.INTERNAL && this.transmitInternalErrors !== true) {
-          message = "internal error";
-        }
-        // internal errors indicate transient problems or implementation bugs
-        // so we log them as critical errors
-        if (e.status === TempoStatusCode.INTERNAL) {
-          this.logger.critical(e.message, undefined, e);
-        } else {
-          this.logger.error(message, undefined, e);
-        }
-      } else if (e instanceof Error) {
-        message = e.message;
-        this.logger.error(message, undefined, e);
-      }
-      if (e instanceof Error && this.hooks !== undefined) {
-        await this.hooks.executeErrorHooks(context!, e);
-      }
-      // cleanup any lingering event emitters
-      this.clientStreams.delete(request.messageId!);
-      response.status = status;
-      response.msg = message;
-      response.messageId = request.messageId;
-      response.timestamp = request.timestamp;
-      response.methodId = request.methodId;
-      const encoded = Message.encode(response).slice();
+    // `Message.encode` returns a view into bebop's singleton write buffer;
+    // `.slice()` owns a fresh ArrayBuffer so the transfer cannot detach it.
+    const send = (message: Message) => {
+      const encoded = Message.encode(message).slice();
       postMessage(encoded, [encoded.buffer]);
-    }
+    };
+
+    await this.core.processRequest(request, response, env, {
+      send,
+      stampErrorResponse: true,
+      writeStreamFrames: async (generator, resp, method) => {
+        const messageId = request.messageId!;
+        // Track the generator so an inbound CANCELLED frame (handled above)
+        // can stop the pump and run the generator's cleanup.
+        const streamInfo = { generator, cancelled: false };
+        this.serverStreams.set(messageId, streamInfo);
+        await this.core.writeStreamFrames({
+          generator,
+          response: resp,
+          method,
+          send,
+          shouldStop: () => streamInfo.cancelled,
+          alwaysTerminate: true,
+          onEnd: () => this.serverStreams.delete(messageId),
+        });
+      },
+    });
   }
 
   override handle(_request: string | Buffer, _env: TEnv): Promise<Message> {

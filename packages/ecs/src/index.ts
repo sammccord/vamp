@@ -1,4 +1,5 @@
 export type { Archetype } from "./Archetype";
+export { clonePlainValue } from "./clone";
 export {
   accumulateArrayDelta,
   accumulatePoolDelta,
