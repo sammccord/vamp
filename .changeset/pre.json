@@ -11,6 +11,7 @@
     "@vampgg/cli": "0.1.0"
   },
   "changesets": [
+    "audit-perf-billing-pass",
     "beta-1-release",
     "beta-2-provenance",
     "cli-configurable-env",
