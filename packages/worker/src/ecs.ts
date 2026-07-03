@@ -290,6 +290,13 @@ export class ECSDurableObject<
   private _rootEntityCount = new Map<string, number>();
   // The lobby's own shard (`game/${ns}`); locally-spawned entities default here.
   private _defaultRoot = "";
+  // Roots this lobby has EXPLICITLY subscribed to via {@link loadShard} (e.g. a
+  // player's `character/<id>`), independent of whether it authored any entity
+  // there. Combined with the entity count these give the shard pin OR-semantics:
+  // a root stays pinned while (entityCount > 0 OR it is subscribed). Persisted
+  // under `__vamp:subscribed` and restored on hibernation wake so the
+  // {@link _maybeReleaseShard} exemption survives eviction.
+  private _subscribedRoots = new Set<string>();
   // Hysteresis (ms) before an unpinned shard is torn down; the alarm reaps.
   private _shardGraceMs = 30_000;
   // Per-shard entity-set observer cleanups (replaces the single membership obs.).
@@ -412,15 +419,35 @@ export class ECSDurableObject<
           // Absent (older DOs / never seeded) yields `undefined`, which falls back
           // to the static `config.context` — identical to the pre-seed behavior.
           const seed = await this.ctx.storage.get<Record<string, unknown>>("__vamp:context");
+          // Read the persisted shard sets BEFORE setup(): initialize() opens the
+          // lobby's own default shard and re-persists `__vamp:shards` for that root
+          // alone, which would clobber the additional players' roots (character/*
+          // etc.) before we can read them. Capturing first keeps the full set.
+          const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
+          const persistedSubscribed = await this.ctx.storage.get<string[]>("__vamp:subscribed");
           await this.setup(namespace, seed);
           // Re-subscribe the persisted shard set so a hibernation-recreated DO
           // re-aggregates the same multi-provider world. setup()/initialize()
           // already re-opened the lobby's own default shard; restore re-opens the
           // additional players' shards (character/* etc.). A restored shard's pin
           // is released once it proves entity-empty (_untrackEntityRoot →
-          // _maybeReleaseShard), after which the reap cycle tears it down.
-          const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
+          // _maybeReleaseShard), after which the reap cycle tears it down — unless
+          // it is explicitly subscribed (see below), which exempts it.
           if (persistedShards && this.shards) this.shards.restore(persistedShards);
+          // Restore the explicit-subscription SET only — do NOT re-acquire. A
+          // subscribed root always carries its OR-pin, so it is already in the
+          // persisted `__vamp:shards` set re-acquired above; re-acquiring here
+          // would leak a second pin. Repopulating the set makes the
+          // `_maybeReleaseShard` exemption effective post-wake so a subscribed
+          // shard that churns to entity-empty is not torn down.
+          if (persistedSubscribed && this.shards) {
+            for (const root of persistedSubscribed) this._subscribedRoots.add(root);
+          }
+          // Re-persist the full restored active set: initialize() clobbered
+          // `__vamp:shards` down to the default root, so without this a SECOND
+          // hibernation wake would read the truncated set and drop the additional
+          // shards again.
+          if (this.shards) this._persistActiveShards();
           // Re-register restored shards for notify-push (the wake was triggered by
           // a live socket, so we have players and should receive live updates).
           this._syncRegistrations();
@@ -1023,6 +1050,64 @@ export class ECSDurableObject<
   }
 
   /**
+   * Explicitly subscribe this lobby to a shard `root` (e.g. a player's
+   * `character/<id>`), importing its entities into the running ECS world for
+   * systems/behaviors WITHOUT re-persisting them. This is the explicit analog of
+   * the implicit acquire that authoring an entity into a root triggers
+   * ({@link _trackEntityRoot} → {@link _acquireShard}) — the "subscribe without
+   * authoring" driver.
+   *
+   * Idempotent, and adds no duplicate pin: the shard pin is single with
+   * OR-semantics (pinned while entityCount > 0 OR subscribed), so we only acquire
+   * when the root is not already pinned (an existing entity-pin is reused as the
+   * subscription pin). {@link _maybeReleaseShard} then exempts subscribed roots,
+   * so the subscription survives even if every entity is later evicted — only
+   * {@link unloadShard} (or lobby teardown) releases it.
+   *
+   * Fire-and-forget past the acquire: the actual pull runs in
+   * `client.syncOnce().then(_onShardSynced)` under `waitUntil`, so the entities
+   * stream in moments later as remote inserts (mirrors the implicit path).
+   */
+  async loadShard(root: string): Promise<void> {
+    await this.ready();
+    if (this._subscribedRoots.has(root)) return;
+    this._subscribedRoots.add(root);
+    if (!this.shards.pinned(root)) this._acquireShard(root);
+    this._persistSubscribedRoots();
+    this._persistActiveShards();
+    this._syncRegistrations();
+  }
+
+  /**
+   * Drop an explicit subscription created by {@link loadShard}. Releases the
+   * shard pin only if the root is now entity-empty (no locally-tracked entities
+   * remain) and is not the lobby's own default shard; if entities remain, the
+   * single pin reverts to being the entity-pin and is released normally by
+   * {@link _decrementRootCount} once membership later hits 0. After release the
+   * reap cycle tears the shard down following the grace period, locally evicting
+   * its entities from the world (the entities still live in their provider doc).
+   */
+  async unloadShard(root: string): Promise<void> {
+    if (!this._subscribedRoots.delete(root)) return;
+    this._persistSubscribedRoots();
+    if (root !== this._defaultRoot && (this._rootEntityCount.get(root) ?? 0) === 0) {
+      this.shards.release(root, Date.now());
+      this._persistActiveShards();
+    }
+    this._syncRegistrations();
+  }
+
+  /**
+   * Persist the explicitly-subscribed root set so a hibernation-recreated
+   * constructor can restore the {@link _maybeReleaseShard} exemption (the pins
+   * themselves ride the persisted `__vamp:shards` set). Fire-and-forget; cheap +
+   * idempotent, mirroring {@link _persistActiveShards}.
+   */
+  private _persistSubscribedRoots() {
+    this.ctx.waitUntil(this.ctx.storage.put("__vamp:subscribed", [...this._subscribedRoots]));
+  }
+
+  /**
    * Record `id` as living in `root` and keep the per-root entity count + the
    * shard pin consistent. An entity landing in a shard that is coasting through
    * its teardown grace period (open but unpinned) re-pins it, cancelling the
@@ -1063,7 +1148,10 @@ export class ECSDurableObject<
    * the grace period re-registers.
    */
   private _maybeReleaseShard(root: string): void {
-    if (!this.shards || root === this._defaultRoot) return;
+    // Exempt the lobby's own shard (pinned for its lifetime) and any explicitly
+    // subscribed root (kept until unloadShard), so an entity-empty subscribed
+    // shard is not torn down — the OR-semantics of the single shard pin.
+    if (!this.shards || root === this._defaultRoot || this._subscribedRoots.has(root)) return;
     if (!this.shards.pinned(root)) return;
     this.shards.release(root, Date.now());
     this._persistActiveShards();

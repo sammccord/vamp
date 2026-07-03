@@ -11,6 +11,7 @@ import {
 } from "y-durablestream";
 import type { Map as YMap } from "yjs";
 
+import { readAllEntities } from "./entity-doc";
 import { GLOBAL_ENTITIES_KEY } from "./reconcile-helpers";
 
 /**
@@ -95,6 +96,23 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
     const raw = emap.toJSON() as Record<string, unknown>;
     if (raw.id === undefined) raw.id = id;
     return raw as E;
+  }
+
+  /**
+   * Read every entity in the shard's authoritative doc. This provider DO is
+   * per-root (`idFromName(sk)`), so the returned set is exactly the entities
+   * sharing that shard key — e.g. all entities of one `character/<id>`. Backs a
+   * "get character" bulk read: no lobby is spun up; the read is against this
+   * provider's already-materialized {@link doc}.
+   *
+   * Synchronous like {@link entity}: `YStreamProvider` hydrates `doc` from
+   * storage inside `blockConcurrencyWhile(onStart)` during construction, which
+   * gates delivery of every inbound RPC — so `doc` is fully loaded before this
+   * runs, even on a cold stub call. `id` is the map key (not a stored
+   * component), so backfill it per entity exactly as {@link entity} does.
+   */
+  entities(): E[] {
+    return readAllEntities<E>(this.doc);
   }
 
   /**

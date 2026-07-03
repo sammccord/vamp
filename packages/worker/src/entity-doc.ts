@@ -26,6 +26,23 @@ export function entitiesMap(doc: Doc): YMap<YMap<unknown>> {
 }
 
 /**
+ * Read every entity in a shard doc as plain objects, backfilling each `id` from
+ * its map key (the key is the id; it is not stored as a component). The whole set
+ * sharing a shard key — e.g. all entities of one `character/<id>`. Pure read used
+ * by the provider's bulk `entities()` accessor and node-testable without workerd.
+ */
+export function readAllEntities<E>(doc: Doc): E[] {
+  const entities = entitiesMap(doc);
+  const out: E[] = [];
+  for (const [id, emap] of entities) {
+    const raw = emap.toJSON() as Record<string, unknown>;
+    if (raw.id === undefined) raw.id = id;
+    out.push(raw as E);
+  }
+  return out;
+}
+
+/**
  * Deep-clone object/array values before they enter the Yjs document. Yjs stores
  * by reference; a later in-place mutation of the same object would change the
  * Y.Map cell with no update and silently diverge peers. Scalars pass through.

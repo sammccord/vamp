@@ -4,6 +4,7 @@ import { applyUpdate, Doc, encodeStateAsUpdate } from "yjs";
 import {
   cloneComponentValue,
   entitiesMap,
+  readAllEntities,
   removeEntity,
   writeEntityInsert,
   writeUpdate,
@@ -81,5 +82,45 @@ describe("entity-doc: sharded entity set", () => {
     expect(entitiesMap(doc).get("e1")?.get("pos")).toEqual({ x: 1, y: 2 });
     expect(cloneComponentValue(null)).toBe(null);
     expect(cloneComponentValue(3)).toBe(3);
+  });
+});
+
+describe("entity-doc: readAllEntities (bulk read backing ECSStorage.entities)", () => {
+  it("returns every entity in the shard with its id backfilled from the key", () => {
+    const doc = new Doc();
+    doc.transact(() => {
+      writeEntityInsert(doc, "c1", { id: "c1", hp: 100, pos: { x: 1, y: 2 } });
+      writeEntityInsert(doc, "c2", { hp: 50 });
+      writeEntityInsert(doc, "c3", { name: "sword" });
+    });
+
+    const all = readAllEntities<{ id: string; hp?: number; pos?: unknown; name?: string }>(doc);
+
+    expect(all).toHaveLength(3);
+    const byId = new Map(all.map((e) => [e.id, e]));
+    // id is the map key, dropped from stored components, backfilled on read.
+    expect(byId.get("c1")).toEqual({ id: "c1", hp: 100, pos: { x: 1, y: 2 } });
+    expect(byId.get("c2")).toEqual({ id: "c2", hp: 50 });
+    expect(byId.get("c3")).toEqual({ id: "c3", name: "sword" });
+  });
+
+  it("returns an empty array for a shard with no entities", () => {
+    expect(readAllEntities(new Doc())).toEqual([]);
+  });
+
+  it("round-trips entities synced from a co-subscriber replica", () => {
+    const a = new Doc();
+    const b = new Doc();
+    a.transact(() => {
+      writeEntityInsert(a, "c1", { hp: 10 });
+      writeEntityInsert(a, "c2", { hp: 20 });
+    });
+    sync(a, b);
+
+    // Reading b (the replica) yields the same set — a lobby's provider doc is a
+    // replica of the authoritative shard.
+    const fromB = readAllEntities<{ id: string; hp: number }>(b);
+    expect(fromB.map((e) => e.id).sort()).toEqual(["c1", "c2"]);
+    expect(fromB.find((e) => e.id === "c1")?.hp).toBe(10);
   });
 });

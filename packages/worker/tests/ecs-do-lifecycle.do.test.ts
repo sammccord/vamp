@@ -3,7 +3,7 @@ import { ServiceRegistry } from "@tempojs/server";
 import { type BaseEntity, createEntitySystem, type ECSOptions } from "@vampgg/ecs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as Y from "yjs";
-import { entitiesMap, writeEntityInsert } from "../src/entity-doc.ts";
+import { entitiesMap, readAllEntities, writeEntityInsert } from "../src/entity-doc.ts";
 
 /**
  * Durable Object lifecycle tests, run in plain Node (see vite.config.ts, which
@@ -45,8 +45,22 @@ vi.mock("y-durablestream", async () => {
       if (seed) Yjs.applyUpdate(this.doc, seed);
       this._synced = true;
     }
-    /** Forward a local write upstream — no-op in this fake (no real provider). */
-    async pushLocalUpdate(_update: Uint8Array, _key?: string): Promise<void> {}
+    /**
+     * Forward a local write upstream. No real provider in this fake, but (a) record
+     * the call on the stub so tests can assert that synced-in (REMOTE) entities are
+     * NOT forwarded back (the no-duplication guarantee of a pure load), and (b) if
+     * the stub models a stateful provider (`__providerDoc`), apply the forwarded
+     * update into it so a later `syncOnce` (a fresh DO) pulls the accumulated state
+     * back — modeling durable persistence across eviction.
+     */
+    async pushLocalUpdate(update: Uint8Array, _key?: string): Promise<void> {
+      const stub = this.opts?.stub as
+        | { __pushed?: Uint8Array[]; __providerDoc?: Y.Doc }
+        | undefined;
+      if (!stub) return;
+      (stub.__pushed ??= []).push(update);
+      if (stub.__providerDoc) Yjs.applyUpdate(stub.__providerDoc, update);
+    }
     async connect(): Promise<void> {
       await this.syncOnce();
       this._cb?.("synced");
@@ -185,6 +199,33 @@ function makeStub(seed?: Uint8Array) {
     async update() {},
     async getYDoc() {
       return new Uint8Array();
+    },
+    async compact() {},
+    async register() {},
+    async deregister() {},
+  };
+}
+
+/**
+ * A GAME_STORAGE stub that IS the durable provider: it holds a `Y.Doc`, the
+ * mocked client's `pushLocalUpdate` accumulates forwarded LOCAL writes into it
+ * (see the `vi.mock` above), and `__seed`/`getYDoc` return its CURRENT encoded
+ * state — so a `syncOnce` from a later, fresh DO pulls back everything a previous
+ * session persisted. Models world-state durability across DO eviction.
+ */
+function makeProviderStub() {
+  const providerDoc = new Y.Doc();
+  return {
+    __providerDoc: providerDoc,
+    get __seed(): Uint8Array {
+      return Y.encodeStateAsUpdate(providerDoc);
+    },
+    async subscribe() {
+      return new ReadableStream();
+    },
+    async update() {},
+    async getYDoc() {
+      return Y.encodeStateAsUpdate(providerDoc);
     },
     async compact() {},
     async register() {},
@@ -559,5 +600,183 @@ describe("ECSDurableObject — runtime tick controls (no alarm)", () => {
     instance2._lastTickAt = Date.now() - 120;
     await instance2._maybeTick();
     expect(instance2.ecs.entity("ticker").n).toBe(2);
+  });
+});
+
+// ── Explicit shard subscription (loadShard / unloadShard) ────────────────────
+
+// Env whose GAME_STORAGE resolves a DISTINCT stub per root, so a character shard
+// can be seeded independently of the lobby's own (default) shard.
+// biome-ignore lint/suspicious/noExplicitAny: fake env binding
+function makeEnvByRoot(byRoot: Record<string, any>): any {
+  return {
+    GAME_STORAGE: {
+      idFromName: (name: string) => ({ name }),
+      get: (id: { name: string }) => byRoot[id.name],
+    },
+  };
+}
+
+// Let fire-and-forget work scheduled past `waitUntil` (the fake ctx ignores the
+// promise, but the async chain still runs) settle before asserting.
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+describe("ECSDurableObject — explicit shard subscription", () => {
+  test("loadShard pulls a character shard's entities into the world and persists the subscription", async () => {
+    configureRuntime();
+    const storage = makeStorage();
+    const gameStub = makeStub(); // lobby's own shard: empty
+    const charStub = makeStub(
+      seedDoc("character/alice", [
+        { id: "c1", x: 1, y: 2 },
+        { id: "c2", x: 3, y: 4 },
+      ]),
+    );
+    const instance = newDO(
+      makeCtx(storage),
+      makeEnvByRoot({ "game/room1": gameStub, "character/alice": charStub }),
+    );
+    await instance.setup("room1");
+
+    // The default shard is empty; the character's entities are not loaded yet.
+    expect(instance.ecs.hasEntity("c1")).toBe(false);
+
+    await instance.loadShard("character/alice");
+    await settle();
+
+    // The character's entities are now imported into the running ECS world.
+    expect(instance.ecs.hasEntity("c1")).toBe(true);
+    expect(instance.ecs.hasEntity("c2")).toBe(true);
+    expect(instance.ecs.entity("c1")).toMatchObject({ x: 1, y: 2 });
+
+    // The subscription is tracked, persisted, and pins the shard.
+    expect(instance._subscribedRoots.has("character/alice")).toBe(true);
+    expect(storage._map.get("__vamp:subscribed")).toEqual(["character/alice"]);
+    expect(instance.shards.activeRoots().sort()).toEqual(["character/alice", "game/room1"]);
+
+    // No duplication: the synced-in (REMOTE) entities are never forwarded back to
+    // the provider — a pure load re-persists nothing. (`__pushed` is attached
+    // dynamically by the mock client's `pushLocalUpdate`, so it is not on the
+    // stub's literal type.)
+    expect((charStub as { __pushed?: Uint8Array[] }).__pushed).toBeUndefined();
+  });
+
+  test("loadShard is idempotent and the subscription survives entity-emptiness until unloadShard", async () => {
+    configureRuntime();
+    const storage = makeStorage();
+    const instance = newDO(
+      makeCtx(storage),
+      makeEnvByRoot({ "game/room1": makeStub(), "character/solo": makeStub() }), // both empty
+    );
+    await instance.setup("room1");
+
+    // Subscribe to an entity-EMPTY character shard, twice (idempotent — no 2nd pin).
+    await instance.loadShard("character/solo");
+    await instance.loadShard("character/solo");
+    await settle();
+    expect(instance.shards.pinned("character/solo")).toBe(true);
+    expect(instance._subscribedRoots.has("character/solo")).toBe(true);
+
+    // OR-semantics: the release driver (called when a root becomes entity-empty)
+    // is a no-op for a subscribed root — the subscription is NOT torn down.
+    instance._maybeReleaseShard("character/solo");
+    expect(instance.shards.pinned("character/solo")).toBe(true);
+    expect(instance.shards.activeRoots()).toContain("character/solo");
+
+    // unloadShard drops the (idempotent, single) pin: one release fully unpins it,
+    // proving no pin leak from the double load.
+    await instance.unloadShard("character/solo");
+    expect(instance._subscribedRoots.has("character/solo")).toBe(false);
+    expect(storage._map.get("__vamp:subscribed")).toEqual([]);
+    expect(instance.shards.activeRoots()).not.toContain("character/solo");
+  });
+
+  test("unloadShard keeps the shard pinned while entities still live in it", async () => {
+    configureRuntime();
+    const storage = makeStorage();
+    const charStub = makeStub(seedDoc("character/bob", [{ id: "c1", x: 9 }]));
+    const instance = newDO(
+      makeCtx(storage),
+      makeEnvByRoot({ "game/room1": makeStub(), "character/bob": charStub }),
+    );
+    await instance.setup("room1");
+    await instance.loadShard("character/bob");
+    await settle();
+    expect(instance.ecs.hasEntity("c1")).toBe(true);
+
+    // Dropping the subscription while the shard still has members leaves the pin in
+    // place (it reverts to the entity-pin, released later when membership hits 0).
+    await instance.unloadShard("character/bob");
+    expect(instance._subscribedRoots.has("character/bob")).toBe(false);
+    expect(instance.shards.pinned("character/bob")).toBe(true);
+    expect(instance.shards.activeRoots()).toContain("character/bob");
+  });
+
+  test("hibernation wake restores the subscribed set without leaking a second pin", async () => {
+    configureRuntime();
+    // A DO previously subscribed to character/alice: namespace + both shards
+    // persisted as pinned, and the explicit-subscription set persisted.
+    const storage = makeStorage({
+      "__vamp:namespace": "room1",
+      "__vamp:shards": ["game/room1", "character/alice"],
+      "__vamp:subscribed": ["character/alice"],
+    });
+    const ws = makeWs({ userId: "u1" });
+    const ctx = makeCtx(storage, [ws]);
+    const instance = newDO(ctx, makeEnv(makeStub())); // empty shards on wake
+    await ctx._blocking;
+    await settle();
+
+    expect(instance.initialized()).toBe(true);
+    // The subscription set is restored so the release exemption holds post-wake.
+    expect(instance._subscribedRoots.has("character/alice")).toBe(true);
+    expect(instance.shards.activeRoots()).toContain("character/alice");
+
+    // Single pin: the restore re-acquired it once (via __vamp:shards); the wake did
+    // NOT re-acquire from the subscribed set. So one unload fully unpins it — a
+    // leaked second pin would leave it active.
+    await instance.unloadShard("character/alice");
+    expect(instance.shards.activeRoots()).not.toContain("character/alice");
+  });
+});
+
+describe("ECSDurableObject — game-shard state persists across eviction", () => {
+  // Let the write-forwarder's debounce (`_forwardDebounceMs` = 16 ms) fire so
+  // LOCAL writes reach the provider before we assert on it.
+  const forwarded = () => new Promise((r) => setTimeout(r, 30));
+
+  test("a game-owned (default-shard) entity is re-seeded with its mutated state when the next player joins", async () => {
+    configureRuntime();
+    // One durable provider DO backing the lobby's own `game/room1` shard, shared
+    // across both sessions (same namespace → same provider by `idFromName`).
+    const provider = makeProviderStub();
+
+    // ── Session 1: game logic spawns and damages an enemy, then everyone leaves.
+    const instance1 = newDO(makeCtx(makeStorage()), makeEnvByRoot({ "game/room1": provider }));
+    await instance1.setup("room1");
+
+    // An enemy OWNED BY THE GAME carries no `sk`, so it homes to the lobby's own
+    // `game/room1` shard (not a player's `character/*`). `n` stands in for HP.
+    await instance1.ecs.withScope(() => instance1.ecs.insert({ id: "enemy", n: 100 }));
+    // It takes damage but survives (n: 100 → 70). The test's ECS mutator is
+    // last-writer (Object.assign), so this is an absolute set.
+    await instance1.ecs.withScope(() => instance1.ecs.put("enemy", { n: 70 }));
+    await forwarded();
+
+    // The mutated state was forwarded to and persisted in the durable provider doc.
+    const persisted = readAllEntities<Entity>(provider.__providerDoc).find((e) => e.id === "enemy");
+    expect(persisted?.n).toBe(70);
+
+    // ── Session 2: a FRESH cold DO (a new isolate; the old one was evicted). Its
+    // ECS starts empty — the enemy can only reappear by being pulled from the
+    // provider on setup.
+    const instance2 = newDO(makeCtx(makeStorage()), makeEnvByRoot({ "game/room1": provider }));
+    expect(instance2.ecs).toBeUndefined(); // cold: nothing bootstrapped yet
+    await instance2.setup("room1");
+
+    // The same enemy is re-seeded into the new world, at its mutated HP — proving
+    // game-owned world state survives eviction and is restored for the next player.
+    expect(instance2.ecs.hasEntity("enemy")).toBe(true);
+    expect(instance2.ecs.entity("enemy").n).toBe(70);
   });
 });

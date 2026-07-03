@@ -88,10 +88,17 @@ app.get("/v1/game", async (c) => {
   }
 
   const gameWorker = c.env.GAME_ECS;
-  // Everything except `ns` becomes the runtime context seed. The seed is
-  // structured-clone serializable (query params are strings), persisted by the
-  // DO, and turned into the world context by `resolveContext` above.
-  const { ns, ...seed } = c.req.query();
+  // Everything except `ns` (and `character`, pulled out below) becomes the
+  // runtime context seed. The seed is structured-clone serializable (query params
+  // are strings), persisted by the DO, and turned into the world context by
+  // `resolveContext` above.
+  //
+  // `character` MUST be destructured out of the seed: the world context is per-DO
+  // and first-connection-wins (`setup` short-circuits for every later player), so
+  // a character id left in the seed would bake the FIRST player's character into
+  // the shared world context. Character loading is per-player, so it rides its own
+  // `stub.loadShard` call below, not the seed.
+  const { ns, character, ...seed } = c.req.query();
   const gameId = gameWorker.idFromName(ns);
   if (!gameId) return c.text("No game id found", 500);
 
@@ -103,8 +110,23 @@ app.get("/v1/game", async (c) => {
   // The seed configures the world context on first bootstrap for this namespace.
   await stub.setup(ns, seed);
 
+  // Load this player's character (the entities sharing `sk = character/<id>`) into
+  // the lobby for systems/behaviors, without re-persisting them. Explicit,
+  // per-player subscribe; fire-and-forget past the acquire (entities stream in as
+  // remote inserts). Held until an explicit unload or lobby teardown.
+  if (character) await stub.loadShard(`character/${character}`);
+
   const headers = new Headers(c.req.raw.headers);
   return stub.fetch(c.req.raw, { headers });
+});
+
+// "Get character": retrieve every entity sharing the shard key `character/<id>`.
+// Reads the per-root provider DO (`GAME_STORAGE`) directly — no lobby is spun up —
+// so it is a cheap, eventually-consistent snapshot of the character's entities.
+app.get("/v1/characters/:id", async (c) => {
+  const root = `character/${c.req.param("id")}`;
+  const ns = c.env.GAME_STORAGE;
+  return c.json(await ns.get(ns.idFromName(root)).entities());
 });
 
 export default app;
