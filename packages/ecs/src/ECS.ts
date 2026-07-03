@@ -1003,6 +1003,24 @@ export class ECS<
   }
 
   /**
+   * Return an entity's behavior cache, materializing it first if a deferred
+   * rebuild is pending. Mutators only enqueue rebuilds (drained by `update()`),
+   * so a reactive caller that dispatches via `act`/`actWithBubbling` outside an
+   * update tick would otherwise read a stale or absent cache. Rebuilding here
+   * and clearing the pending flag keeps those reads correct and avoids a
+   * redundant rebuild at the next `update()`.
+   */
+  private _ensureBehaviorCache(
+    entityId: string,
+  ): Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]> | undefined {
+    if (this._deferredCacheRebuilds.has(entityId)) {
+      this.rebuildBehaviorCache(entityId);
+      this._deferredCacheRebuilds.delete(entityId);
+    }
+    return this.entityBehaviorCache.get(entityId);
+  }
+
+  /**
    * Dispatch `payload` to the entity's matching behaviors, then propagate the
    * same action down to its children (recursive), so acting on a parent cascades
    * to its whole subtree. Resolves `false` if the entity does not exist.
@@ -1019,7 +1037,7 @@ export class ECS<
     const ac = action ?? new CustomAction(payload);
 
     // Act on current entity
-    const entityCache = this.entityBehaviorCache.get(entityId);
+    const entityCache = this._ensureBehaviorCache(entityId);
     const applicableBehaviors = entityCache?.get(payload.tag) ?? EMPTY_BEHAVIORS;
 
     for (const behavior of applicableBehaviors) {
@@ -1051,7 +1069,7 @@ export class ECS<
       if (!entity) break;
 
       // Execute behaviors for current entity
-      const entityCache = this.entityBehaviorCache.get(currentId);
+      const entityCache = this._ensureBehaviorCache(currentId);
       const applicableBehaviors = entityCache?.get(action.tag) ?? EMPTY_BEHAVIORS;
 
       for (const behavior of applicableBehaviors) {

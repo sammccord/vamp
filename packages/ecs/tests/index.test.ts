@@ -2353,6 +2353,133 @@ describe("ECS", () => {
       expect(fired).toContain(inserted.id!); // would be empty before Fix 1c
     });
 
+    test("act() self-heals a freshly inserted entity's behavior cache without a tick", async () => {
+      const fired: string[] = [];
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
+        556,
+        (_world, entity) => {
+          fired.push(entity.id!);
+        },
+        (q: QueryBuilder) => q.every(components.health),
+        10,
+      );
+      ecs.registerBehavior(behavior); // registered before insert; insert only enqueues a deferred rebuild
+
+      const inserted = ecs.insert({ health: 100 });
+      // No manual rebuild, no update() tick: cache entry does not exist yet.
+      expect(ecs.entityBehaviorCache.has(inserted.id!)).toBe(false);
+
+      await ecs.act(inserted.id!, { tag: 556, value: "x" });
+      expect(fired).toContain(inserted.id!); // act() materialized the cache on read
+    });
+
+    test("act() rebuilds a mutated entity's stale cache (archetype changed) without a tick", async () => {
+      const fired: string[] = [];
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
+        557,
+        (_world, entity) => {
+          fired.push(entity.id!);
+        },
+        (q: QueryBuilder) => q.every(components.health, components.level), // requires BOTH
+        10,
+      );
+      ecs.registerBehavior(behavior);
+
+      // Baseline: entity has health only (behavior does not match). Flush so the
+      // cache is clean and the id is not left in the deferred-rebuild set.
+      const e = ecs.insert({ health: 100 });
+      ecs.update(16.67);
+      expect(ecs.entityBehaviorCache.has(e.id!)).toBe(true);
+      await ecs.act(e.id!, { tag: 557, value: "x" });
+      expect(fired).toHaveLength(0); // does not match yet
+
+      // Mutate into a matching archetype. This enqueues a deferred rebuild but
+      // leaves the stale (health-only) cache entry in place, so a has()-based
+      // guard would wrongly skip it.
+      ecs.addComponent(e.id!, "level");
+      expect(ecs.entityBehaviorCache.has(e.id!)).toBe(true); // stale entry still present
+
+      await ecs.act(e.id!, { tag: 557, value: "x" });
+      expect(fired).toContain(e.id!); // act() rebuilt to the new archetype's behavior set
+    });
+
+    test("act() self-heal clears the pending rebuild so the next update() does not redo it", async () => {
+      let rebuildCount = 0;
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
+        558,
+        (_world, _entity) => {},
+        (q: QueryBuilder) => q.every(components.health),
+        10,
+      );
+      ecs.registerBehavior(behavior);
+
+      const inserted = ecs.insert({ health: 100 });
+
+      const originalRebuild = ecs.rebuildBehaviorCache.bind(ecs);
+      ecs.rebuildBehaviorCache = (entityId: string) => {
+        rebuildCount++;
+        originalRebuild(entityId);
+      };
+
+      await ecs.act(inserted.id!, { tag: 558, value: "x" }); // self-heal rebuild
+      expect(rebuildCount).toBe(1);
+      expect(
+        (ecs as unknown as { _deferredCacheRebuilds: Set<string> })._deferredCacheRebuilds.has(
+          inserted.id!,
+        ),
+      ).toBe(false); // dropped from the pending set
+
+      ecs.update(16.67); // flush deferred rebuilds — must not rebuild this id again
+      expect(rebuildCount).toBe(1);
+    });
+
+    test("actWithBubbling() self-heals a freshly inserted entity's behavior cache without a tick", async () => {
+      const fired: string[] = [];
+      const behavior = createBehavior<
+        TestContext,
+        [number],
+        TestAction,
+        number,
+        Entity,
+        EntityDelta
+      >(
+        559,
+        (_world, entity) => {
+          fired.push(entity.id!);
+        },
+        (q: QueryBuilder) => q.every(components.health),
+        10,
+      );
+      ecs.registerBehavior(behavior);
+
+      const inserted = ecs.insert({ health: 100 });
+      expect(ecs.entityBehaviorCache.has(inserted.id!)).toBe(false);
+
+      await ecs.actWithBubbling(inserted.id!, { tag: 559, value: "x" });
+      expect(fired).toContain(inserted.id!);
+    });
+
     test("deleteEntity evicts entity behavior cache and deferred rebuild (id-reuse safe)", () => {
       const id = "reused_1";
       const a = ecs.insert({ id, health: 100 });
