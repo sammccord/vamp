@@ -19,6 +19,7 @@
     "cli-split-generated-output",
     "cli-stable-pool-import",
     "cozy-houses-clap",
-    "ecs-act-self-heal-behavior-cache"
+    "ecs-act-self-heal-behavior-cache",
+    "worker-shard-load-and-bulk-read"
   ]
 }
