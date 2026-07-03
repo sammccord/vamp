@@ -1,5 +1,12 @@
 # @vampgg/worker
 
+## 1.0.0-beta.4
+
+### Patch Changes
+
+- Updated dependencies [646c805]
+  - @vampgg/ecs@1.0.0-beta.4
+
 ## 1.0.0-beta.3
 
 ### Minor Changes

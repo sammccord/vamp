@@ -18,6 +18,7 @@
     "cli-js-import-extensions",
     "cli-split-generated-output",
     "cli-stable-pool-import",
-    "cozy-houses-clap"
+    "cozy-houses-clap",
+    "ecs-act-self-heal-behavior-cache"
   ]
 }
