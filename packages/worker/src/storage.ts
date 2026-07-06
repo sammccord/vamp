@@ -11,7 +11,13 @@ import {
 } from "y-durablestream";
 import type { Map as YMap } from "yjs";
 
-import { readAllEntities } from "./entity-doc";
+import {
+  entitiesMap,
+  readAllEntities,
+  removeEntity as removeEntityFromDoc,
+  writeEntityInsert,
+  writeUpdate,
+} from "./entity-doc";
 import { GLOBAL_ENTITIES_KEY } from "./reconcile-helpers";
 
 /**
@@ -124,5 +130,85 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
    */
   async compact(): Promise<void> {
     await this.storage.commit(this.doc);
+  }
+
+  /**
+   * Insert-or-update a single entity from **inside** the provider DO, avoiding the
+   * client-side read-modify-write dance (pull the whole doc, mutate a throwaway
+   * `Y.Doc`, push a sync-framed diff) a caller would otherwise hand-roll against
+   * {@link update}/{@link getYDoc}. The mutation runs against the authoritative
+   * {@link doc}, so it is O(change), not O(world); the surrounding `transact` fires
+   * the base provider's `update` observer, which persists and broadcasts to every
+   * subscriber automatically. Mirrors the {@link entity}/{@link entities} read side.
+   *
+   * `id` is the map key (never stored as a component), so a non-empty string
+   * `entity.id` is required — the invariant callers previously enforced by hand.
+   * Returns the input record unchanged for caller convenience.
+   */
+  putEntity(entity: Record<string, unknown>): E {
+    const id = entity.id;
+    if (typeof id !== "string" || !id) throw new Error("entity requires a string id");
+    this.doc.transact(() => writeEntityInsert(this.doc, id, entity));
+    return entity as E;
+  }
+
+  /**
+   * Remove one entity from the shard doc, returning whether it existed. Collapses
+   * the two-round-trip "check then delete" a client would otherwise do
+   * ({@link entity} followed by a mutation): the existence check is local, and the
+   * `transact` (hence the persist + broadcast) is skipped entirely on a no-op
+   * delete so subscribers never see an empty update.
+   */
+  removeEntity(id: string): boolean {
+    const existed = entitiesMap(this.doc).has(id);
+    if (existed) this.doc.transact(() => removeEntityFromDoc(this.doc, id));
+    return existed;
+  }
+
+  /**
+   * Apply a partial component delta to an existing entity (set keys with defined
+   * values, delete keys set to `undefined`). Returns whether the entity existed;
+   * on a missing entity it is a no-op (no transact, no broadcast). Use
+   * {@link putEntity} to create.
+   */
+  updateEntity(id: string, delta: Record<string, unknown>): boolean {
+    const existed = entitiesMap(this.doc).has(id);
+    if (existed) this.doc.transact(() => writeUpdate(this.doc, id, delta));
+    return existed;
+  }
+
+  /**
+   * Insert-or-update many entities in a **single** transaction — one `update`
+   * event, so one persist and one broadcast for the whole batch (bulk seeding).
+   * Each record needs a non-empty string `id`; the batch is validated up front so
+   * a bad record aborts before any partial write. Returns the input records.
+   */
+  putEntities(entities: Record<string, unknown>[]): E[] {
+    for (const entity of entities) {
+      const id = entity.id;
+      if (typeof id !== "string" || !id) throw new Error("entity requires a string id");
+    }
+    this.doc.transact(() => {
+      for (const entity of entities) {
+        writeEntityInsert(this.doc, entity.id as string, entity);
+      }
+    });
+    return entities as E[];
+  }
+
+  /**
+   * Remove many entities in a single transaction, returning the count actually
+   * removed. Absent ids are skipped; the `transact` (and its broadcast) runs only
+   * if at least one id was present.
+   */
+  removeEntities(ids: string[]): number {
+    const map = entitiesMap(this.doc);
+    const present = ids.filter((id) => map.has(id));
+    if (present.length > 0) {
+      this.doc.transact(() => {
+        for (const id of present) removeEntityFromDoc(this.doc, id);
+      });
+    }
+    return present.length;
   }
 }
