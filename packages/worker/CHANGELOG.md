@@ -1,5 +1,12 @@
 # @vampgg/worker
 
+## 1.0.0-beta.6
+
+### Patch Changes
+
+- Updated dependencies [637791d]
+  - @vampgg/utils@1.0.0-beta.4
+
 ## 1.0.0-beta.5
 
 ### Minor Changes
