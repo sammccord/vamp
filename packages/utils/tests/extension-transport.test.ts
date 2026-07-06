@@ -4,7 +4,7 @@ import { ServiceRegistry } from "@tempojs/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Message } from "../src/bebop.ts";
 import { TempoExtensionChannel } from "../src/extension-channel.ts";
-import { TempoExtensionRouter } from "../src/extension-router.ts";
+import { createExtensionListener, TempoExtensionRouter } from "../src/extension-router.ts";
 
 /**
  * In-process loopback for the browser-extension transport
@@ -23,10 +23,14 @@ const ext = vi.hoisted(() => ({
   // Set per-test: handles a frame the channel sends toward the "background".
   background: (_payload: number[]) => {},
   removeListenerSpy: undefined as undefined | ((fn: (msg: unknown) => void) => void),
+  // Every payload passed to runtime.sendMessage (client->background frames and
+  // the router's broadcast replies to tabless senders).
+  runtimeSent: [] as number[][],
 }));
 
 vi.mock("webextension-polyfill", () => ({
   runtime: {
+    id: "test-ext",
     onMessage: {
       addListener: (fn: (msg: unknown) => void) => ext.runtimeListeners.add(fn),
       removeListener: (fn: (msg: unknown) => void) => {
@@ -34,8 +38,9 @@ vi.mock("webextension-polyfill", () => ({
         ext.runtimeListeners.delete(fn);
       },
     },
-    // client -> background
+    // client -> background, and background -> tabless senders (broadcast)
     sendMessage: (payload: number[]) => {
+      ext.runtimeSent.push(payload);
       ext.background(payload);
       return Promise.resolve();
     },
@@ -94,6 +99,7 @@ beforeEach(() => {
   ext.runtimeListeners.clear();
   ext.background = () => {};
   ext.removeListenerSpy = undefined;
+  ext.runtimeSent = [];
 });
 
 afterEach(() => {
@@ -139,5 +145,69 @@ describe("extension transport (TempoExtensionChannel + TempoExtensionRouter)", (
     // The global onMessage listener added in the constructor must be removed.
     expect(removed.length).toBe(1);
     expect(ext.runtimeListeners.size).toBe(0);
+  });
+
+  test("reply to a tabless (popup) sender is broadcast, not dropped", async () => {
+    const router = new TempoExtensionRouter(logger, new EchoRegistry(logger));
+    const messageId = "12345678-1234-1234-1234-123456789abc";
+    const req = Message({
+      methodId: ECHO_METHOD_ID,
+      messageId,
+      data: Message.encode(Message({ msg: "popup" })),
+    });
+
+    // A popup/options sender has no `tab`; the old router dropped the reply.
+    await router.process(req, Message({}), { sender: {} } as any);
+
+    expect(ext.runtimeSent.length).toBe(1);
+    const reply = Message.decode(new Uint8Array(ext.runtimeSent[0]!));
+    expect(reply.messageId).toBe(messageId);
+    expect(reply.methodId).toBe(ECHO_METHOD_ID);
+  });
+});
+
+describe("createExtensionListener", () => {
+  function setup() {
+    const registry = new EchoRegistry(logger);
+    const router = new TempoExtensionRouter(logger, registry);
+    const processSpy = vi.spyOn(router, "process").mockResolvedValue(undefined);
+    const listener = createExtensionListener(router, registry);
+    return { listener, processSpy };
+  }
+
+  const validFrame = Array.from(
+    Message.encode(Message({ methodId: ECHO_METHOD_ID, messageId: "x", data: new Uint8Array() })),
+  );
+  const self = { id: "test-ext" } as any;
+
+  test("dispatches a valid frame from this extension", () => {
+    const { listener, processSpy } = setup();
+    listener(validFrame, self);
+    expect(processSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects frames from another extension", () => {
+    const { listener, processSpy } = setup();
+    listener(validFrame, { id: "other-ext" } as any);
+    expect(processSpy).not.toHaveBeenCalled();
+  });
+
+  test("drops non-array payloads", () => {
+    const { listener, processSpy } = setup();
+    listener("not-a-frame", self);
+    expect(processSpy).not.toHaveBeenCalled();
+  });
+
+  test("drops undecodable payloads", () => {
+    const { listener, processSpy } = setup();
+    listener([1, 2, 3], self);
+    expect(processSpy).not.toHaveBeenCalled();
+  });
+
+  test("drops frames whose methodId is not registered (replies / junk)", () => {
+    const { listener, processSpy } = setup();
+    const unknown = Array.from(Message.encode(Message({ methodId: 9999, messageId: "y" })));
+    listener(unknown, self);
+    expect(processSpy).not.toHaveBeenCalled();
   });
 });

@@ -16,7 +16,7 @@ import {
   TempoRouterConfiguration,
 } from "@tempojs/server";
 import type { BebopRecord } from "bebop";
-import { type Runtime, tabs } from "webextension-polyfill";
+import { type Runtime, runtime, tabs } from "webextension-polyfill";
 import { Message } from "./bebop";
 import { RouterCore } from "./router-core";
 
@@ -279,18 +279,57 @@ export class TempoExtensionRouter<
   }
 
   private async send(sender: Runtime.MessageSender, message: Message) {
-    if (!sender.tab?.id || sender.tab?.discarded === true) {
-      this.logger.warn(`ignoring message to discarded tab`, { tab: sender.tab });
-      return;
-    }
+    const payload = Array.from(Message.encode(message));
     try {
-      await tabs.sendMessage(sender.tab.id, Array.from(Message.encode(message)));
+      if (sender.tab?.id !== undefined && sender.tab.discarded !== true) {
+        await tabs.sendMessage(sender.tab.id, payload);
+      } else {
+        // Popup / options / other extension pages aren't reachable via tabs;
+        // broadcast reaches them and each channel demultiplexes by messageId.
+        await runtime.sendMessage(payload);
+      }
     } catch (e) {
-      this.logger.error("failed to send message, tab is likely inactive", {}, e as Error);
+      // Receiver gone (popup closed, tab navigated); the client call times out.
+      this.logger.debug(
+        "extension reply not delivered; receiver likely gone",
+        { tab: sender.tab },
+        e as Error,
+      );
     }
   }
 
   override async handle(_req: Message, _ctx: Ctx): Promise<Message> {
     return Message({});
   }
+}
+
+export type ExtensionSenderContext = { sender: Runtime.MessageSender };
+
+/**
+ * Inbound guard + dispatch for the background/service-worker `runtime.onMessage`
+ * hook, which the router does not install itself. Only frames from this
+ * extension that decode to a Message with a registered methodId are processed;
+ * everything else (other extensions, reply frames, malformed traffic) is
+ * ignored. Replies travel back through the router's send path, so this never
+ * uses `sendResponse`.
+ */
+export function createExtensionListener(
+  router: Pick<TempoExtensionRouter<ExtensionSenderContext>, "process">,
+  registry: ServiceRegistry,
+): (raw: unknown, sender: Runtime.MessageSender) => undefined {
+  return (raw, sender) => {
+    if (sender.id !== runtime.id) return undefined;
+    if (!Array.isArray(raw)) return undefined;
+    let message: Message;
+    try {
+      message = Message(Message.decode(new Uint8Array(raw as number[])));
+    } catch {
+      return undefined;
+    }
+    if (message.methodId === undefined || !registry.getMethod(message.methodId)) {
+      return undefined;
+    }
+    void router.process(message, Message({}), { sender });
+    return undefined;
+  };
 }
