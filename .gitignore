@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 *.tgz
 .plans
+
+# verify-vamp run state and evidence (see .opencode/skills/verify-vamp/SKILL.md)
+.opencode/skills/verify-vamp/.verify/
