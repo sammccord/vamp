@@ -4,6 +4,19 @@ Solid.js bindings for [`@vampgg/ecs`](../ecs) + generated bebop RPC clients. Wra
 app in `<GameProvider>` and read entities through reactive, fine-grained queries
 that update as the server streams mutations.
 
+## Requirements
+
+Solid 2 (`solid-js@^2.0.0-rc.3`). This package is headless and imports no DOM types, so
+it does not depend on `@solidjs/web`. Your app does. Install `@solidjs/web`, build with
+`@solidjs/vite-plugin`, and point TypeScript at the renderer:
+
+```json
+{ "compilerOptions": { "jsx": "preserve", "jsxImportSource": "@solidjs/web" } }
+```
+
+Solid 2 stages writes and commits them on the next microtask. In a test that asserts
+against streamed state without a user-event helper, call `flush()` from `solid-js` first.
+
 ## Model
 
 **Server-authoritative.** The client ECS is a read-replica. You call semantic RPCs
