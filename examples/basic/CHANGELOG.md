@@ -1,5 +1,12 @@
 # basic
 
+## 0.0.1-beta.8
+
+### Patch Changes
+
+- Updated dependencies [b3c3d52]
+  - @vampgg/solid@1.0.0-beta.5
+
 ## 0.0.1-beta.7
 
 ### Patch Changes
