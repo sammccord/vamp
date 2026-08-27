@@ -21,7 +21,6 @@
     "cozy-houses-clap",
     "ecs-act-self-heal-behavior-cache",
     "extension-router-tabless-reply-and-listener",
-    "solid-2-migration",
     "worker-shard-load-and-bulk-read",
     "worker-storage-write-methods"
   ]
