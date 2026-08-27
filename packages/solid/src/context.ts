@@ -17,15 +17,17 @@ export const GameContext = createContext<GameContextValue<BaseEntity, unknown, u
 /**
  * Read the game context. Throws when called outside a {@link GameProvider}. The
  * type parameters let call sites recover their concrete entity/delta/client types.
+ * Solid 2's default-less `useContext` throws `ContextNotFoundError` on missing
+ * provider; we rebrand it to name the provider a game developer forgot.
  */
 export function useGame<
   E extends BaseEntity = BaseEntity,
   D = unknown,
   C = unknown,
 >(): GameContextValue<E, D, C> {
-  const ctx = useContext(GameContext);
-  if (!ctx) {
+  try {
+    return useContext(GameContext) as unknown as GameContextValue<E, D, C>;
+  } catch {
     throw new Error("[@vampgg/solid] hooks must be called within a <GameProvider>.");
   }
-  return ctx as unknown as GameContextValue<E, D, C>;
 }

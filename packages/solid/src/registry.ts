@@ -8,7 +8,7 @@ import {
   type QueryBuilder,
   type TrackedQuery,
 } from "@vampgg/ecs";
-import { type Accessor, createSignal, type Owner, runWithOwner, type Setter } from "solid-js";
+import { type Accessor, createSignal, type Setter } from "solid-js";
 import type { AnyECS } from "./types";
 
 export type QueryInput = Query | ((builder: QueryBuilder) => QueryBuilder);
@@ -29,17 +29,21 @@ export interface QueryHandle {
  * The Solid binding over the framework-agnostic membership tracker
  * (`createQueryMembershipTracker` in `@vampgg/ecs`). The tracker owns the
  * id-set diffing; this layer adds only Solid concerns: one shared signal +
- * reference count per distinct `Query`, owned at the provider scope so it
- * persists across the components that share a query and is disposed with them.
+ * reference count per distinct `Query`. Solid 2 signals outlive the owner that
+ * created them, so the registry needs no owner of its own.
  */
 export interface QueryRegistry<E extends BaseEntity, D> {
   acquire(input: QueryInput): QueryHandle;
+  /**
+   * Call this from an unowned scope — the observe loop calls it after an
+   * `await`. Solid 2 rejects reactive writes made from inside a component body
+   * or a computation.
+   */
   update(batch: ReadonlyMap<string, MutationRecord<E, D>>): void;
 }
 
 export function createQueryRegistry<E extends BaseEntity, D>(
   world: AnyECS<E, D>,
-  owner: Owner | null,
 ): QueryRegistry<E, D> {
   const tracker: QueryMembershipTracker = createQueryMembershipTracker(world);
   const entries = new Map<Query, Entry>();
@@ -50,9 +54,7 @@ export function createQueryRegistry<E extends BaseEntity, D>(
     if (!entry) {
       // `track` seeds the member set from the world's current matches.
       const tracked = tracker.track(q);
-      const [ids, setIds] = runWithOwner(owner, () =>
-        createSignal<string[]>([...tracked.members]),
-      )!;
+      const [ids, setIds] = createSignal<string[]>([...tracked.members]);
       entry = { tracked, ids, setIds, refs: 0 };
       entries.set(q, entry);
     }

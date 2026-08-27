@@ -1,14 +1,5 @@
-import { type BaseEntity, MutationType } from "@vampgg/ecs";
-import {
-  batch,
-  createComponent,
-  createSignal,
-  getOwner,
-  type JSX,
-  onCleanup,
-  onMount,
-  runWithOwner,
-} from "solid-js";
+import { type BaseEntity, clonePlainValue, MutationType } from "@vampgg/ecs";
+import { createComponent, createSignal, onCleanup, onSettled, type Element } from "solid-js";
 import { GameContext, type GameContextValue } from "./context";
 import { createQueryRegistry } from "./registry";
 import { createEntityStore } from "./store";
@@ -26,7 +17,7 @@ export interface GameProviderProps<E extends BaseEntity, D, C> {
   open: (client: C) => Promise<AsyncGenerator<WireBatch<E, D>, void, unknown>>;
   /** Delay (ms) before reconnecting after the stream ends/errors. Default 1000. */
   reconnectDelay?: number;
-  children?: JSX.Element;
+  children?: Element;
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -40,19 +31,15 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  */
 export function GameProvider<E extends BaseEntity, D, C>(
   props: GameProviderProps<E, D, C>,
-): JSX.Element {
+): Element {
   const world = props.world;
   if (!world.initialized) world.initialize();
 
-  const store = createEntityStore<E>();
-  const owner = getOwner();
-  const registry = createQueryRegistry<E, D>(world, owner);
+  const seed: Record<string, E> = {};
+  for (const [id, entity] of world.entities) seed[id] = clonePlainValue(entity) as E;
+  const store = createEntityStore<E>(seed);
+  const registry = createQueryRegistry<E, D>(world);
   const [connection, setConnection] = createSignal<ConnectionStatus>("connecting");
-
-  // Seed the store from any entities already present in the world.
-  batch(() => {
-    for (const [id, entity] of world.entities) store.upsert(id, entity as E);
-  });
 
   let stream: AsyncGenerator<WireBatch<E, D>, void, unknown> | undefined;
   let stopped = false;
@@ -63,21 +50,17 @@ export function GameProvider<E extends BaseEntity, D, C>(
     const { mutations } = await world.withScope(() => {
       if (frame.mutations) world.applyMutations(frame.mutations);
     });
-    // Drive store + membership from the committed batch under the provider owner,
-    // in a single Solid batch so dependent effects run once on final state.
-    runWithOwner(owner, () => {
-      batch(() => {
-        for (const [id, record] of mutations) {
-          if (record.tag === MutationType.Delete) {
-            store.remove(id);
-          } else {
-            const entity = world.entity(id);
-            if (entity) store.upsert(id, entity as E);
-          }
-        }
-        registry.update(mutations);
-      });
-    });
+    // Writes are safe here: commit runs after an await, so the owner context is null
+    // and Solid 2 allows unowned writes. Writes coalesce on the microtask by default.
+    for (const [id, record] of mutations) {
+      if (record.tag === MutationType.Delete) {
+        store.remove(id);
+      } else {
+        const entity = world.entity(id);
+        if (entity) store.upsert(id, entity as E);
+      }
+    }
+    registry.update(mutations);
   }
 
   async function run(): Promise<void> {
@@ -101,9 +84,9 @@ export function GameProvider<E extends BaseEntity, D, C>(
     }
   }
 
-  // `onMount` runs client-side only, so SSR renders children without opening a
-  // socket. `onCleanup` cancels the stream and stops the loop.
-  onMount(() => {
+  // `onSettled` runs client-side only, so SSR renders children without opening a
+  // socket.
+  onSettled(() => {
     void run();
   });
   onCleanup(() => {
@@ -119,7 +102,7 @@ export function GameProvider<E extends BaseEntity, D, C>(
     connection,
   };
 
-  return createComponent(GameContext.Provider, {
+  return createComponent(GameContext, {
     value: value as unknown as GameContextValue<BaseEntity, unknown, unknown>,
     get children() {
       return props.children;

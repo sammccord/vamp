@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import solid from "vite-plugin-solid";
+import solid from "@solidjs/vite-plugin";
 import { defineConfig } from "vite-plus";
 
 // `game.generated` (imported for the pure `createECSOptions`/`components`/delta
@@ -12,9 +12,10 @@ const workerStub = fileURLToPath(new URL("./tests/support/worker-stub.ts", impor
 
 // Dedicated config for the @vampgg/solid end-to-end suite. Kept separate from
 // vite.config.mts so the default `vp test` (node, rpc.test.ts) is unaffected:
-// these tests need a DOM (jsdom), the Solid JSX transform (vite-plugin-solid),
+// these tests need a DOM (jsdom), the Solid JSX transform (@solidjs/vite-plugin),
 // and a polyfilled global WebSocket (setupFiles). Run via `pnpm test:e2e`.
 export default defineConfig({
+  resolve: { conditions: ["browser", "development"] },
   plugins: [
     {
       name: "stub-vamp-worker",
