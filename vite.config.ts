@@ -20,7 +20,12 @@ export default defineConfig({
     ignorePatterns: ["**/bebop.ts", "**/*.generated.ts", ".changeset/**", "**/CHANGELOG.md"],
   },
   lint: {
-    ignorePatterns: ["**/bebop.ts", "**/*.generated.ts"],
+    // `.opencode/**` holds the verify-vamp harness. Its scenarios import `vitest`
+    // and `@vampgg/*` through a `node_modules` symlink that `control-vamp up`
+    // creates at run time (see that skill's SKILL.md), so they are unresolvable
+    // until the skill bootstraps itself and can never type-check on CI. Running
+    // the skill is what validates them.
+    ignorePatterns: ["**/bebop.ts", "**/*.generated.ts", ".opencode/**"],
     // Both flag deliberate patterns: `new Array(n)` preallocates fixed-size ring
     // buffers / scratch arrays (Array.from({length}) would create holey arrays),
     // and the `[...map]`/`[...set]` spreads snapshot a collection before it is
