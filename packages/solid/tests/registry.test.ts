@@ -1,5 +1,5 @@
 import { query as buildQuery, type QueryBuilder } from "@vampgg/ecs";
-import { createRoot, getOwner } from "solid-js";
+import { createRoot, flush } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { createQueryRegistry } from "../src/registry.ts";
 import { createWorld } from "../src/world.ts";
@@ -10,12 +10,13 @@ describe("createQueryRegistry membership", () => {
     await createRoot(async (dispose) => {
       const world = createWorld(options());
       world.initialize();
-      const registry = createQueryRegistry(world, getOwner());
+      const registry = createQueryRegistry(world);
       const handle = registry.acquire((q: QueryBuilder) => q.every(components.faction));
 
       const push = async (f: ReturnType<typeof frame>) => {
         const { mutations } = await world.withScope(() => world.applyMutations(f.mutations!));
         registry.update(mutations);
+        flush();
       };
 
       expect(handle.ids()).toEqual([]);
@@ -44,6 +45,7 @@ describe("createQueryRegistry membership", () => {
         world.put("e2", { faction: undefined }, true);
       });
       registry.update(leave.mutations);
+      flush();
       expect(handle.ids()).not.toContain("e2");
 
       // delete e1 -> leaves
@@ -58,7 +60,7 @@ describe("createQueryRegistry membership", () => {
     await createRoot(async (dispose) => {
       const world = createWorld(options());
       world.initialize();
-      const registry = createQueryRegistry(world, getOwner());
+      const registry = createQueryRegistry(world);
 
       const built = buildQuery((b: QueryBuilder) => b.every(components.hp));
       const a = registry.acquire(built);
@@ -69,6 +71,7 @@ describe("createQueryRegistry membership", () => {
         world.applyMutations(frame(["x", insert({ id: "x", hp: 5, tags: [] })]).mutations!),
       );
       registry.update(mutations);
+      flush();
       expect(a.ids()).toContain("x");
 
       a.release();

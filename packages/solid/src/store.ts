@@ -1,5 +1,5 @@
 import { type BaseEntity, clonePlainValue } from "@vampgg/ecs";
-import { createStore, produce, reconcile, type Store } from "solid-js/store";
+import { createStore, reconcile, type Store } from "solid-js";
 
 /**
  * A fine-grained reactive mirror of the world's committed entity state, keyed by
@@ -13,8 +13,10 @@ export interface EntityStore<E extends BaseEntity> {
   remove(id: string): void;
 }
 
-export function createEntityStore<E extends BaseEntity>(): EntityStore<E> {
-  const [state, setState] = createStore<Record<string, E>>({});
+export function createEntityStore<E extends BaseEntity>(
+  initial: Record<string, E> = {},
+): EntityStore<E> {
+  const [state, setState] = createStore<Record<string, E>>(initial);
 
   return {
     state,
@@ -25,14 +27,18 @@ export function createEntityStore<E extends BaseEntity>(): EntityStore<E> {
       // against itself, detect no change, and never notify (stale UI). Cloning
       // decouples the store's value; reconcile then produces minimal,
       // identity-preserving path updates (rows in `<For>` stay stable).
-      setState(id, reconcile(clonePlainValue(entity), { key: "id", merge: false }));
+      // Solid 2's `reconcile` throws on an absent target, so a first sighting
+      // has to be a plain assignment.
+      const next = clonePlainValue(entity);
+      setState((draft) => {
+        if (draft[id] === undefined) draft[id] = next;
+        else reconcile(next, "id")(draft[id]);
+      });
     },
     remove(id) {
-      setState(
-        produce((draft) => {
-          delete draft[id];
-        }),
-      );
+      setState((draft) => {
+        delete draft[id];
+      });
     },
   };
 }

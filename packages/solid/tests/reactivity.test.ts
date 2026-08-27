@@ -1,5 +1,5 @@
 import type { QueryBuilder } from "@vampgg/ecs";
-import { createRoot, getOwner } from "solid-js";
+import { createRoot, flush } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { createQueryRegistry } from "../src/registry.ts";
 import { createEntityStore } from "../src/store.ts";
@@ -20,7 +20,7 @@ describe("createQuery store + registry composition", () => {
       const world = createWorld(options());
       world.initialize();
       const store = createEntityStore<TestEntity>();
-      const registry = createQueryRegistry(world, getOwner());
+      const registry = createQueryRegistry(world);
       const handle = registry.acquire((q: QueryBuilder) => q.every(components.hp));
 
       const push = async (f: ReturnType<typeof frame>) => {
@@ -33,6 +33,7 @@ describe("createQuery store + registry composition", () => {
           }
         }
         registry.update(mutations);
+        flush();
       };
 
       // insert -> joins membership, lands in the store

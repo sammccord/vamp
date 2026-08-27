@@ -1,4 +1,4 @@
-/** @jsxImportSource solid-js */
+/** @jsxImportSource @solidjs/web */
 import type { ChildProcess } from "node:child_process";
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { ConsoleLogger, TempoLogLevel } from "@tempojs/common";
