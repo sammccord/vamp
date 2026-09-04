@@ -29,6 +29,7 @@
     "./extension-router": "./dist/extension-router.mjs",
     "./pino-logger": "./dist/pino-logger.mjs",
     "./router-core": "./dist/router-core.mjs",
+    "./service-registry": "./dist/service-registry.mjs",
     "./worker-channel": "./dist/worker-channel.mjs",
     "./worker-router": "./dist/worker-router.mjs",
     "./ws-channel": "./dist/ws-channel.mjs",
