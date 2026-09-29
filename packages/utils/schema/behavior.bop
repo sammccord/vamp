@@ -15,9 +15,9 @@ enum BehaviorNodeKind {
 message BehaviorNode {
   1 -> BehaviorNodeKind kind;
   2 -> uint16[] children;   // indices into BehaviorTree.nodes
-  3 -> uint32 weight;       // weight | percent | cooldown ticks, depending on kind
+  3 -> uint32 weight;       // Chance percent or Cooldown ticks
   4 -> uint32 leaf;         // Condition / Task id (app enum)
-  5 -> float32[] args;
+  5 -> float32[] args;      // leaf arguments; per-child weights on Weighted
 }
 
 message BehaviorTree {

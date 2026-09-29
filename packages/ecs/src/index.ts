@@ -51,3 +51,26 @@ export {
   MutationType,
   type UpdateMutation,
 } from "./types";
+export {
+  type BehaviorSpec,
+  chance,
+  cond,
+  cooldown,
+  invert,
+  selector,
+  seq,
+  task,
+  tree,
+  weighted,
+} from "./behavior-tree/builder";
+export { type BehaviorContext, type BehaviorResult, evaluate } from "./behavior-tree/evaluate";
+export {
+  type BehaviorCondition,
+  type BehaviorNode,
+  BehaviorNodeKind,
+  type BehaviorRandom,
+  type BehaviorStatus,
+  type BehaviorTask,
+  type BehaviorTree,
+  type Brain,
+} from "./behavior-tree/types";

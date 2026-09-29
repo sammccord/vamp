@@ -214,6 +214,9 @@ importers:
       '@typescript/native-preview':
         specifier: 7.0.0-dev.20260315.1
         version: 7.0.0-dev.20260315.1
+      '@vampgg/rot':
+        specifier: workspace:*
+        version: link:../rot
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
