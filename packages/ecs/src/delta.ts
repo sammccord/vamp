@@ -1,6 +1,7 @@
 /**
- * Canonical delta algebra for entity components: set/add/remove on array fields
- * and additive merge on pool (`Record<string, number>`) fields.
+ * Canonical delta algebra for entity components: set/add/remove on array fields,
+ * additive merge on pool (`Record<string, number>`) fields, and last-write-wins
+ * replace on fields such as behavior trees whose values must not be summed.
  *
  * This is the SINGLE source of truth for those semantics. Generated code
  * (`materializeDelta`, `mergeDelta`, `accumulateDelta` in each app's
@@ -103,4 +104,30 @@ export function accumulatePoolDelta(
     if (from[key] !== undefined) to[key] = (to[key] ?? 0) + from[key];
   }
   return to;
+}
+
+/**
+ * Last-write-wins merge of a replace delta onto a base component (entity-level):
+ * each field the delta defines overwrites the base's, including whole arrays.
+ * Returns a new object and never mutates `base`.
+ */
+export function applyReplaceDelta<T extends object>(base: T, delta: Partial<T>): T {
+  const result = { ...base };
+  for (const key in delta) {
+    if (delta[key] !== undefined) result[key] = delta[key] as T[typeof key];
+  }
+  return result;
+}
+
+/**
+ * Accumulate a replace delta INTO another (delta-on-delta): the later delta's
+ * defined fields win. Returns a fresh object when `to` is absent, else mutates
+ * and returns `to`.
+ */
+export function accumulateReplaceDelta<D extends object>(to: D | undefined, from: D): D {
+  const out = to ?? ({} as D);
+  for (const key in from) {
+    if (from[key] !== undefined) out[key] = from[key];
+  }
+  return out;
 }

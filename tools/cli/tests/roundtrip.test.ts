@@ -41,6 +41,8 @@ export function applyArrayDelta<T>(base: T[], d?: ArrayDelta<T>): T[];
 export function applyPoolDelta<T>(base: T, delta: Record<string, number>): T;
 export function accumulateArrayDelta<T>(to: ArrayDelta<T> | undefined, from: ArrayDelta<T>): ArrayDelta<T>;
 export function accumulatePoolDelta(to: Record<string, number> | undefined, from: Record<string, number>): Record<string, number>;
+export function applyReplaceDelta<T extends object>(base: T, delta: Partial<T>): T;
+export function accumulateReplaceDelta<D extends object>(to: D | undefined, from: D): D;
 
 export type Query = { __query: true };
 export type QueryBuilder = { __builder: true };
@@ -150,6 +152,8 @@ export function createInterestBroadcast<W, Req, Yield = never, E = unknown, D = 
 ): InterestBroadcast<W, Req, Yield>;
 `;
 
+const BEHAVIOR_BOP = resolve(TOOLS_CLI, "../../packages/utils/schema/behavior.bop");
+
 const CF_STUB = `declare namespace Cloudflare { interface Env {} }`;
 
 interface ScratchFiles {
@@ -187,6 +191,7 @@ message PoolDelta {
 `,
     "utf-8",
   );
+  cpSync(BEHAVIOR_BOP, join(schemaDir, "behavior.bop"));
   writeFileSync(join(schemaDir, "tags.bop"), `enum Tags { Human = 1; Hostile = 2; }`, "utf-8");
   writeFileSync(
     join(schemaDir, "actions.bop"),
@@ -332,6 +337,32 @@ message Entity {
 }
 `;
     expect(() => roundtrip({ entity })).not.toThrow();
+  });
+
+  it("behavior tree and brain fields merge by replace, not by counter", () => {
+    const entity = `import "./pool.bop"
+import "./behavior.bop"
+import "./tags.bop"
+
+message Entity {
+  1 -> guid id;
+  2 -> guid sk;
+  3 -> Tags[] tags;
+  4 -> Pool health;
+  5 -> Brain brain;
+  6 -> BehaviorTree behaviorTree;
+}
+`;
+    const { paths } = roundtrip({ entity });
+    const core = readFileSync(paths.core, "utf-8");
+    expect(core).toContain(
+      'import { applyArrayDelta, accumulateArrayDelta, applyPoolDelta, accumulatePoolDelta, applyReplaceDelta, accumulateReplaceDelta } from "@vampgg/ecs";',
+    );
+    expect(core).toContain("entity.brain = applyReplaceDelta(entity.brain ?? {}, delta.brain);");
+    expect(core).toContain(
+      "to.behaviorTree = accumulateReplaceDelta(to.behaviorTree, from.behaviorTree);",
+    );
+    expect(core).toContain("entity.health = applyPoolDelta(");
   });
 
   it("throws before emitting when a custom component delta cannot be resolved (Case D)", () => {

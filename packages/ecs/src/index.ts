@@ -3,9 +3,11 @@ export { clonePlainValue } from "./clone";
 export {
   accumulateArrayDelta,
   accumulatePoolDelta,
+  accumulateReplaceDelta,
   applyArrayDelta,
   type ArrayDelta,
   applyPoolDelta,
+  applyReplaceDelta,
 } from "./delta";
 export {
   archetypeId,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { emitDelta, scalarToTs } from "../src/generators/emit-delta.js";
-import { emitHelpers } from "../src/generators/emit-helpers.js";
+import { emitHelperImports, emitHelpers } from "../src/generators/emit-helpers.js";
 import { emitMutationSchema, planMutationSchema } from "../src/generators/emit-mutation-bop.js";
 import { parseEntityMessage, parseMessage } from "../src/generators/parse-bop-source.js";
 import type { ParsedSchema, SchemaDefinition } from "../src/generators/parse-bop.js";
@@ -203,5 +203,48 @@ describe("emitDelta reconciliation (Step 4, no Partial fallback)", () => {
       ],
     );
     expect(emitDelta(entity, schema)).toContain("pos?: PositionDelta;");
+  });
+});
+
+// --- Delta strategy: counter vs replace by component type ---
+
+describe("delta strategy per component type", () => {
+  const field = (name: string, typeName: string, constantValue: number) => ({
+    name,
+    typeId: 5,
+    isArray: false,
+    isMap: false,
+    typeName,
+    constantValue,
+  });
+  const { entity, schema } = schemaFixture(
+    [field("health", "Pool", 1), field("brain", "Brain", 2), field("stats", "Stats", 3)],
+    [
+      ["Pool", { name: "Pool", kind: "message", fields: [] }],
+      ["PoolDelta", { name: "PoolDelta", kind: "message", fields: [] }],
+      ["Brain", { name: "Brain", kind: "message", fields: [] }],
+      ["BrainDelta", { name: "BrainDelta", kind: "message", fields: [] }],
+      ["Stats", { name: "Stats", kind: "message", fields: [] }],
+      ["StatsDelta", { name: "StatsDelta", kind: "message", fields: [] }],
+    ],
+  );
+  const out = emitHelpers(entity, schema);
+
+  it("replaces Brain instead of summing it", () => {
+    expect(out).toContain("brain: delta.brain ? applyReplaceDelta(");
+    expect(out).toContain("entity.brain = applyReplaceDelta(entity.brain ?? {}, delta.brain);");
+    expect(out).toContain("to.brain = accumulateReplaceDelta(to.brain, from.brain);");
+  });
+
+  it("keeps Pool and unlisted types on the additive counter", () => {
+    expect(out).toContain("entity.health = applyPoolDelta(");
+    expect(out).toContain("entity.stats = applyPoolDelta(");
+    expect(out).toContain("to.stats = accumulatePoolDelta(");
+  });
+
+  it("imports only the helpers in use", () => {
+    expect(emitHelperImports(entity, schema)).toBe(
+      'import { applyPoolDelta, accumulatePoolDelta, applyReplaceDelta, accumulateReplaceDelta } from "@vampgg/ecs";',
+    );
   });
 });

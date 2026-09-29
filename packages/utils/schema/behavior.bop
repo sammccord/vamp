@@ -1,0 +1,43 @@
+// Behavior tree built-ins. A BehaviorTree lives on its own entity and is shared
+// by every agent whose Brain points at it. Nodes form a flat array linked by
+// index; nodes[0] is the root.
+enum BehaviorNodeKind {
+  Selector = 1;   // first child that succeeds
+  Sequence = 2;   // every child succeeds, in order
+  Weighted = 3;   // children that pass, picked by weight
+  Condition = 4;  // leaf: registered predicate
+  Task = 5;       // leaf: registered task, emits action intents
+  Invert = 6;
+  Chance = 7;     // decorator: passes with probability weight/100
+  Cooldown = 8;   // decorator: fails until `weight` ticks since its last success
+}
+
+message BehaviorNode {
+  1 -> BehaviorNodeKind kind;
+  2 -> uint16[] children;   // indices into BehaviorTree.nodes
+  3 -> uint32 weight;       // weight | percent | cooldown ticks, depending on kind
+  4 -> uint32 leaf;         // Condition / Task id (app enum)
+  5 -> float32[] args;
+}
+
+message BehaviorTree {
+  1 -> BehaviorNode[] nodes;
+}
+
+// Behavior tree delta - last-write-wins replace of the whole node array
+message BehaviorTreeDelta {
+  1 -> BehaviorNode[] nodes;
+}
+
+message Brain {
+  1 -> string tree;         // id of the entity that holds the BehaviorTree
+  2 -> uint32[] readyAt;    // per-node cooldown expiry tick
+  3 -> uint16 last;         // last task node that fired
+}
+
+// Brain delta - every field is last-write-wins
+message BrainDelta {
+  1 -> string tree;
+  2 -> uint32[] readyAt;
+  3 -> uint16 last;
+}
