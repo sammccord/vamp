@@ -119,7 +119,7 @@ export function createEntitySystem<
   ) => void,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
 ): EntitySystem<State, UpdateArguments, Actions, Tags, E, D> {
-  query = typeof query === "function" ? buildQuery(query) : query;
+  query = query instanceof Function ? buildQuery(query) : query;
   return Object.freeze({
     execute,
     query,
@@ -151,7 +151,7 @@ export function createArchetypeSystem<
   ) => ReturnArguments,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
 ): ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D> {
-  query = typeof query === "function" ? buildQuery(query) : query;
+  query = query instanceof Function ? buildQuery(query) : query;
   return Object.freeze({
     execute,
     query,
@@ -171,7 +171,7 @@ export function createEventSystem(
   execute: (entities: Array<string>) => void,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
 ): EventSystem {
-  query = typeof query === "function" ? buildQuery(query) : query;
+  query = query instanceof Function ? buildQuery(query) : query;
   return Object.freeze({
     execute,
     query,
@@ -191,7 +191,7 @@ export function createLifecycleSystem(
   execute: (entity: string) => void,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
 ): LifecycleSystem {
-  query = typeof query === "function" ? buildQuery(query) : query;
+  query = query instanceof Function ? buildQuery(query) : query;
   return Object.freeze({
     execute,
     query,
@@ -226,7 +226,7 @@ export function createBehavior<
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
   priority?: number,
 ): Behavior<State, UpdateArguments, Actions, Tags, E, D> {
-  query = typeof query === "function" ? buildQuery(query) : query;
+  query = query instanceof Function ? buildQuery(query) : query;
   return Object.freeze({
     tag,
     handler,

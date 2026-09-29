@@ -209,7 +209,7 @@ describe("component ids tag-derived (4.6)", () => {
 // Fixture 11 — vocabulary drift guard (4.9)
 describe("single scalar vocabulary (4.9)", () => {
   it("every WireBaseType name is in SCALAR_TYPES and has a scalarToTs case", () => {
-    for (const name of Object.values(WireBaseType)) {
+    for (const name of WireBaseType.values()) {
       expect(SCALAR_TYPES.has(name)).toBe(true);
       // scalarToTs must not fall through to the identity default for a scalar.
       const ts = scalarToTs(name);

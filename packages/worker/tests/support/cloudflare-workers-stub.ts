@@ -12,4 +12,6 @@ export class DurableObject<Env = unknown> {
   }
 }
 
-export type Env = Record<string, unknown>;
+export interface Env {
+  readonly [binding: string]: DurableObjectNamespace | undefined;
+}

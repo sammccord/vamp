@@ -64,8 +64,14 @@ export function createBehaviorTreeSystem<
       for (const archetype of archetypes) {
         for (const id of archetype.entities) {
           const agent = world.entity(id);
+          // SAFETY: brainField is the key holding each agent's Brain (options
+          // contract), so agent[brainField] is that Brain, or undefined when the
+          // agent is absent.
           const brain = agent?.[brainField] as Brain | undefined;
           if (!agent || !brain?.tree) continue;
+          // SAFETY: treeField is the key holding the BehaviorTree on the entity a
+          // brain points at (options contract), so the read value is that
+          // BehaviorTree, or undefined when absent.
           const tree = world.entity(brain.tree)?.[treeField] as BehaviorTree | undefined;
           if (!tree) continue;
           const result = evaluate(tree, brain, {
@@ -77,6 +83,9 @@ export function createBehaviorTreeSystem<
             now,
           });
           if (Object.keys(result.brain).length > 0) {
+            // SAFETY: result.brain is the Brain delta evaluate produced; keyed by
+            // brainField it forms the D-shaped delta world.put expects for the
+            // brain field.
             world.put(id, { [brainField]: result.brain } as D);
           }
           for (const intent of result.intents) {

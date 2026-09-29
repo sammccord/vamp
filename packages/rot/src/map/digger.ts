@@ -6,7 +6,7 @@ import { DIRS } from "../constants";
 import RNG from "../rng";
 
 type FeatureType = "room" | "corridor";
-const FEATURES = {
+const FEATURES: Record<FeatureType, FeatureConstructor> = {
   room: Room,
   corridor: Corridor,
 };
@@ -174,8 +174,8 @@ export default class Digger extends Dungeon {
    * Get a suitable wall
    */
   _findWall() {
-    let prio1 = [];
-    let prio2 = [];
+    let prio1: string[] = [];
+    let prio2: string[] = [];
     for (let id in this._walls) {
       let prio = this._walls[id];
       if (prio == 2) {
@@ -190,6 +190,7 @@ export default class Digger extends Dungeon {
       return null;
     } /* no walls :/ */
 
+    // SAFETY: arr is non-empty (guarded above) and holds the wall-id strings collected from for-in over _walls, so getItem returns a string, not null.
     let id = RNG.getItem(arr.sort()) as string; // sort to make the order deterministic
     delete this._walls[id];
 
@@ -201,8 +202,9 @@ export default class Digger extends Dungeon {
    * @returns {bool} was this a successful try?
    */
   _tryFeature(x: number, y: number, dx: number, dy: number) {
+    // SAFETY: getWeightedValue returns one of this._features' keys, which are exactly "room" and "corridor" (the FeatureType union) as set in the constructor.
     let featureName = RNG.getWeightedValue(this._features) as FeatureType;
-    let ctor = FEATURES[featureName] as FeatureConstructor;
+    let ctor = FEATURES[featureName];
     let feature = ctor.createRandomAt(x, y, dx, dy, this._options);
 
     if (!feature.isValid(this._isWallCallback, this._canBeDugCallback)) {

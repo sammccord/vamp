@@ -1,4 +1,4 @@
-import { ConsoleLogger, type TempoLogger } from "@tempojs/common";
+import { ConsoleLogger, MethodType, type TempoLogger } from "@tempojs/common";
 import { type BebopMethodAny, ServiceRegistry } from "@tempojs/server";
 import { describe, expect, it } from "vitest";
 import { CompositeServiceRegistry } from "../src/service-registry.ts";
@@ -18,10 +18,24 @@ class FakeRegistry extends ServiceRegistry {
   }
 
   getMethod(methodId: number): BebopMethodAny | undefined {
-    return this.methodIds.includes(methodId)
-      ? ({ name: `m${methodId}` } as BebopMethodAny)
-      : undefined;
+    return this.methodIds.includes(methodId) ? fakeMethod(`m${methodId}`) : undefined;
   }
+}
+
+function fakeMethod(name: string): BebopMethodAny {
+  const unused = () => {
+    throw new Error(`${name} is a lookup-only fake`);
+  };
+  return {
+    name,
+    service: "Fake",
+    invoke: unused,
+    serialize: unused,
+    deserialize: unused,
+    stringify: unused,
+    fromJSON: unused,
+    type: MethodType.Unary,
+  };
 }
 
 // TempoLogger keeps a process-global registry keyed by name, so a second

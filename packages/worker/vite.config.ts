@@ -7,6 +7,8 @@ import tsdownConfig from "./tsdown.config.ts";
 // stub base class so the DO loads + runs under the plain-Node test runner. This
 // affects only `vp test`/`vp dev`; the published build uses `tsdown.config.ts`
 // (`neverBundle: ["cloudflare:workers"]`), so the real module stays external.
+// `y-durablestream` also imports it, so the test runner inlines that package
+// for the alias to reach it.
 const cfWorkersStub = fileURLToPath(
   new URL("./tests/support/cloudflare-workers-stub.ts", import.meta.url),
 );
@@ -23,4 +25,7 @@ export default defineConfig({
       },
     },
   ],
+  test: {
+    server: { deps: { inline: ["y-durablestream"] } },
+  },
 });

@@ -21,7 +21,7 @@ import {
 } from "./game.core.generated";
 
 /** What the hostile AI reads from the world context: its seeded RNG and frame clock. */
-export type AIContext = Record<string, unknown> & { random: BehaviorRandom; frame: number };
+export type AIContext = { random: BehaviorRandom; frame: number };
 
 /**
  * The concrete ECS world the basic example runs. `UpdateArguments` is `[]`
@@ -156,14 +156,17 @@ export function registerGameSystems<Context extends AIContext = AIContext>(
   registerBehaviors(ecs);
 }
 
+/** The hostile tree's leaf contract: its condition predicates and its tasks. */
+interface HostileLeaves<Context extends AIContext> {
+  conditions: GameConditions<Context>;
+  tasks: GameTasks<Context>;
+}
+
 /**
  * The hostile tree's leaves. Players are queried once per frame and shared by
  * every hostile's scan.
  */
-function hostileLeaves<Context extends AIContext>(): {
-  conditions: GameConditions<Context>;
-  tasks: GameTasks<Context>;
-} {
+function hostileLeaves<Context extends AIContext>(): HostileLeaves<Context> {
   let playersFrame = -1;
   let players: string[] = [];
   const nearestPlayer = (world: World<Context>, hostile: Entity) => {
@@ -214,6 +217,11 @@ function registerBehaviors<Context extends AIContext>(ecs: World<Context>): void
     createGameBehavior<Context, []>(
       1,
       (world, entity, event) => {
+        // SAFETY: ECS.act dispatches through the behavior cache keyed by the
+        // action's tag, so this tag-1 handler only receives `Actions` members
+        // `{ tag: 1, value: Attack }`; the generated Attack record declares
+        // `damage?: number`, and wire-decoded actions preserve the tag/value
+        // pairing (Actions.readFrom).
         const damage = (event.detail.value as { damage?: number }).damage ?? 0;
         if (!entity.id || damage === 0) return;
         world.put(entity.id, { health: { points: -damage } });
@@ -228,6 +236,11 @@ function registerBehaviors<Context extends AIContext>(ecs: World<Context>): void
     createGameBehavior<Context, []>(
       2,
       (world, entity, event) => {
+        // SAFETY: ECS.act dispatches through the behavior cache keyed by the
+        // action's tag, so this tag-2 handler only receives `Actions` members
+        // `{ tag: 2, value: TakeDamage }`; the generated TakeDamage record
+        // declares `damage?: number`, and wire-decoded actions preserve the
+        // tag/value pairing (Actions.readFrom).
         const damage = (event.detail.value as { damage?: number }).damage ?? 0;
         if (!entity.id || damage === 0) return;
         world.put(entity.id, { health: { points: -damage } });
@@ -241,6 +254,11 @@ function registerBehaviors<Context extends AIContext>(ecs: World<Context>): void
     createGameBehavior<Context, []>(
       3,
       (world, entity, event) => {
+        // SAFETY: ECS.act dispatches through the behavior cache keyed by the
+        // action's tag, so this tag-3 handler only receives `Actions` members
+        // `{ tag: 3, value: Heal }`; the generated Heal record declares
+        // `amount?: number`, and wire-decoded actions preserve the tag/value
+        // pairing (Actions.readFrom).
         const amount = (event.detail.value as { amount?: number }).amount ?? 0;
         if (!entity.id || amount === 0) return;
         world.put(entity.id, { health: { points: amount } });
@@ -255,6 +273,11 @@ function registerBehaviors<Context extends AIContext>(ecs: World<Context>): void
     createGameBehavior<Context, []>(
       4,
       (world, entity, event) => {
+        // SAFETY: ECS.act dispatches through the behavior cache keyed by the
+        // action's tag, so this tag-4 handler only receives `Actions` members
+        // `{ tag: 4, value: AreaAttack }`; the generated AreaAttack record
+        // declares `damage?: number`, and wire-decoded actions preserve the
+        // tag/value pairing (Actions.readFrom).
         const damage = (event.detail.value as { damage?: number }).damage ?? 0;
         if (!entity.id || damage === 0) return;
         const delta: EntityDelta = { health: { points: -damage } };

@@ -35,8 +35,11 @@ export function readAllEntities<E>(doc: Doc): E[] {
   const entities = entitiesMap(doc);
   const out: E[] = [];
   for (const [id, emap] of entities) {
-    const raw = emap.toJSON() as Record<string, unknown>;
+    const raw = emap.toJSON();
     if (raw.id === undefined) raw.id = id;
+    // SAFETY: `emap` is the entity's component `Y.Map`, populated by
+    // `writeEntityInsert` (which skips only the redundant `id` key); `id` is the
+    // map key and is backfilled here, so `raw` is that entity — an `E`.
     out.push(raw as E);
   }
   return out;
@@ -47,8 +50,8 @@ export function readAllEntities<E>(doc: Doc): E[] {
  * by reference; a later in-place mutation of the same object would change the
  * Y.Map cell with no update and silently diverge peers. Scalars pass through.
  */
-export function cloneComponentValue(value: unknown): unknown {
-  return value !== null && typeof value === "object" ? clonePlainValue(value) : value;
+export function cloneComponentValue<T>(value: T): T {
+  return clonePlainValue(value);
 }
 
 /**
@@ -57,7 +60,7 @@ export function cloneComponentValue(value: unknown): unknown {
  * an entity already created by a co-subscriber is shared, never duplicated.
  * Assumes a surrounding transaction.
  */
-export function writeEntityInsert(doc: Doc, id: string, entity: Record<string, unknown>): void {
+export function writeEntityInsert<E extends object>(doc: Doc, id: string, entity: E): void {
   const entities = entitiesMap(doc);
   let map = entities.get(id);
   if (!map) {
@@ -86,7 +89,7 @@ export function removeEntity(doc: Doc, id: string): void {
 }
 
 /** Apply a component delta (set/delete keys) to an entity. Assumes a surrounding transaction. */
-export function writeUpdate(doc: Doc, id: string, delta: Record<string, unknown>): void {
+export function writeUpdate<D>(doc: Doc, id: string, delta: D): void {
   const map = entitiesMap(doc).get(id);
   if (!map) return;
   for (const key in delta) {

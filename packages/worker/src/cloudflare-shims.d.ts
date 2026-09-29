@@ -23,7 +23,10 @@ declare module "cloudflare:workers" {
     protected env: Env;
     constructor(ctx: DurableObjectState, env: Env);
   }
-  export type Env = Record<string, unknown>;
+  // Only DO namespaces are resolved from `env` by binding name in this package.
+  export interface Env {
+    readonly [binding: string]: DurableObjectNamespace | undefined;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -131,13 +134,16 @@ interface SqlStorageCursor<T extends Record<string, SqlStorageValue>> {
 
 interface WebSocket {
   accept(): void;
-  send(message: string | ArrayBuffer): void;
+  send(message: string | ArrayBuffer | ArrayBufferView): void;
   close(code?: number, reason?: string): void;
-  serializeAttachment(attachment: unknown): void;
-  deserializeAttachment(): unknown;
+  serializeAttachment(attachment: WebSocketAttachment): void;
+  deserializeAttachment(): WebSocketAttachment | null;
   readonly readyState: number;
   readonly url: string | null;
 }
+
+/** Any non-nullish structured-clone value; the runtime hands back `null` when none is set. */
+type WebSocketAttachment = {};
 
 declare class WebSocketRequestResponsePair {
   constructor(request: string, response: string);
@@ -164,7 +170,10 @@ interface GameStorageStub {
   compact(): Promise<void>;
   // Notify-push registry: a lobby registers itself so the provider RPCs its
   // `onShardUpdate` on every co-subscriber write (see ECSStorage.pushToSubscriber).
-  register(clientId: string, address: unknown): Promise<void>;
+  register(
+    clientId: string,
+    address: { binding: string; name: string; root: string },
+  ): Promise<void>;
   deregister(clientId: string): Promise<void>;
 }
 
@@ -178,7 +187,7 @@ declare class DurableObjectNamespace<T = unknown> {
   newUniqueId(): DurableObjectId;
   idFromName(name: string): DurableObjectId;
   idFromString(id: string): DurableObjectId;
-  get(id: DurableObjectId, options?: unknown): T;
+  get(id: DurableObjectId, options?: DurableObjectGetOptions): T;
   jurisdiction(jurisdiction: string): DurableObjectNamespace<T>;
 }
 
@@ -198,14 +207,12 @@ declare class ReadableStream<R = unknown> {
   ): ReadableStream<T>;
   pipeTo(destination: WritableStream<R>, options?: StreamPipeOptions): Promise<void>;
   tee(): [ReadableStream<R>, ReadableStream<R>];
-  cancel(reason?: unknown): Promise<void>;
   readonly locked: boolean;
 }
 
 declare class ReadableStreamDefaultReader<R = unknown> {
   constructor(stream: ReadableStream<R>);
   read(): Promise<ReadableStreamReadResult<R>>;
-  cancel(reason?: unknown): Promise<void>;
   releaseLock(): void;
   readonly closed: Promise<undefined>;
 }
@@ -216,7 +223,6 @@ declare class WritableStream<W = unknown> {
   constructor(underlyingSink?: UnderlyingSink<W>, strategy?: QueuingStrategy<W>);
   getWriter(): WritableStreamDefaultWriter<W>;
   close(): Promise<void>;
-  abort(reason?: unknown): Promise<void>;
   readonly locked: boolean;
 }
 
@@ -224,7 +230,6 @@ declare class WritableStreamDefaultWriter<W = unknown> {
   constructor(stream: WritableStream<W>);
   write(chunk: W): Promise<void>;
   close(): Promise<void>;
-  abort(reason?: unknown): Promise<void>;
   releaseLock(): void;
   readonly closed: Promise<undefined>;
   readonly ready: Promise<undefined>;
@@ -244,14 +249,12 @@ declare class TransformStream<I = unknown, O = unknown> {
 interface UnderlyingSource<R = unknown> {
   start?(controller: ReadableStreamDefaultController<R>): void | Promise<void>;
   pull?(controller: ReadableStreamDefaultController<R>): void | Promise<void>;
-  cancel?(reason?: unknown): void | Promise<void>;
   type?: undefined;
 }
 
 interface ReadableStreamDefaultController<R = unknown> {
   enqueue(chunk: R): void;
   close(): void;
-  error(e?: unknown): void;
   readonly desiredSize: number | null;
 }
 
@@ -259,12 +262,10 @@ interface UnderlyingSink<W = unknown> {
   start?(controller: WritableStreamDefaultController): void | Promise<void>;
   write?(chunk: W, controller: WritableStreamDefaultController): void | Promise<void>;
   close?(controller: WritableStreamDefaultController): void | Promise<void>;
-  abort?(reason?: unknown): void | Promise<void>;
   type?: undefined;
 }
 
 interface WritableStreamDefaultController {
-  error(e?: unknown): void;
   readonly signal: AbortSignal;
 }
 
@@ -278,7 +279,6 @@ interface Transformer<I = unknown, O = unknown> {
 
 interface TransformStreamDefaultController<O = unknown> {
   enqueue(chunk: O): void;
-  error(reason?: unknown): void;
   terminate(): void;
   readonly desiredSize: number | null;
 }

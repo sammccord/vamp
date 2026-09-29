@@ -1,6 +1,6 @@
 import { type ConsoleLogger, type TempoLogger, TempoLogLevel } from "@tempojs/common";
 import pino from "pino";
-import { ContextLogger } from "./context-logger";
+import { ContextLogger, type LogData } from "./context-logger";
 
 export class PinoLogger extends ContextLogger implements ConsoleLogger {
   logger: pino.Logger;
@@ -12,7 +12,7 @@ export class PinoLogger extends ContextLogger implements ConsoleLogger {
     sourceName: string,
     logLevel: TempoLogLevel = TempoLogLevel.Info,
     parent: pino.Logger = pino(),
-    bindings?: Record<string, unknown>,
+    bindings?: LogData,
   ) {
     super(sourceName, logLevel, undefined, bindings);
     this.sourceName = sourceName;
@@ -44,18 +44,13 @@ export class PinoLogger extends ContextLogger implements ConsoleLogger {
   clone<TLogger extends TempoLogger>(
     sourceName: string,
     asOrphan?: boolean,
-    bindings?: Record<string, unknown>,
+    bindings?: LogData,
   ): TLogger {
     //@ts-expect-error this is fine
     return new PinoLogger(sourceName, this.logLevel, asOrphan ? undefined : this.logger, bindings);
   }
 
-  write(
-    level: TempoLogLevel,
-    message: string,
-    data: Record<string, unknown> = {},
-    error?: Error,
-  ): void {
+  write(level: TempoLogLevel, message: string, data: LogData = {}, error?: Error): void {
     if (level < this.logLevel) {
       return;
     }
@@ -90,37 +85,37 @@ export class PinoLogger extends ContextLogger implements ConsoleLogger {
   /**
    * @inheritDoc
    */
-  trace(message: string, data?: Record<string, unknown>, error?: Error) {
+  trace(message: string, data?: LogData, error?: Error) {
     this.write(0 /* Trace */, message, data, error);
   }
   /**
    * @inheritDoc
    */
-  debug(message: string, data?: Record<string, unknown>, error?: Error) {
+  debug(message: string, data?: LogData, error?: Error) {
     this.write(1 /* Debug */, message, data, error);
   }
   /**
    * @inheritDoc
    */
-  info(message: string, data?: Record<string, unknown>, error?: Error) {
+  info(message: string, data?: LogData, error?: Error) {
     this.write(2 /* Info */, message, data, error);
   }
   /**
    * @inheritDoc
    */
-  warn(message: string, data?: Record<string, unknown>, error?: Error) {
+  warn(message: string, data?: LogData, error?: Error) {
     this.write(3 /* Warn */, message, data, error);
   }
   /**
    * @inheritDoc
    */
-  error(message: string, data?: Record<string, unknown>, error?: Error) {
+  error(message: string, data?: LogData, error?: Error) {
     this.write(4 /* Error */, message, data, error);
   }
   /**
    * @inheritDoc
    */
-  critical(message: string, data?: Record<string, unknown>, error?: Error) {
+  critical(message: string, data?: LogData, error?: Error) {
     this.write(5 /* Critical */, message, data, error);
   }
 

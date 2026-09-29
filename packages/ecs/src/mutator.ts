@@ -41,6 +41,9 @@ export function applyMutation<E extends BaseEntity, D>(
       if (entity) {
         options.mergeDelta(entity, mutation.value.delta);
       } else if (config?.materializeOnMissingUpdate) {
+        // SAFETY: id is the entity id and BaseEntity carries `id?: string`, so
+        // { id } is a valid Partial<E> seed; materializeDelta fills in the rest
+        // from the delta.
         entities.set(id, options.materializeDelta(mutation.value.delta, { id } as Partial<E>));
       }
       return;

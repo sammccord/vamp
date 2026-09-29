@@ -39,7 +39,7 @@ export class AsyncQueueOverflowError extends Error {
 }
 
 type Resolver<T> = (r: IteratorResult<T>) => void;
-type Rejecter = (e: unknown) => void;
+type Rejecter = (cause: unknown) => void;
 
 export class AsyncQueue<T> implements AsyncIterableIterator<T> {
   // Ring buffer: head index + length, never `shift()`.
@@ -98,20 +98,20 @@ export class AsyncQueue<T> implements AsyncIterableIterator<T> {
       const resolve = this.pendingResolve;
       this.pendingResolve = null;
       this.pendingReject = null;
-      resolve({ value: undefined as never, done: true });
+      resolve({ value: undefined, done: true });
     }
   }
 
   /** Producer: terminate the stream with an error thrown into the consumer. Idempotent. */
-  fail(error: unknown): void {
+  fail(cause: unknown): void {
     if (this.closed || this.hasError) return;
     this.hasError = true;
-    this.error = error;
+    this.error = cause;
     if (this.pendingReject) {
       const reject = this.pendingReject;
       this.pendingResolve = null;
       this.pendingReject = null;
-      reject(error);
+      reject(cause);
     }
   }
 
@@ -125,7 +125,7 @@ export class AsyncQueue<T> implements AsyncIterableIterator<T> {
     }
     if (this.closed) {
       await this.dispose();
-      return { value: undefined as never, done: true };
+      return { value: undefined, done: true };
     }
     // Park the single consumer.
     return new Promise<IteratorResult<T>>((resolve, reject) => {
@@ -135,30 +135,30 @@ export class AsyncQueue<T> implements AsyncIterableIterator<T> {
   }
 
   /** Consumer aborted early (break / return). Runs dispose and ends the stream. */
-  async return(value?: unknown): Promise<IteratorResult<T>> {
+  async return(value?: undefined): Promise<IteratorResult<T>> {
     this.closed = true;
     // Resolve any parked consumer so its awaited next() does not dangle.
     if (this.pendingResolve) {
       const resolve = this.pendingResolve;
       this.pendingResolve = null;
       this.pendingReject = null;
-      resolve({ value: undefined as never, done: true });
+      resolve({ value: undefined, done: true });
     }
     await this.dispose();
-    return { value: value as never, done: true };
+    return { value: value, done: true };
   }
 
   /** Consumer threw. Propagate after dispose. */
-  async throw(e?: unknown): Promise<IteratorResult<T>> {
+  async throw(cause?: unknown): Promise<IteratorResult<T>> {
     this.closed = true;
     if (this.pendingReject) {
       const reject = this.pendingReject;
       this.pendingResolve = null;
       this.pendingReject = null;
-      reject(e);
+      reject(cause);
     }
     await this.dispose();
-    throw e;
+    throw cause;
   }
 
   [Symbol.asyncIterator](): AsyncIterableIterator<T> {

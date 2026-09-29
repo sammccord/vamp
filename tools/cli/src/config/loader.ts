@@ -6,6 +6,10 @@ import type { BebopConfig, FrameworkConfig } from "./types";
 /** Parse jsonc, throwing a clear error (with offsets) on any syntax error. */
 function parseJsoncStrict<T>(raw: string, resolved: string): T {
   const errors: ParseError[] = [];
+  // SAFETY: jsonc-parser returns `any` for a user-authored config file. Only
+  // loadVampConfig and loadBebopConfig instantiate T; the former checks every
+  // required field right after, and BebopConfig's fields are all optional and
+  // read through optional chaining.
   const config = parseJsonc(raw, errors, { allowTrailingComma: true }) as T;
   if (errors.length) {
     throw new Error(

@@ -144,6 +144,7 @@ export default class Uniform extends Dungeon {
       this._unconnected = RNG.shuffle(this._rooms.slice());
       this._connected = [];
       if (this._unconnected.length) {
+        // SAFETY: _unconnected is non-empty (the length check above), so pop() cannot return undefined.
         this._connected.push(this._unconnected.pop() as Room);
       } /* first one is always connected */
 
@@ -241,6 +242,7 @@ export default class Uniform extends Dungeon {
 
     if (start[index] >= min && start[index] <= max) {
       /* possible to connect with straight line (I-like) */
+      // SAFETY: start is a non-null Point (guarded above), so start.slice() is a [number, number] tuple.
       end = start.slice() as Point;
       let value = 0;
       switch (dirIndex2) {
@@ -281,11 +283,12 @@ export default class Uniform extends Dungeon {
         return false;
       }
 
-      let mid = [0, 0];
+      let mid: Point = [0, 0];
       mid[index] = start[index];
       let index2 = (index + 1) % 2;
       mid[index2] = end[index2];
-      this._digLine([start as Point, mid as Point, end as Point]);
+      // SAFETY: start and end are non-null here — start was guarded by `if (!start) return false` and end by the `if (!end) return false` above.
+      this._digLine([start as Point, mid, end as Point]);
     } else {
       /* use current wall pair, but adjust the line in the middle (S-like) */
 
@@ -296,13 +299,14 @@ export default class Uniform extends Dungeon {
       }
       let mid = Math.round((end[index2] + start[index2]) / 2);
 
-      let mid1 = [0, 0];
-      let mid2 = [0, 0];
+      let mid1: Point = [0, 0];
+      let mid2: Point = [0, 0];
       mid1[index] = start[index];
       mid1[index2] = mid;
       mid2[index] = end[index];
       mid2[index2] = mid;
-      this._digLine([start as Point, mid1 as Point, mid2 as Point, end as Point]);
+      // SAFETY: start and end are non-null here — start was guarded by `if (!start) return false` and end by the `if (!end) return false` above.
+      this._digLine([start as Point, mid1, mid2, end as Point]);
     }
 
     room1.addDoor(start[0], start[1]);

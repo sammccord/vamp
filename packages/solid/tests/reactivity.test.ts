@@ -29,7 +29,7 @@ describe("createQuery store + registry composition", () => {
           if (record.tag === 3) store.remove(id);
           else {
             const e = world.entity(id);
-            if (e) store.upsert(id, e as TestEntity);
+            if (e) store.upsert(id, e);
           }
         }
         registry.update(mutations);

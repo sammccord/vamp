@@ -16,16 +16,25 @@ export function fromString(str: string): Color {
       let matched = str.match(/[0-9a-f]/gi) || [];
       let values = matched.map((x: string) => parseInt(x, 16));
       if (values.length == 3) {
+        // SAFETY: the `values.length == 3` guard above bounds the hex-digit
+        // match to three channels; `map` preserves length, so the result is a
+        // 3-element `Color` tuple.
         cached = values.map((x: number) => x * 17) as Color;
       } else {
         for (let i = 0; i < 3; i++) {
           values[i + 1] += 16 * values[i];
           values.splice(i, 1);
         }
+        // SAFETY: `values` holds the six matched hex digits of a `#RRGGBB`
+        // color; the pair-folding loop above splices one element per iteration
+        // (three total), leaving exactly three channel values.
         cached = values as Color;
       }
     } else if ((r = str.match(/rgb\(([0-9, ]+)\)/i))) {
       // decimal rgb
+      // SAFETY: `rgb\(([0-9, ]+)\)` has a single capture group, so `r[1]` is
+      // present on a successful match and holds the comma-separated channels of
+      // a well-formed `rgb(r,g,b)`; splitting yields the three tuple elements.
       cached = r[1].split(/\s*,\s*/).map((x: string) => parseInt(x)) as Color;
     } else {
       // html name
@@ -35,6 +44,9 @@ export function fromString(str: string): Color {
     CACHE[str] = cached;
   }
 
+  // SAFETY: `cached` is a 3-element `Color` tuple, populated above from the
+  // cache or parsed input; `slice()` copies every element into a fresh array of
+  // the same length.
   return cached.slice() as Color;
 }
 
@@ -42,6 +54,8 @@ export function fromString(str: string): Color {
  * Add two or more colors
  */
 export function add(color1: Color, ...colors: Color[]): Color {
+  // SAFETY: `color1` is a 3-element `Color` tuple; `slice()` returns a fresh
+  // 3-element copy.
   let result = color1.slice() as Color;
   for (let i = 0; i < 3; i++) {
     for (let j = 0; j < colors.length; j++) {
@@ -67,6 +81,8 @@ export function add_(color1: Color, ...colors: Color[]): Color {
  * Multiply (mix) two or more colors
  */
 export function multiply(color1: Color, ...colors: Color[]): Color {
+  // SAFETY: `color1` is a 3-element `Color` tuple; `slice()` returns a fresh
+  // 3-element copy.
   let result = color1.slice() as Color;
   for (let i = 0; i < 3; i++) {
     for (let j = 0; j < colors.length; j++) {
@@ -94,6 +110,8 @@ export function multiply_(color1: Color, ...colors: Color[]): Color {
  * Interpolate (blend) two colors with a given factor
  */
 export function interpolate(color1: Color, color2: Color, factor = 0.5): Color {
+  // SAFETY: `color1` is a 3-element `Color` tuple; `slice()` returns a fresh
+  // 3-element copy.
   let result = color1.slice() as Color;
   for (let i = 0; i < 3; i++) {
     result[i] = Math.round(result[i] + factor * (color2[i] - color1[i]));
@@ -122,6 +140,8 @@ export function randomize(color: Color, diff: number | Color): Color {
   if (!(diff instanceof Array)) {
     diff = Math.round(RNG.getNormal(0, diff));
   }
+  // SAFETY: `color` is a 3-element `Color` tuple; `slice()` returns a fresh
+  // 3-element copy.
   let result = color.slice() as Color;
   for (let i = 0; i < 3; i++) {
     result[i] += diff instanceof Array ? Math.round(RNG.getNormal(0, diff[i])) : diff;
@@ -204,7 +224,7 @@ export function toHex(color: Color) {
   return `#${clamped.join("")}`;
 }
 
-const CACHE: Record<string, Color> = {
+const CACHE = {
   black: [0, 0, 0],
   navy: [0, 0, 128],
   darkblue: [0, 0, 139],
@@ -351,4 +371,4 @@ const CACHE: Record<string, Color> = {
   lightyellow: [255, 255, 224],
   ivory: [255, 255, 240],
   white: [255, 255, 255],
-};
+} satisfies Record<string, Color>;

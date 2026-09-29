@@ -3,7 +3,7 @@ message Pool {
 	2 -> uint32 min;
 	3 -> uint32 max;
 	4 -> int32 rate;
-  5 -> uint32 interval;
+    5 -> uint32 interval;
 }
 
 // Pool delta - points is CRDT counter, others are last-write-wins

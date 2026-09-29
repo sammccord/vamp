@@ -10,15 +10,16 @@ import type { AnyECS } from "./types";
  * The returned world is NOT `update()`-ticked: it is a pure replica fed by the
  * server `observe` stream via {@link GameProvider}.
  */
-export function createWorld<E extends BaseEntity, D>(
-  options: ECSOptions<E, D>,
-  context: Record<string, unknown> = {},
-): AnyECS<E, D> {
+export function createWorld<
+  E extends BaseEntity,
+  D,
+  State extends Record<string, unknown> = Record<string, never>,
+>(options: ECSOptions<E, D>, context?: State): AnyECS<E, D> {
   const entities = new Map<string, E>();
 
   // Client replica: an Update may be the first frame we see for an entity, so
   // materialize-and-insert on a missing target instead of no-op'ing.
   const mutate = createBaseMutator(entities, options, { materializeOnMissingUpdate: true });
 
-  return new ECS(entities, mutate, context, options);
+  return new ECS(entities, mutate, context ?? {}, options);
 }

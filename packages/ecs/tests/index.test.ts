@@ -4,6 +4,7 @@
  * This test suite covers all public API methods and provides a safety net for refactoring.
  */
 import { beforeEach, describe, expect, test } from "vite-plus/test";
+import type { ArrayDelta } from "../src/delta.ts";
 import { ECS, type ECSOptions, type MutationBatch } from "../src/index.ts";
 import { MutationRecord, MutationType } from "../src/index.ts";
 import { query } from "../src/Query.ts";
@@ -33,8 +34,12 @@ type Entity = {
   userId?: string;
 };
 
-// Simple delta type mirrors the entity shape
-type EntityDelta = Partial<Entity>;
+// Simple delta type mirrors the entity shape; array fields also take the
+// bebop-style array delta { set?, add?, remove? }.
+type EntityDelta = Omit<Partial<Entity>, "children" | "tags"> & {
+  children?: string[] | ArrayDelta<string>;
+  tags?: number[] | ArrayDelta<number>;
+};
 
 // Component IDs
 const components = {
@@ -52,97 +57,85 @@ const components = {
   userId: 12,
 } as const satisfies Record<keyof Omit<Required<Entity>, "tags">, number>;
 
+const numericFields = ["health", "level", "xp", "mana"] as const;
+type NumericFields = Pick<Entity, (typeof numericFields)[number]>;
+
 // Handle bebop-style array delta { set?, add?, remove? }
-function applyArrayDelta(current: string[] | undefined, delta: any): string[] {
+function applyArrayDelta<T>(current: T[] | undefined, delta: ArrayDelta<T>): T[] {
   if (delta.set) return [...delta.set];
   let result = current ? [...current] : [];
   if (delta.add) result = [...result, ...delta.add];
-  if (delta.remove) result = result.filter((x) => !delta.remove.includes(x));
+  const remove = delta.remove;
+  if (remove) result = result.filter((x) => !remove.includes(x));
   return result;
+}
+
+function resolveArray<T>(current: T[] | undefined, delta: T[] | ArrayDelta<T>): T[] {
+  return Array.isArray(delta) ? delta : applyArrayDelta(current, delta);
+}
+
+// Copy every defined field of `source` onto `target`.
+function assignDefined<T>(target: T, source: Partial<T>): void {
+  for (const key in source) {
+    const value = source[key];
+    if (value !== undefined) target[key] = value;
+  }
+}
+
+// Add each defined numeric delta onto the target's value (or set it when absent).
+function addNumeric(target: NumericFields, delta: NumericFields): void {
+  for (const key of numericFields) {
+    const value = delta[key];
+    if (value !== undefined) target[key] = (target[key] ?? 0) + value;
+  }
 }
 
 // materializeDelta: copy all defined fields from delta onto base
 function materializeDelta(delta: EntityDelta, base: Partial<Entity> = {}): Entity {
-  const result = { ...base } as Record<string, unknown>;
-  for (const key in delta) {
-    const dv = (delta as Record<string, unknown>)[key];
-    if (dv === undefined) continue;
-    if (
-      dv !== null &&
-      typeof dv === "object" &&
-      !Array.isArray(dv) &&
-      ("set" in (dv as object) || "add" in (dv as object) || "remove" in (dv as object))
-    ) {
-      result[key] = applyArrayDelta(result[key] as string[] | undefined, dv);
-    } else {
-      result[key] = dv;
-    }
-  }
-  return result as Entity;
+  const { children, tags, ...fields } = delta;
+  const result: Entity = { ...base };
+  assignDefined(result, fields);
+  if (children !== undefined) result.children = resolveArray(result.children, children);
+  if (tags !== undefined) result.tags = resolveArray(result.tags, tags);
+  return result;
 }
 
 // mergeDelta: add numeric deltas, overwrite strings/booleans, merge arrays
 function mergeDelta(entity: Entity, delta: EntityDelta): void {
-  const e = entity as Record<string, unknown>;
-  for (const key in delta) {
-    const dv = (delta as Record<string, unknown>)[key];
-    if (dv === undefined) continue;
-    const ev = e[key];
-    if (typeof dv === "number" && typeof ev === "number") {
-      e[key] = (ev as number) + dv;
-    } else if (
-      dv !== null &&
-      typeof dv === "object" &&
-      !Array.isArray(dv) &&
-      ("set" in (dv as object) || "add" in (dv as object) || "remove" in (dv as object))
-    ) {
-      // bebop array delta
-      e[key] = applyArrayDelta(ev as string[] | undefined, dv);
-    } else {
-      e[key] = dv;
-    }
-  }
+  const { children, tags, health, level, xp, mana, ...fields } = delta;
+  assignDefined(entity, fields);
+  addNumeric(entity, { health, level, xp, mana });
+  if (children !== undefined) entity.children = resolveArray(entity.children, children);
+  if (tags !== undefined) entity.tags = resolveArray(entity.tags, tags);
+}
+
+// Accumulate array deltas: apply `next` on top of `prev`.
+// For simplicity, last-write wins for set; union add/remove
+function accumulateArray<T>(
+  prev: T[] | ArrayDelta<T> | undefined,
+  next: T[] | ArrayDelta<T>,
+): T[] | ArrayDelta<T> {
+  if (Array.isArray(next)) return next;
+  if (next.set) return { set: next.set };
+  const prevDelta = Array.isArray(prev) ? undefined : prev;
+  if (prevDelta?.set) return { set: applyArrayDelta(prevDelta.set, next) };
+  const combinedAdd = [...(prevDelta?.add || []), ...(next.add || [])];
+  const combinedRemove = [...(prevDelta?.remove || []), ...(next.remove || [])];
+  const combined: ArrayDelta<T> = {};
+  if (combinedAdd.length) combined.add = combinedAdd;
+  if (combinedRemove.length) combined.remove = combinedRemove;
+  return combined;
 }
 
 // accumulateDelta: accumulate two deltas together
 function accumulateDelta(from: EntityDelta, to: EntityDelta): EntityDelta {
-  const result = { ...(from as Record<string, unknown>) };
-  for (const key in to) {
-    const tv = (to as Record<string, unknown>)[key];
-    if (tv === undefined) continue;
-    const fv = result[key];
-    if (typeof tv === "number" && typeof fv === "number") {
-      result[key] = fv + tv;
-    } else if (
-      tv !== null &&
-      typeof tv === "object" &&
-      !Array.isArray(tv) &&
-      ("set" in (tv as object) || "add" in (tv as object) || "remove" in (tv as object))
-    ) {
-      // Accumulate array deltas: apply `to` delta on top of result
-      // For simplicity, last-write wins for set; union add/remove
-      const prevDelta = fv as any;
-      const nextDelta = tv as any;
-      if (nextDelta.set) {
-        result[key] = { set: nextDelta.set };
-      } else {
-        const combinedAdd = [...(prevDelta?.add || []), ...(nextDelta.add || [])];
-        const combinedRemove = [...(prevDelta?.remove || []), ...(nextDelta.remove || [])];
-        const prevSet = prevDelta?.set;
-        if (prevSet) {
-          result[key] = { set: applyArrayDelta(prevSet, nextDelta) };
-        } else {
-          result[key] = {
-            ...(combinedAdd.length ? { add: combinedAdd } : {}),
-            ...(combinedRemove.length ? { remove: combinedRemove } : {}),
-          };
-        }
-      }
-    } else {
-      result[key] = tv;
-    }
-  }
-  return result as EntityDelta;
+  const { children, tags, health, level, xp, mana, ...fields } = to;
+  const result: EntityDelta = { ...from };
+  assignDefined(result, fields);
+  addNumeric(result, { health, level, xp, mana });
+  if (children !== undefined) result.children = accumulateArray(result.children, children);
+  if (tags !== undefined) result.tags = accumulateArray(result.tags, tags);
+  return result;
 }
 
 // Helper functions mirroring @vaporware/bebop/lib/entities
@@ -215,7 +208,7 @@ function createTestECS() {
 
   const options: ECSOptions<Entity, EntityDelta> = {
     createId: () => `entity_${idCounter++}`,
-    components: components as unknown as Record<keyof Entity, number>,
+    components,
     materializeDelta,
     mergeDelta,
     accumulateDelta,
@@ -227,7 +220,7 @@ function createTestECS() {
   };
 
   return new ECS<TestContext, [number], TestAction, number, Entity, EntityDelta>(
-    entities as unknown as Map<string, Entity>,
+    entities,
     mutate,
     context,
     options,
@@ -276,7 +269,7 @@ describe("ECS", () => {
     test("should create entity with generated ID", () => {
       const entityId = ecs.createEntity();
       expect(entityId).toBeDefined();
-      expect(typeof entityId).toBe("string");
+      expect(entityId).toBeTypeOf("string");
       expect(ecs.hasEntity(entityId)).toBe(true);
     });
 
@@ -445,8 +438,12 @@ describe("ECS", () => {
 
     test("should handle undefined component gracefully", () => {
       // This should not throw or cause issues
-      ecs.addComponent(entityId, "nonexistent" as any);
-      ecs.removeComponent(entityId, "nonexistent" as any);
+      // SAFETY: "nonexistent" is deliberately not a component name; this test
+      // exercises the runtime guard where add/removeComponent miss the
+      // `options.components` lookup and return without touching the entity.
+      const nonexistent = "nonexistent" as Exclude<keyof Entity, "tags">;
+      ecs.addComponent(entityId, nonexistent);
+      ecs.removeComponent(entityId, nonexistent);
     });
   });
 
@@ -1745,7 +1742,7 @@ describe("ECS", () => {
 
   describe("Edge Cases and Error Handling", () => {
     test("should handle entity operations with undefined ID gracefully", () => {
-      const result = ecs.delete({ name: "No ID" } as Entity);
+      const result = ecs.delete({ name: "No ID" });
       expect(result).toBeUndefined();
     });
 
@@ -1823,7 +1820,7 @@ describe("ECS", () => {
       const mutation = mutations.get("new-entity");
       expect(mutation).toBeDefined();
       expect(mutation?.tag).toBe(MutationType.Insert);
-      expect((mutation!.value as any).entity.health).toBe(100);
+      expect(mutation!.value).toHaveProperty("entity.health", 100);
     });
 
     test("should track update mutations within scope", async () => {
@@ -1837,7 +1834,7 @@ describe("ECS", () => {
       expect(mutations.size).toBe(1);
       const mutation = mutations.get("existing-entity")!;
       expect(mutation.tag).toBe(MutationType.Update);
-      expect((mutation.value as any).delta.health).toBe(50);
+      expect(mutation.value).toHaveProperty("delta.health", 50);
     });
 
     test("should track delete mutations within scope", async () => {
@@ -1867,8 +1864,8 @@ describe("ECS", () => {
       expect(mutations.size).toBe(1);
       const mutation = mutations.get("coalesce-test");
       expect(mutation!.tag).toBe(MutationType.Insert);
-      expect((mutation!.value as any).entity.health).toBe(75); // 100 + (-25) = 75
-      expect((mutation!.value as any).entity.name).toBe("updated");
+      expect(mutation!.value).toHaveProperty("entity.health", 75); // 100 + (-25) = 75
+      expect(mutation!.value).toHaveProperty("entity.name", "updated");
     });
 
     test("should coalesce insert + delete = net zero (no mutations)", async () => {
@@ -2005,9 +2002,9 @@ describe("ECS", () => {
       const entity2 = mutations.get("async-2");
 
       expect(entity1!.tag).toBe(MutationType.Insert);
-      expect((entity1!.value as any).entity.health).toBe(50); // 100 + (-50) = 50
+      expect(entity1!.value).toHaveProperty("entity.health", 50); // 100 + (-50) = 50
       expect(entity2!.tag).toBe(MutationType.Insert);
-      expect((entity2!.value as any).entity.health).toBe(200);
+      expect(entity2!.value).toHaveProperty("entity.health", 200);
     });
 
     test("should capture final entity state at scope completion", async () => {
@@ -2023,8 +2020,8 @@ describe("ECS", () => {
 
       expect(mutations.size).toBe(1);
       const mutation = mutations.get("final-state")!;
-      expect((mutation.value as any).entity.health).toBe(50); // 100 + (-25) + (-25) = 50
-      expect((mutation.value as any).entity.name).toBe("updated");
+      expect(mutation.value).toHaveProperty("entity.health", 50); // 100 + (-25) + (-25) = 50
+      expect(mutation.value).toHaveProperty("entity.name", "updated");
     });
   });
 
@@ -2141,7 +2138,7 @@ describe("ECS", () => {
       expect(ecs.hasTag(entity.id!, 1)).toBe(true);
 
       // Replace tags with [3]
-      ecs.put(entity.id!, { tags: [3] } as unknown as EntityDelta);
+      ecs.put(entity.id!, { tags: [3] });
       expect(ecs.hasTag(entity.id!, 1)).toBe(false);
       expect(ecs.hasTag(entity.id!, 3)).toBe(true);
     });
@@ -2231,7 +2228,7 @@ describe("ECS", () => {
       expect(ecs.hasTag(entity.id!, 1)).toBe(true);
       expect(ecs.hasTag(entity.id!, 2)).toBe(true);
 
-      ecs.put(entity.id!, { tags: { set: [3] } } as unknown as EntityDelta);
+      ecs.put(entity.id!, { tags: { set: [3] } });
       expect(ecs.hasTag(entity.id!, 1)).toBe(false);
       expect(ecs.hasTag(entity.id!, 2)).toBe(false);
       expect(ecs.hasTag(entity.id!, 3)).toBe(true);
@@ -2243,8 +2240,8 @@ describe("ECS", () => {
       expect(ecs.hasTag(entity.id!, 2)).toBe(true);
 
       ecs.put(entity.id!, {
-        tags: { add: [3], remove: [1] } as { add: number[]; remove: number[] },
-      } as unknown as EntityDelta);
+        tags: { add: [3], remove: [1] },
+      });
       expect(ecs.hasTag(entity.id!, 3)).toBe(true);
       expect(ecs.hasTag(entity.id!, 1)).toBe(false);
       expect(ecs.hasTag(entity.id!, 2)).toBe(true);
@@ -2254,8 +2251,8 @@ describe("ECS", () => {
       const entity = ecs.insert({ health: 100, tags: [1, 2] });
       // tag 2 is both added and removed -> removals win (applied last)
       ecs.put(entity.id!, {
-        tags: { add: [2, 3], remove: [2] } as { add: number[]; remove: number[] },
-      } as unknown as EntityDelta);
+        tags: { add: [2, 3], remove: [2] },
+      });
       expect(ecs.hasTag(entity.id!, 1)).toBe(true);
       expect(ecs.hasTag(entity.id!, 2)).toBe(false); // removed (remove applied after add)
       expect(ecs.hasTag(entity.id!, 3)).toBe(true); // added
@@ -2263,13 +2260,13 @@ describe("ECS", () => {
 
     test("put with object delta add-only preserves existing tags", () => {
       const entity = ecs.insert({ health: 100, tags: [1] });
-      ecs.put(entity.id!, { tags: { add: [2] } } as unknown as EntityDelta);
+      ecs.put(entity.id!, { tags: { add: [2] } });
       expect(ecs.getTags(entity.id!).sort()).toEqual([1, 2]);
     });
 
     test("put with object delta remove-only against current tags", () => {
       const entity = ecs.insert({ health: 100, tags: [1, 2, 3] });
-      ecs.put(entity.id!, { tags: { remove: [2] } } as unknown as EntityDelta);
+      ecs.put(entity.id!, { tags: { remove: [2] } });
       expect(ecs.getTags(entity.id!).sort()).toEqual([1, 3]);
     });
 
@@ -2277,7 +2274,7 @@ describe("ECS", () => {
       const entity = ecs.insert({ health: 100, tags: [1, 2, 3] });
       expect(ecs.getTags(entity.id!)).toHaveLength(3);
 
-      ecs.put(entity.id!, { tags: [] } as unknown as EntityDelta);
+      ecs.put(entity.id!, { tags: [] });
       expect(ecs.getTags(entity.id!)).toEqual([]);
     });
 
@@ -2320,10 +2317,7 @@ describe("ECS", () => {
       // No live entities remain in the archetype graph.
       expect(ecs.entityArchetype.size).toBe(0);
       // archetypeBehaviorCache is bounded by distinct archetypes, not iterations.
-      expect(
-        (ecs as unknown as { archetypeBehaviorCache: Map<unknown, unknown> }).archetypeBehaviorCache
-          .size,
-      ).toBeLessThan(10);
+      expect(ecs["archetypeBehaviorCache"].size).toBeLessThan(10);
       // deletedEntities is bounded by the documented ring cap rather than 10k.
       expect(ecs.deletedEntities.size).toBeLessThanOrEqual(1024);
     });
@@ -2444,11 +2438,7 @@ describe("ECS", () => {
 
       await ecs.act(inserted.id!, { tag: 558, value: "x" }); // self-heal rebuild
       expect(rebuildCount).toBe(1);
-      expect(
-        (ecs as unknown as { _deferredCacheRebuilds: Set<string> })._deferredCacheRebuilds.has(
-          inserted.id!,
-        ),
-      ).toBe(false); // dropped from the pending set
+      expect(ecs["_deferredCacheRebuilds"].has(inserted.id!)).toBe(false); // dropped from the pending set
 
       ecs.update(16.67); // flush deferred rebuilds — must not rebuild this id again
       expect(rebuildCount).toBe(1);
@@ -2488,9 +2478,7 @@ describe("ECS", () => {
 
       ecs.deleteEntity(id);
       expect(ecs.entityBehaviorCache.has(id)).toBe(false); // evicted by Fix 1b/1d
-      expect(
-        (ecs as unknown as { _deferredCacheRebuilds: Set<string> })._deferredCacheRebuilds.has(id),
-      ).toBe(false);
+      expect(ecs["_deferredCacheRebuilds"].has(id)).toBe(false);
     });
 
     test("query() result is not aliased by event-system execution", () => {
@@ -2547,7 +2535,7 @@ describe("ECS", () => {
         }
         created++;
       }
-      const index = (ecs as unknown as { _archetypeIndex: Map<string, unknown> })._archetypeIndex;
+      const index = ecs["_archetypeIndex"];
       // Root + every distinct combination archetype reached. Bounded by distinct
       // combinations (<= 32), NOT by created entities * combinations (quadratic).
       expect(index.size).toBeGreaterThan(comps.length); // graph actually grew
@@ -2610,10 +2598,7 @@ describe("ECS", () => {
     test("upsert cached query sees entities in archetypes created later", () => {
       // First upsert of shape {health}: no match -> inserts a new entity. This
       // populates the {health} query cache entry.
-      const first = ecs.upsert(
-        { health: 10 } as EntityDelta,
-        (e: Entity | undefined) => e?.name === "target",
-      );
+      const first = ecs.upsert({ health: 10 }, (e: Entity | undefined) => e?.name === "target");
       expect(first.name).toBeUndefined();
 
       // Create a brand-new archetype {health, name} AFTER the cache entry exists,
@@ -2626,7 +2611,7 @@ describe("ECS", () => {
       // archetype. We assert by entity count: a stale cache would insert a 3rd
       // entity instead of updating `target`.
       const before = ecs.entities.size;
-      ecs.upsert({ health: 1 } as EntityDelta, (e: Entity | undefined) => e?.name === "target");
+      ecs.upsert({ health: 1 }, (e: Entity | undefined) => e?.name === "target");
       expect(ecs.entities.size).toBe(before); // update path taken, not insert
       // target's health was updated (mergeDelta adds: 5 + 1 = 6).
       expect(ecs.entities.get("target-entity")?.health).toBe(6);
@@ -2638,7 +2623,7 @@ describe("ECS", () => {
       ecs.insert({ id: "p2", health: 50 });
 
       const updated = ecs.upsert(
-        { health: 75, level: 5 } as EntityDelta,
+        { health: 75, level: 5 },
         (e: Entity | undefined) => e?.replicated === true,
       );
       expect(updated.health).toBe(75);
@@ -2686,7 +2671,7 @@ describe("ECS", () => {
 
     // 19 §4a — actToSubtree removed; act is the subtree operation.
     test("actToSubtree is removed from the public API", () => {
-      expect((ecs as unknown as Record<string, unknown>).actToSubtree).toBeUndefined();
+      expect("actToSubtree" in ecs).toBe(false);
     });
 
     // 19 §4d — insert must not mutate the caller's object and must return the

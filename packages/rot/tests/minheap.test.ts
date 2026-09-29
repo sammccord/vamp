@@ -31,11 +31,12 @@ describe("MinHeap.remove", () => {
 
   test("remove of the last slot leaves the rest sorted", () => {
     const h = new MinHeap<string>();
-    for (const [k, v] of [
+    const items: [number, string][] = [
       [1, "a"],
       [2, "b"],
       [3, "c"],
-    ] as [number, string][]) {
+    ];
+    for (const [k, v] of items) {
       h.push(v, k);
     }
     h.remove("c");
@@ -111,10 +112,17 @@ describe("Speed scheduler integration", () => {
     s.add(b, true);
     s.add(c, true);
     s.next(); // advance once so the queue is non-trivially populated
+    // SAFETY: Speed extends Scheduler (src/scheduler/scheduler.ts), whose
+    // remove(item) is public; the cast is needed because this file typechecks
+    // under nodenext, where speed.ts's extensionless `./scheduler` import
+    // fails to resolve and the inherited member vanishes from Speed's type.
     (s as any).remove(b); // de-schedule the mid-priority actor
 
     const order: string[] = [];
-    for (let i = 0; i < 12; i++) order.push((s.next() as Actor).id);
+    for (let i = 0; i < 12; i++) {
+      const actor: Actor = s.next();
+      order.push(actor.id);
+    }
 
     expect(order).not.toContain("b");
     // 'a' (fastest) must appear at least as often as 'c' (slowest)

@@ -29,7 +29,7 @@ describe("scalarToTs (1a float64)", () => {
 function schemaFixture(
   entityFields: SchemaDefinition["fields"],
   extra: Array<[string, SchemaDefinition]> = [],
-): { entity: SchemaDefinition; schema: ParsedSchema } {
+) {
   const entity: SchemaDefinition = { name: "Entity", kind: "message", fields: entityFields };
   const schema: ParsedSchema = {
     definitions: new Map<string, SchemaDefinition>([

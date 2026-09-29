@@ -1,19 +1,52 @@
 import { ConsoleLogger } from "@tempojs/common";
 import { ServiceRegistry } from "@tempojs/server";
-import { type BaseEntity, createEntitySystem, type ECSOptions } from "@vampgg/ecs";
+import {
+  type BaseEntity,
+  createEntitySystem,
+  type ECS,
+  type ECSOptions,
+  type GenericAction,
+} from "@vampgg/ecs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as Y from "yjs";
+import type { YStreamClientOptions, YStreamProviderStub } from "y-durablestream";
+import {
+  type ContextSeed,
+  defineECSRuntime,
+  ECSDurableObject,
+  type RuntimeContext,
+  type ShardSyncClient,
+} from "../src/ecs.ts";
 import { entitiesMap, readAllEntities, writeEntityInsert } from "../src/entity-doc.ts";
+
+/** The GAME_STORAGE stub the fake env hands out; the fake client reads/writes its `__` fields. */
+interface FakeStub {
+  __seed?: Uint8Array;
+  __pushed?: Uint8Array[];
+  __providerDoc?: Y.Doc;
+  subscribe(): Promise<ReadableStream>;
+  update(): Promise<void>;
+  getYDoc(): Promise<Uint8Array>;
+  compact(): Promise<void>;
+  register(): Promise<void>;
+  deregister(): Promise<void>;
+}
+
+/** A stub that is itself the durable provider: it keeps the doc forwarded writes land in. */
+interface FakeProviderStub extends FakeStub {
+  __providerDoc: Y.Doc;
+}
 
 /**
  * Durable Object lifecycle tests, run in plain Node (see vite.config.ts, which
  * aliases the workerd-only `cloudflare:workers` module to a stub base class).
  *
  * The DO is driven against a fake `DurableObjectState`/`env`. Only the external
- * Yjs sync transport (`y-durablestream`'s `YStreamClient`) is mocked — vamp's own
+ * Yjs sync transport (`y-durablestream`'s `YStreamClient`) is replaced, through the
+ * DO's `createSyncClient` seam — vamp's own
  * logic (storage persistence, doc write/seed, session restore on hibernation
- * wake, connection teardown, the alarm tick loop) runs for real. The mock client
- * applies an optional `stub.__seed` doc update on connect and reports "synced",
+ * wake, connection teardown, the alarm tick loop) runs for real. The fake client
+ * applies an optional `stub.__seed` doc update on `syncOnce`,
  * standing in for the storage DO streaming the persisted world.
  *
  * NOTE: pool-workers (real workerd) is the ideal harness but is currently
@@ -21,57 +54,47 @@ import { entitiesMap, readAllEntities, writeEntityInsert } from "../src/entity-d
  * I/O in workerd's global scope), so we run the DO in Node behind these fakes.
  */
 
-vi.mock("y-durablestream", async () => {
-  const Yjs = await import("yjs");
-  class YStreamClient {
-    private _synced = false;
-    private _cb: ((s: string) => void) | undefined;
-    constructor(
-      public doc: Y.Doc,
-      public opts: { stub?: { __seed?: Uint8Array } },
-    ) {}
-    get synced(): boolean {
-      return this._synced;
-    }
-    onStatusChange(cb: (s: string) => void): () => void {
-      this._cb = cb;
-      return () => {
-        this._cb = undefined;
-      };
-    }
-    /** One-shot initial sync: apply the provider's seed (stands in for the pull). */
-    async syncOnce(): Promise<void> {
-      const seed = this.opts?.stub?.__seed;
-      if (seed) Yjs.applyUpdate(this.doc, seed);
-      this._synced = true;
-    }
-    /**
-     * Forward a local write upstream. No real provider in this fake, but (a) record
-     * the call on the stub so tests can assert that synced-in (REMOTE) entities are
-     * NOT forwarded back (the no-duplication guarantee of a pure load), and (b) if
-     * the stub models a stateful provider (`__providerDoc`), apply the forwarded
-     * update into it so a later `syncOnce` (a fresh DO) pulls the accumulated state
-     * back — modeling durable persistence across eviction.
-     */
-    async pushLocalUpdate(update: Uint8Array, _key?: string): Promise<void> {
-      const stub = this.opts?.stub as
-        | { __pushed?: Uint8Array[]; __providerDoc?: Y.Doc }
-        | undefined;
-      if (!stub) return;
-      (stub.__pushed ??= []).push(update);
-      if (stub.__providerDoc) Yjs.applyUpdate(stub.__providerDoc, update);
-    }
-    async connect(): Promise<void> {
-      await this.syncOnce();
-      this._cb?.("synced");
-    }
-    disconnect(): void {}
-  }
-  return { YStreamClient };
-});
+/** The test-controlled state a fake stub carries; the fake client reads/writes it. */
+type FakeStubState = Partial<Pick<FakeStub, "__seed" | "__pushed" | "__providerDoc">>;
 
-// Imported AFTER vi.mock so the DO picks up the mocked client.
-const { ECSDurableObject, defineECSRuntime } = await import("../src/ecs.ts");
+class FakeYStreamClient implements ShardSyncClient {
+  constructor(
+    private doc: Y.Doc,
+    private stub: YStreamProviderStub & FakeStubState,
+  ) {}
+  /** One-shot initial sync: apply the provider's seed (stands in for the pull). */
+  async syncOnce(): Promise<void> {
+    const seed = this.stub.__seed;
+    if (seed) Y.applyUpdate(this.doc, seed);
+  }
+  /**
+   * Forward a local write upstream. No real provider in this fake, but (a) record
+   * the call on the stub so tests can assert that synced-in (REMOTE) entities are
+   * NOT forwarded back (the no-duplication guarantee of a pure load), and (b) if
+   * the stub models a stateful provider (`__providerDoc`), apply the forwarded
+   * update into it so a later `syncOnce` (a fresh DO) pulls the accumulated state
+   * back — modeling durable persistence across eviction.
+   */
+  async pushLocalUpdate(update: Uint8Array): Promise<void> {
+    (this.stub.__pushed ??= []).push(update);
+    if (this.stub.__providerDoc) Y.applyUpdate(this.stub.__providerDoc, update);
+  }
+  disconnect(): void {}
+}
+
+class TestECSDurableObject extends ECSDurableObject<
+  {},
+  {},
+  [],
+  GenericAction,
+  number,
+  Entity,
+  Delta
+> {
+  protected override createSyncClient(doc: Y.Doc, options: YStreamClientOptions): ShardSyncClient {
+    return new FakeYStreamClient(doc, options.stub);
+  }
+}
 
 // `WebSocketRequestResponsePair` is a workerd global used in the DO constructor.
 class FakeWSRRP {
@@ -90,29 +113,27 @@ type Delta = Partial<Entity>;
 const ecsOptions = {
   createId: () => crypto.randomUUID(),
   components: { x: 0, y: 1, n: 2 },
-  materializeDelta: (delta: Delta): Entity => ({ ...delta }) as Entity,
+  materializeDelta: (delta: Delta): Entity => ({ ...delta }),
   mergeDelta: (entity: Entity, delta: Delta): void => {
-    Object.assign(entity as Record<string, unknown>, delta);
+    Object.assign(entity, delta);
   },
   accumulateDelta: (from: Delta, to: Delta): Delta => ({ ...to, ...from }),
-} as unknown as ECSOptions<Entity, Delta>;
+} satisfies ECSOptions<Entity, Delta>;
+
+type TestWorld = ECS<RuntimeContext<{}, {}>, [], GenericAction, number, Entity, Delta>;
 
 // Registers a system that increments `n` on every entity carrying the `n`
 // component each tick — the observable proof that a tick actually ran.
-function registerNSystem(ecs: unknown) {
-  // biome-ignore lint/suspicious/noExplicitAny: minimal world typing in test
-  const world = ecs as any;
+function registerNSystem(world: TestWorld) {
   world.registerSystem(
     createEntitySystem(
-      // biome-ignore lint/suspicious/noExplicitAny: see above
-      (entities: string[], w: any) => {
+      (entities: string[], w: TestWorld) => {
         for (const id of entities) {
           const n = w.entity(id)?.n ?? 0;
           w.put(id, { n: n + 1 });
         }
       },
-      // biome-ignore lint/suspicious/noExplicitAny: query builder
-      (q: any) => q.every(ecsOptions.components.n),
+      (q) => q.every(ecsOptions.components.n),
     ),
   );
 }
@@ -126,16 +147,21 @@ class TestRegistry extends ServiceRegistry {
 }
 
 // ── Fakes for the Durable Object runtime ────────────────────────────────────
-function makeStorage(initial: Record<string, unknown> = {}) {
-  const _map = new Map<string, unknown>(Object.entries(initial));
+/** Every value the DO persists: namespace, context seed, shard roots, tick config. */
+type StoredValue = string | string[] | ContextSeed | { intervalMs: number; paused: boolean };
+
+function makeStorage(initial: { [key: string]: StoredValue } = {}) {
+  const _map = new Map<string, StoredValue>(Object.entries(initial));
   return {
     _map,
     async get(key: string) {
       return _map.get(key);
     },
-    async put(entries: Record<string, unknown> | string, value?: unknown) {
-      if (typeof entries === "string") _map.set(entries, value);
-      else for (const [k, v] of Object.entries(entries)) _map.set(k, v);
+    async put(
+      ...args: [entries: { [key: string]: StoredValue }] | [key: string, value: StoredValue]
+    ) {
+      if (args.length === 2) _map.set(args[0], args[1]);
+      else for (const [k, v] of Object.entries(args[0])) _map.set(k, v);
     },
   };
 }
@@ -143,11 +169,14 @@ type FakeStorage = ReturnType<typeof makeStorage>;
 
 // biome-ignore lint/suspicious/noExplicitAny: fake socket list
 function makeCtx(storage: FakeStorage, sockets: any[] = []) {
+  let blocking: Promise<unknown> | undefined;
   const ctx = {
     id: { toString: () => "do-test", name: "do-test" },
     storage,
     _sockets: sockets,
-    _blocking: undefined as Promise<unknown> | undefined,
+    get _blocking() {
+      return blocking;
+    },
     getWebSockets() {
       return this._sockets;
     },
@@ -156,7 +185,7 @@ function makeCtx(storage: FakeStorage, sockets: any[] = []) {
     waitUntil() {},
     blockConcurrencyWhile<T>(fn: () => Promise<T>): Promise<T> {
       const p = fn();
-      this._blocking = p;
+      blocking = p;
       return p;
     },
     abort() {},
@@ -165,13 +194,13 @@ function makeCtx(storage: FakeStorage, sockets: any[] = []) {
 }
 type FakeCtx = ReturnType<typeof makeCtx>;
 
-function makeWs(attachment: unknown = null) {
+function makeWs(attachment: WebSocketAttachment | null = null) {
   let a = attachment;
   const sent: ArrayBuffer[] = [];
   let closed: { code?: number; reason?: string } | undefined;
   return {
     readyState: 1,
-    serializeAttachment(v: unknown) {
+    serializeAttachment(v: WebSocketAttachment) {
       a = structuredClone(v);
     },
     deserializeAttachment() {
@@ -190,7 +219,7 @@ function makeWs(attachment: unknown = null) {
   };
 }
 
-function makeStub(seed?: Uint8Array) {
+function makeStub(seed?: Uint8Array): FakeStub {
   return {
     __seed: seed,
     async subscribe() {
@@ -208,12 +237,12 @@ function makeStub(seed?: Uint8Array) {
 
 /**
  * A GAME_STORAGE stub that IS the durable provider: it holds a `Y.Doc`, the
- * mocked client's `pushLocalUpdate` accumulates forwarded LOCAL writes into it
- * (see the `vi.mock` above), and `__seed`/`getYDoc` return its CURRENT encoded
+ * fake client's `pushLocalUpdate` accumulates forwarded LOCAL writes into it
+ * (see `FakeYStreamClient`), and `__seed`/`getYDoc` return its CURRENT encoded
  * state — so a `syncOnce` from a later, fresh DO pulls back everything a previous
  * session persisted. Models world-state durability across DO eviction.
  */
-function makeProviderStub() {
+function makeProviderStub(): FakeProviderStub {
   const providerDoc = new Y.Doc();
   return {
     __providerDoc: providerDoc,
@@ -233,8 +262,14 @@ function makeProviderStub() {
   };
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: fake env binding
-function makeEnv(stub: any) {
+interface FakeEnv {
+  GAME_STORAGE: {
+    idFromName(name: string): { name: string };
+    get(id: { name: string }): FakeStub;
+  };
+}
+
+function makeEnv(stub: FakeStub): FakeEnv {
   return {
     GAME_STORAGE: {
       idFromName: (name: string) => ({ name }),
@@ -247,40 +282,37 @@ function makeEnv(stub: any) {
 function seedDoc(namespace: string, entities: Array<Entity & { id: string }>): Uint8Array {
   const doc = new Y.Doc();
   doc.transact(() => {
-    for (const e of entities) writeEntityInsert(doc, e.id, e as Record<string, unknown>);
+    for (const e of entities) writeEntityInsert(doc, e.id, e);
   });
   return Y.encodeStateAsUpdate(doc);
 }
 
 interface RuntimeOverrides {
-  registerSystems?: (ecs: unknown) => void;
+  registerSystems?: (ecs: TestWorld) => void;
   tickIntervalMs?: number;
-  tickArgs?: () => unknown[];
-  onConnectionClose?: (ws: unknown) => void;
-  rehydrateConnection?: (ecs: unknown, ws: unknown) => void;
+  tickArgs?: () => [];
+  onConnectionClose?: (ws: WebSocket) => void;
+  rehydrateConnection?: (ecs: TestWorld, ws: WebSocket) => void;
 }
 
 function configureRuntime(overrides: RuntimeOverrides = {}) {
-  defineECSRuntime(
-    () =>
-      ({
-        serviceRegistry: new TestRegistry(logger),
-        ecs: ecsOptions,
-        ...overrides,
-        // biome-ignore lint/suspicious/noExplicitAny: erased provider shape
-      }) as any,
-  );
+  defineECSRuntime<{}, {}, [], GenericAction, number, Entity, Delta>(() => ({
+    serviceRegistry: new TestRegistry(logger),
+    ecs: ecsOptions,
+    ...overrides,
+  }));
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: the DO has many generic params the tests don't need
-function newDO(ctx: FakeCtx, env: unknown): any {
+function newDO(ctx: FakeCtx, env: FakeEnv): any {
+  // SAFETY: the fakes cover only the DO runtime surface these tests drive, and
+  // the DO's generic parameters are left unbound so tests can reach internals.
   // biome-ignore lint/suspicious/noExplicitAny: see above
-  return new (ECSDurableObject as any)(ctx, env);
+  return new (TestECSDurableObject as any)(ctx, env);
 }
 
 beforeEach(() => {
-  // biome-ignore lint/suspicious/noExplicitAny: install workerd global
-  (globalThis as any).WebSocketRequestResponsePair = FakeWSRRP;
+  vi.stubGlobal("WebSocketRequestResponsePair", FakeWSRRP);
 });
 
 describe("ECSDurableObject — bootstrap & persistence", () => {
@@ -607,8 +639,7 @@ describe("ECSDurableObject — runtime tick controls (no alarm)", () => {
 
 // Env whose GAME_STORAGE resolves a DISTINCT stub per root, so a character shard
 // can be seeded independently of the lobby's own (default) shard.
-// biome-ignore lint/suspicious/noExplicitAny: fake env binding
-function makeEnvByRoot(byRoot: Record<string, any>): any {
+function makeEnvByRoot(byRoot: { [root: string]: FakeStub }): FakeEnv {
   return {
     GAME_STORAGE: {
       idFromName: (name: string) => ({ name }),
@@ -656,9 +687,9 @@ describe("ECSDurableObject — explicit shard subscription", () => {
 
     // No duplication: the synced-in (REMOTE) entities are never forwarded back to
     // the provider — a pure load re-persists nothing. (`__pushed` is attached
-    // dynamically by the mock client's `pushLocalUpdate`, so it is not on the
+    // dynamically by the fake client's `pushLocalUpdate`, so it is not on the
     // stub's literal type.)
-    expect((charStub as { __pushed?: Uint8Array[] }).__pushed).toBeUndefined();
+    expect(charStub.__pushed).toBeUndefined();
   });
 
   test("loadShard is idempotent and the subscription survives entity-emptiness until unloadShard", async () => {

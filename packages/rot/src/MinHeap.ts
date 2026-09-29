@@ -31,6 +31,8 @@ export class MinHeap<T> {
     }
     const top = this.heap[0];
     if (this.len() > 1) {
+      // SAFETY: guarded by `this.len() > 1`, so `heap` is non-empty and `pop()`
+      // returns the last `HeapWrapper<T>` rather than `undefined`.
       this.heap[0] = this.heap.pop() as HeapWrapper<T>;
       this.updateDown(0);
     } else {
@@ -62,6 +64,9 @@ export class MinHeap<T> {
 
     // Move the last element into the freed slot. If the removed element WAS the
     // last slot, popping it already removed it and there is nothing to re-place.
+    // SAFETY: reached only when `index >= 0` (the `index < 0` early-return above
+    // passed), so `heap` holds the removed element and `pop()` returns a
+    // `HeapWrapper<T>`.
     const last = this.heap.pop() as HeapWrapper<T>;
     if (index < this.len()) {
       this.heap[index] = last;

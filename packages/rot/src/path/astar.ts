@@ -66,7 +66,7 @@ export default class AStar extends Path {
     this._add(this._toX, this._toY, null);
 
     while (this._open.len()) {
-      let item = this._open.pop().value as Item;
+      let item = this._open.pop().value;
       let id = this._key(item.x, item.y);
       if (this._done.has(id)) {
         continue;

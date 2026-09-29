@@ -204,7 +204,10 @@ describe("AStar", () => {
   test("illegal topology throws instead of producing NaN paths", () => {
     const map = parseMap(OPEN);
     const passable = (x: number, y: number) => map.isFloor(x, y);
-    // bypass typing on the @ts-nocheck file by casting
+    // SAFETY: topology 5 is deliberately outside AStar's 4|6|8 union; the cast
+    // smuggles the invalid value past the call-site check so this test can
+    // assert that compute() hits _distance's default branch ("Illegal
+    // topology") instead of silently producing NaN paths.
     const astar = new AStar(5, 4, passable, { topology: 5 as any, width: map.W });
     expect(() => astar.compute(0, 0, () => {})).toThrow(/topology/i);
   });
@@ -258,8 +261,15 @@ describe("EventQueue", () => {
     q.add("a", 5);
     q.add("b", 2);
     // reach into internals: the heap array reference must stay stable across get()
+    // SAFETY: q is the `new EventQueue<string>()` above; its constructor assigns
+    // `_events = new MinHeap()`, whose constructor assigns `heap = []` and no
+    // MinHeap method ever reassigns it. `heap` is private on MinHeap, so the
+    // cast is the only way to read the backing array this test pins by identity.
     const heapBefore = (q as any)._events.heap;
     q.get(); // advances time, triggers shift(-time)
+    // SAFETY: same private MinHeap backing array as heapBefore — get() pops in
+    // place and reassigns neither `_events` nor its `heap` array (only clear()
+    // does, and this test never calls it).
     const heapAfter = (q as any)._events.heap;
     expect(heapAfter).toBe(heapBefore); // same array identity -> no realloc
   });
@@ -274,8 +284,14 @@ describe("Action scheduler", () => {
     s.add("free", false, 0);
     s.add("normal", false, 1);
     expect(s.next()).toBe("free"); // 0-cost goes first
+    // SAFETY: Action extends Scheduler (src/scheduler/scheduler.ts), whose
+    // getTime() is public; the cast is needed because this file typechecks
+    // under nodenext, where action.ts's extensionless `./scheduler` import
+    // fails to resolve and the inherited member vanishes from Action's type.
     expect((s as any).getTime()).toBe(0);
     expect(s.next()).toBe("normal");
+    // SAFETY: getTime() is public on Scheduler, Action's base class (see the
+    // nodenext note above).
     expect((s as any).getTime()).toBe(1);
   });
 
@@ -283,6 +299,8 @@ describe("Action scheduler", () => {
     const s = new Action<string>();
     s.add("a", false);
     expect(s.next()).toBe("a");
+    // SAFETY: getTime() is public on Scheduler, Action's base class (see the
+    // nodenext note in the first Action test).
     expect((s as any).getTime()).toBe(1);
   });
 
@@ -290,10 +308,14 @@ describe("Action scheduler", () => {
     const s = new Action<string>();
     s.add("loop", true, 0);
     expect(s.next()).toBe("loop");
+    // SAFETY: getTime() is public on Scheduler, Action's base class (see the
+    // nodenext note in the first Action test).
     expect((s as any).getTime()).toBe(0);
     s.setDuration(0);
     // next() re-schedules the repeating current at _duration (0)
     expect(s.next()).toBe("loop");
+    // SAFETY: getTime() is public on Scheduler, Action's base class (see the
+    // nodenext note in the first Action test).
     expect((s as any).getTime()).toBe(0);
   });
 });

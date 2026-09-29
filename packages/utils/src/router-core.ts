@@ -220,6 +220,10 @@ export class RouterCore {
     this.events.emit(messageId, request);
     // Reap the map entry on every completion path (incl. early resolution where
     // the iterator cleanup closure never runs).
+    // SAFETY: invokeClientStreamMethod is dispatched only for ClientStream
+    // methods, whose BebopMethod.invoke(generator, ...) resolves to
+    // Promise<TResponse>; TResponse extends BebopRecord, so `invocation` is a
+    // Promise<BebopRecord>.
     return await (invocation as Promise<BebopRecord>).finally(() => {
       this.clientStreams.delete(messageId);
     });
@@ -247,6 +251,10 @@ export class RouterCore {
     if (hooks !== undefined) {
       await hooks.executeDecodeHooks(context, record);
     }
+    // SAFETY: TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))
+    // above proves method.invoke is an async generator function, so
+    // invoke(record, context) returns an AsyncGenerator whose yielded values are
+    // BebopRecords.
     return method.invoke(record, context) as AsyncGenerator<BebopRecord, void, unknown>;
   }
 
@@ -371,10 +379,10 @@ export class RouterCore {
    * type, populate and deliver the response, and map any failure onto an error
    * frame. Transport-specific behavior is injected via `transport`.
    */
-  public async processRequest(
+  public async processRequest<TEnv>(
     request: Message,
     response: Message,
-    env: unknown,
+    env: TEnv,
     transport: ProcessTransport,
     contentType: BebopContentType = "bebop",
   ): Promise<void> {

@@ -1,13 +1,16 @@
 import { ConsoleLogger, TempoLogger, TempoLogLevel } from "@tempojs/common";
 
+/** Structured log fields, as TempoLogger's own `write` contract defines them. */
+export type LogData = NonNullable<Parameters<TempoLogger["write"]>[2]>;
+
 export class ContextLogger extends ConsoleLogger {
-  bindings: Record<string, unknown> = {};
+  bindings: LogData = {};
 
   constructor(
     sourceName: string,
     logLevel: TempoLogLevel = TempoLogLevel.Info,
     parent?: TempoLogger,
-    bindings: Record<string, unknown> = {},
+    bindings: LogData = {},
   ) {
     super(sourceName, logLevel, parent);
     this.bindings = bindings || {};
@@ -22,18 +25,17 @@ export class ContextLogger extends ConsoleLogger {
     sourceName: string,
     correlationId?: string,
     asOrphan?: boolean,
-    bindings?: Record<string, unknown>,
+    bindings?: LogData,
   ): TLogger {
-    return this.clone(sourceName, asOrphan, {
-      ...(correlationId ? { correlationId } : {}),
-      ...bindings,
-    });
+    const merged = correlationId ? { correlationId } : {};
+    Object.assign(merged, bindings);
+    return this.clone(sourceName, asOrphan, merged);
   }
 
   clone<TLogger extends TempoLogger>(
     sourceName: string,
     asOrphan?: boolean,
-    bindings?: Record<string, unknown>,
+    bindings?: LogData,
   ): TLogger {
     const logger = Reflect.construct(this.constructor, [
       sourceName,

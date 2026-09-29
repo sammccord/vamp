@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
-import { generate, type GeneratedPaths } from "../src/generators/codegen.js";
+import { generate } from "../src/generators/codegen.js";
 import { generateMutationSchema } from "../src/generators/generate-mutation-schema.js";
 import { loadBebopConfig, loadVampConfig } from "../src/config/loader.js";
 
@@ -200,7 +200,7 @@ interface ScratchFiles {
  * minimal @vampgg/* stubs. Returns the scratch dir + emitted file paths; throws
  * on any failure.
  */
-function roundtrip(files: ScratchFiles): { dir: string; paths: GeneratedPaths } {
+function roundtrip(files: ScratchFiles) {
   const dir = mkdtempSync(join(tmpdir(), "vamp-rt-"));
   const schemaDir = join(dir, "schema");
   const srcDir = join(dir, "src");

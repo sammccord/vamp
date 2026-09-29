@@ -77,11 +77,16 @@ function makeEntityAt(x: number, y: number): Entity {
   });
 }
 
+interface CreatedShardEntity {
+  id: string;
+  entity: Entity;
+}
+
 /**
  * An entity homed in a specific shard via its `sk` (the D1b shard key). With
  * no `sk` it defaults server-side to the lobby's own `game/${ns}` shard.
  */
-function makeShardEntity(sk?: string): { id: string; entity: Entity } {
+function makeShardEntity(sk?: string): CreatedShardEntity {
   const id = crypto.randomUUID();
   return {
     id,
@@ -108,14 +113,16 @@ function observeAs(client: RpcClient, viewerId: string) {
   );
 }
 
+interface RpcConnection {
+  channel: TempoWSChannel;
+  client: RpcClient;
+}
+
 describe("basic RPC service (integration)", () => {
   let proc: ChildProcess;
   let port: number;
 
-  function createRpcClient(
-    ns: string,
-    extraQuery = "",
-  ): { channel: TempoWSChannel; client: RpcClient } {
+  function createRpcClient(ns: string, extraQuery = ""): RpcConnection {
     const channel = TempoWSChannel.forAddress(
       `ws://127.0.0.1:${port}/v1/game?ns=${ns}${extraQuery}`,
       {
@@ -300,7 +307,9 @@ describe("basic RPC service (integration)", () => {
 
     const { channel: chA, client: clientA } = createRpcClient(ns);
     const { channel: chB, client: clientB } = createRpcClient(ns);
+    // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so viewerA.id is a string.
     const streamA = await observeAs(clientA, viewerA.id as string);
+    // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so viewerB.id is a string.
     const streamB = await observeAs(clientB, viewerB.id as string);
 
     const seenA = new Set<string>();
@@ -324,18 +333,24 @@ describe("basic RPC service (integration)", () => {
     await actor.spawn(nearA);
     await actor.spawn(nearB);
 
+    // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so nearA.id is a string.
     await waitFor(() => (seenA.has(nearA.id as string) ? true : undefined), {
       label: "nearA delivered to A",
     });
+    // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so nearB.id is a string.
     await waitFor(() => (seenB.has(nearB.id as string) ? true : undefined), {
       label: "nearB delivered to B",
     });
     // Settle to surface any erroneous cross-zone delivery before asserting absence.
     await new Promise((r) => setTimeout(r, 300));
 
+    // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so nearA.id is a string.
     expect(seenA.has(nearA.id as string)).toBe(true);
+    // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so nearB.id is a string.
     expect(seenA.has(nearB.id as string)).toBe(false); // B's entity must not leak to A
+    // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so nearB.id is a string.
     expect(seenB.has(nearB.id as string)).toBe(true);
+    // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so nearA.id is a string.
     expect(seenB.has(nearA.id as string)).toBe(false); // A's entity must not leak to B
 
     await streamA.return(undefined);
@@ -429,6 +444,7 @@ describe("basic RPC service (integration)", () => {
 
       const health = { points: 1000, min: 0, max: 1000, rate: 0, interval: 0 };
       const pet = Entity({ id: crypto.randomUUID(), tags: [], children: [], health });
+      // SAFETY: pet is built above with id: crypto.randomUUID(), so pet.id is a string.
       const player = Entity({
         id: crypto.randomUUID(),
         tags: [Tags.PlayerControlled],
@@ -457,6 +473,7 @@ describe("basic RPC service (integration)", () => {
               ? [rec.value.delta.health.points]
               : [],
           );
+      // SAFETY: pet is built above with id: crypto.randomUUID(), so pet.id is a string.
       await waitFor(() => (deltasFor(pet.id as string).length === FRAMES ? true : undefined), {
         label: "a health delta per frame on the player's child",
       });
@@ -464,6 +481,7 @@ describe("basic RPC service (integration)", () => {
       await stream.return(undefined);
       await bg.catch(() => {});
       channel.close();
+      // SAFETY: player and pet are built above with id: crypto.randomUUID(); both ids are strings.
       return { player: deltasFor(player.id as string), pet: deltasFor(pet.id as string) };
     };
 

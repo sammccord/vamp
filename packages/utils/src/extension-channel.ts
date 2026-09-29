@@ -16,11 +16,16 @@ export class TempoExtensionChannel extends CoreChannel {
 
   // Stored so close() can remove it; guards decode so foreign/malformed runtime
   // traffic is dropped instead of throwing synchronously inside the listener.
-  private readonly onMessage = (msg: unknown): Promise<void> => {
+  private readonly onMessage: browser.Runtime.OnMessageListenerAsync = (msg): Promise<void> => {
     let message: Message;
     try {
+      // SAFETY: legitimate frames arrive as sendMessage's Array.from(Message.encode(...)),
+      // a number[] of byte values; a payload that is not a number[] makes the Uint8Array
+      // constructor throw inside the try, which is caught and dropped below.
       message = Message(Message.decode(new Uint8Array(msg as number[])));
     } catch (e) {
+      // SAFETY: the try body only invokes new Uint8Array(...) and Message.decode(...),
+      // both of which fail with Error subclasses (TypeError / BebopRuntimeError).
       this.logger.warn("dropping undecodable runtime message", {}, e as Error);
       return Promise.resolve();
     }
@@ -75,11 +80,11 @@ export class TempoExtensionChannel extends CoreChannel {
   /**
    * {@inheritDoc CoreChannel.sendFrame}
    */
-  protected override sendFrame(message: Message): Promise<unknown> {
+  protected override sendFrame(message: Message): Promise<void> {
     return this.sendMessage(message);
   }
 
-  protected sendMessage(message: Message) {
-    return browser.runtime.sendMessage(Array.from(Message.encode(message)));
+  protected sendMessage(message: Message): Promise<void> {
+    return browser.runtime.sendMessage<number[], void>(Array.from(Message.encode(message)));
   }
 }

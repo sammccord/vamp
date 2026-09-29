@@ -14,7 +14,15 @@ describe("Digger", () => {
       if (contents === 0) dugCount++; // 0 = floor in this port's convention
     });
 
+    // SAFETY: Digger extends Dungeon (src/map/dungeon.ts), which declares
+    // public getRooms()/getCorridors() returning the _rooms/_corridors arrays
+    // create() populates, so every Digger instance inherits both. The cast is
+    // needed because this file typechecks under nodenext, where digger.ts's
+    // extensionless `./dungeon` import fails to resolve and the inherited
+    // members vanish from Digger's declared type.
     const rooms = (digger as any).getRooms();
+    // SAFETY: getCorridors() is public on Dungeon exactly like getRooms()
+    // above, inherited by every Digger; same nodenext resolution gap.
     const corridors = (digger as any).getCorridors();
 
     expect(rooms.length).toBeGreaterThan(1); // was 1 (only the first room)
@@ -36,6 +44,8 @@ describe("Digger", () => {
       digger.create((_x: number, _y: number, c: number) => {
         if (c === 0) dug++;
       });
+      // SAFETY: getRooms() is public on Digger's Dungeon base
+      // (src/map/dungeon.ts); same nodenext resolution gap as in the first test.
       expect((digger as any).getRooms().length).toBeGreaterThan(1);
       expect(dug).toBeGreaterThan((60 - 2) * (30 - 2) * 0.1);
     }
@@ -53,9 +63,15 @@ describe("Digger", () => {
       grid[x]![y] = c;
     });
 
+    // SAFETY: getRooms() is public on Digger's Dungeon base
+    // (src/map/dungeon.ts); same nodenext resolution gap as in the first test.
     const rooms = (digger as any).getRooms();
     expect(rooms.length).toBeGreaterThan(1);
 
+    // SAFETY: every argument comes from getRooms() — Dungeon's _rooms array of
+    // Room instances — and Room.getCenter() (src/map/features.ts) returns the
+    // two-element literal [round((x1+x2)/2), round((y1+y2)/2)]; the assertion
+    // restores the fixed tuple length the inferred number[] return erases.
     const centerOf = (r: any) => r.getCenter() as [number, number];
 
     // BFS flood fill over floor cells (0) from the first room's center.

@@ -56,15 +56,18 @@ export default class Rogue extends Map {
 		and the cell sizes.
 		*/
     if (!options.hasOwnProperty("roomWidth")) {
+      // SAFETY: cellWidth was defaulted to 3 by the Object.assign above, so it is always a number here.
       options["roomWidth"] = this._calculateRoomSize(this._width, options["cellWidth"] as number);
     }
     if (!options.hasOwnProperty("roomHeight")) {
+      // SAFETY: cellHeight was defaulted to 3 by the Object.assign above, so it is always a number here.
       options["roomHeight"] = this._calculateRoomSize(
         this._height,
         options["cellHeight"] as number,
       );
     }
 
+    // SAFETY: all four Options fields are present now — cellWidth/cellHeight were defaulted and roomWidth/roomHeight were assigned above.
     this._options = options as Options;
   }
 
@@ -143,6 +146,7 @@ export default class Rogue extends Map {
 
       do {
         found = false;
+        // SAFETY: dirToCheck is non-empty — it holds 4 entries on the first pass and the loop condition `dirToCheck.length > 0` guards later passes, so pop() cannot return undefined.
         idx = dirToCheck.pop() as number;
 
         ncgx = cgx + DIRS[8][idx][0];
@@ -199,6 +203,7 @@ export default class Rogue extends Map {
           validRoom = false;
 
           do {
+            // SAFETY: directions is non-empty — it holds 4 entries on the first pass and the `directions.length` loop condition guards later passes, so pop() cannot return undefined.
             let dirIdx = directions.pop() as number;
             let newI = i + DIRS[8][dirIdx][0];
             let newJ = j + DIRS[8][dirIdx][1];
@@ -399,6 +404,7 @@ export default class Rogue extends Map {
     this.map[xpos][ypos] = 0;
 
     while (moves.length > 0) {
+      // SAFETY: moves is non-empty (guarded by the while condition) and every element is a [dir, dist] two-number array, so pop() yields a Point.
       move = moves.pop() as Point;
       while (move[1] > 0) {
         xpos += DIRS[8][move[0]][0];

@@ -164,7 +164,7 @@ export default class Cellular extends Map {
     for (let y = 0; y < this._height; y++) {
       for (let x = widthStarts[y % 2]; x < this._width; x += widthStep) {
         if (this._freeSpace(x, y, value)) {
-          let p = [x, y] as Point;
+          let p: Point = [x, y];
           notConnected[this._pointKey(p)] = p;
           allFreeSpace.push([x, y]);
         }
@@ -238,7 +238,7 @@ export default class Cellular extends Map {
   }
 
   _getClosest(point: Point, space: PointMap) {
-    let minPoint = null;
+    let minPoint: Point | null = null;
     let minDist = null;
     for (let k in space) {
       let p = space[k];
@@ -248,6 +248,7 @@ export default class Cellular extends Map {
         minPoint = p;
       }
     }
+    // SAFETY: space is non-empty at every call site (notConnected is guarded non-empty by the connect loop, connected always holds the start point), so the loop assigns minPoint a Point, never leaving it null.
     return minPoint as Point;
   }
 
@@ -311,7 +312,7 @@ export default class Cellular extends Map {
     }
     for (let xx = a[0]; xx <= b[0]; xx++) {
       this._map[xx][a[1]] = value;
-      let p = [xx, a[1]] as Point;
+      let p: Point = [xx, a[1]];
       let pkey = this._pointKey(p);
       connected[pkey] = p;
       delete notConnected[pkey];
@@ -332,7 +333,7 @@ export default class Cellular extends Map {
     }
     for (let yy = a[1]; yy < b[1]; yy++) {
       this._map[x][yy] = value;
-      let p = [x, yy] as Point;
+      let p: Point = [x, yy];
       let pkey = this._pointKey(p);
       connected[pkey] = p;
       delete notConnected[pkey];
@@ -383,7 +384,7 @@ export default class Cellular extends Map {
         xx += stepWidth;
       }
       this._map[xx][yy] = value;
-      let p = [xx, yy] as Point;
+      let p: Point = [xx, yy];
       let pkey = this._pointKey(p);
       connected[pkey] = p;
       delete notConnected[pkey];

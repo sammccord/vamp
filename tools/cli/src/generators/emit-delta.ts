@@ -9,7 +9,7 @@ import { SOURCE_ONLY_SCALARS, WireBaseType } from "./parse-bop";
  * every `WireBaseType` name also has a `scalarToTs` case.
  */
 export const SCALAR_TYPES: ReadonlySet<string> = new Set([
-  ...Object.values(WireBaseType),
+  ...WireBaseType.values(),
   ...SOURCE_ONLY_SCALARS,
 ]);
 

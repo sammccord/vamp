@@ -14,6 +14,7 @@ import {
   type MutationBatch,
   MutationType,
   type MutationRecord,
+  type MutationScope,
   type QueryBuilder,
   seq,
   task,
@@ -31,7 +32,8 @@ type Entity = {
 type Delta = { hp?: number; brain?: Brain; behaviorTree?: BehaviorTree };
 type Action = { tag: 1; value: { target: string; damage: number } };
 
-type World = ECS<Record<string, unknown>, [], Action, number, Entity, Delta>;
+type State = { scope?: MutationScope<Entity, Delta> };
+type World = ECS<State, [], Action, number, Entity, Delta>;
 
 const components = { id: 1, children: 2, hp: 3, brain: 4, behaviorTree: 5 };
 const Condition = { Hurt: 1 } as const;
@@ -51,14 +53,14 @@ function world(seed: number) {
   };
   let tick = 0;
   const random = new RNGClass().setSeed(seed);
-  const ecs: World = new ECS<Record<string, unknown>, [], Action, number, Entity, Delta>(
+  const ecs: World = new ECS<State, [], Action, number, Entity, Delta>(
     entities,
     mutate,
     {},
     {
       createId: () => crypto.randomUUID(),
       components,
-      materializeDelta: (delta: Delta, base?: Partial<Entity>) => ({ ...base, ...delta }) as Entity,
+      materializeDelta: (delta: Delta, base?: Partial<Entity>) => ({ ...base, ...delta }),
       mergeDelta: merge,
       accumulateDelta: (from: Delta, to: Delta) => {
         if (from.hp !== undefined) to.hp = (to.hp ?? 0) + from.hp;
@@ -72,7 +74,7 @@ function world(seed: number) {
     for (const [id, record] of mutations) mutate(id, record);
   });
   ecs.registerBehavior(
-    createBehavior<Record<string, unknown>, [], Action, number, Entity, Delta>(
+    createBehavior<State, [], Action, number, Entity, Delta>(
       1,
       async (w: World, entity: Entity, event: CustomAction<Action>) => {
         await Promise.resolve();
@@ -82,13 +84,13 @@ function world(seed: number) {
     ),
   );
   ecs.registerSystem(
-    createBehaviorTreeSystem<Record<string, unknown>, [], Action, number, Entity, Delta>({
+    createBehaviorTreeSystem<State, [], Action, number, Entity, Delta>({
       query: (q: QueryBuilder) => q.every(components.brain),
       brain: "brain",
       tree: "behaviorTree",
-      conditions: { [Condition.Hurt]: (_w: unknown, e: Entity) => (e.hp ?? 0) < 10 },
+      conditions: { [Condition.Hurt]: (_w: World, e: Entity) => (e.hp ?? 0) < 10 },
       tasks: {
-        [Task.Attack]: (_w: unknown, _e: Entity, args: readonly number[]) => ({
+        [Task.Attack]: (_w: World, _e: Entity, args: readonly number[]) => ({
           tag: 1,
           value: { target: "player", damage: args[0] },
         }),

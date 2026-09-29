@@ -20,9 +20,8 @@ export function capitalize(string: string) {
   return string.charAt(0).toUpperCase() + string.substring(1);
 }
 
-interface HasMap {
-  (): string;
-  map: { [key: string]: string };
+interface FormatMap {
+  [key: string]: string;
 }
 
 /**
@@ -31,7 +30,7 @@ interface HasMap {
  * @param {any} [argv]
  */
 export function format(template: string, ...args: any[]): string {
-  const map = (format as HasMap).map;
+  const map = format.map;
 
   const replacer = (match: string, group1: string, group2: string, index: number) => {
     if (template.charAt(index - 1) == "%") {
@@ -62,6 +61,9 @@ export function format(template: string, ...args: any[]): string {
   };
   return template.replace(/%(?:([a-z]+)|(?:{([^}]+)}))/gi, replacer);
 }
-(format as HasMap).map = {
-  s: "toString",
-};
+
+export namespace format {
+  export const map: FormatMap = {
+    s: "toString",
+  };
+}

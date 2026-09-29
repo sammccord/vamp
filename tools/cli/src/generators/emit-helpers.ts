@@ -27,17 +27,17 @@ const REPLACE: DeltaStrategy = {
  * whose values must not be summed (behavior trees, brains) replace instead.
  * Unlisted types with a `<Type>Delta` default to {@link COUNTER}.
  */
-const DELTA_STRATEGIES: Readonly<Record<string, DeltaStrategy>> = {
-  Pool: COUNTER,
-  BehaviorTree: REPLACE,
-  Brain: REPLACE,
-};
+const DELTA_STRATEGIES: ReadonlyMap<string, DeltaStrategy> = new Map([
+  ["Pool", COUNTER],
+  ["BehaviorTree", REPLACE],
+  ["Brain", REPLACE],
+]);
 
 /** The delta strategy for a non-array custom field with a `<Type>Delta`, else undefined. */
 function deltaStrategy(field: SchemaField, schema: ParsedSchema): DeltaStrategy | undefined {
   if (field.isArray || isScalar(field.typeName)) return undefined;
   if (!schema.definitions.has(`${field.typeName}Delta`)) return undefined;
-  return DELTA_STRATEGIES[field.typeName] ?? COUNTER;
+  return DELTA_STRATEGIES.get(field.typeName) ?? COUNTER;
 }
 
 /** True when the entity has at least one array field (so the shared array applier is needed). */

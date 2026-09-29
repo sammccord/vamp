@@ -61,7 +61,7 @@ defineGameECSRuntime<{}, GameWorldContext>(() => ({
   // INCLUDING after a hibernation wake (the seed is restored from storage), so
   // `seededAt` is re-stamped fresh each time. Only the seed is persisted, so the
   // resolved context is free to hold non-serializable values.
-  resolveContext: (seed: Record<string, unknown>) => {
+  resolveContext: (seed) => {
     const faction = Number(seed.faction);
     const rng = Number(seed.rng);
     return {

@@ -151,14 +151,14 @@ export class TempoWsRouter<
       );
       return;
     }
-    const request = Message.decode(new Uint8Array(req as ArrayBuffer));
+    const request = Message.decode(new Uint8Array(req));
     const [, ws] = env;
 
     // `Message.encode` returns a view into bebop's shared write buffer; copy it
     // so concurrent encodes (e.g. an overlapping unary response) cannot clobber
     // this frame before the socket flushes it.
     const send = (message: Message) => {
-      ws.send(new Uint8Array(Message.encode(message)) as BufferSource);
+      ws.send(new Uint8Array(Message.encode(message)));
     };
 
     await this.core.processRequest(request, response, env, {

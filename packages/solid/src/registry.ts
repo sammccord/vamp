@@ -49,7 +49,7 @@ export function createQueryRegistry<E extends BaseEntity, D>(
   const entries = new Map<Query, Entry>();
 
   function acquire(input: QueryInput): QueryHandle {
-    const q = typeof input === "function" ? buildQuery(input) : input;
+    const q = input instanceof Function ? buildQuery(input) : input;
     let entry = entries.get(q);
     if (!entry) {
       // `track` seeds the member set from the world's current matches.

@@ -290,6 +290,8 @@ export class TempoExtensionRouter<
       }
     } catch (e) {
       // Receiver gone (popup closed, tab navigated); the client call times out.
+      // SAFETY: the only awaits here are tabs.sendMessage / runtime.sendMessage, and
+      // the polyfill's wrappedSendMessage rejects both with new Error(...).
       this.logger.debug(
         "extension reply not delivered; receiver likely gone",
         { tab: sender.tab },
@@ -316,13 +318,13 @@ export type ExtensionSenderContext = { sender: Runtime.MessageSender };
 export function createExtensionListener(
   router: Pick<TempoExtensionRouter<ExtensionSenderContext>, "process">,
   registry: ServiceRegistry,
-): (raw: unknown, sender: Runtime.MessageSender) => undefined {
+): Runtime.OnMessageListenerNoResponse {
   return (raw, sender) => {
     if (sender.id !== runtime.id) return undefined;
     if (!Array.isArray(raw)) return undefined;
     let message: Message;
     try {
-      message = Message(Message.decode(new Uint8Array(raw as number[])));
+      message = Message(Message.decode(new Uint8Array(raw)));
     } catch {
       return undefined;
     }

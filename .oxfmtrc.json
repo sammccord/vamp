@@ -1,5 +1,22 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["**/bebop.ts", "**/*.generated.ts"],
+  "ignorePatterns": [
+    "**/bebop.ts",
+    "**/*.generated.ts",
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    ".zed/**",
+    ".vite-hooks/**",
+    "tools/oxlint/anti-slop/**"
+  ],
   "experimentalTailwindcss": {}
 }

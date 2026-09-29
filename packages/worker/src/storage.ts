@@ -18,6 +18,7 @@ import {
   writeEntityInsert,
   writeUpdate,
 } from "./entity-doc";
+import { toError } from "./errors";
 import { GLOBAL_ENTITIES_KEY } from "./reconcile-helpers";
 
 /**
@@ -25,8 +26,15 @@ import { GLOBAL_ENTITIES_KEY } from "./reconcile-helpers";
  * (resolved by binding name from `this.env`). Only the surface used here.
  */
 interface LobbyNamespace {
-  idFromName(name: string): unknown;
-  get(id: unknown): { onShardUpdate(root: string, update: Uint8Array): Promise<void> };
+  idFromName(name: string): DurableObjectId;
+  get(id: DurableObjectId): { onShardUpdate(root: string, update: Uint8Array): Promise<void> };
+}
+
+/** The notify-push address a lobby registers: its own binding name + namespace + shard root. */
+interface SubscriberAddress {
+  binding: string;
+  name: string;
+  root: string;
 }
 
 /**
@@ -54,8 +62,8 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
    * invisible; a failed persist is recovered from a subscriber on the next
    * SyncStep handshake, so this is an observability hook, not a data-loss path.
    */
-  protected override onStorageError(error: unknown): void {
-    ECSStorage.log.error("y-durablestream storage operation failed", {}, error as Error);
+  protected override onStorageError(cause: unknown): void {
+    ECSStorage.log.error("y-durablestream storage operation failed", {}, toError(cause));
   }
 
   /**
@@ -68,10 +76,13 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
    * wakes a hibernating lobby); errors are observability-only (the lobby re-syncs
    * via `syncOnce` on its next wake, so a dropped push is never divergence).
    */
-  protected override pushToSubscriber(address: unknown, update: Uint8Array): void {
-    const { binding, name, root } = address as { binding: string; name: string; root: string };
+  protected override pushToSubscriber(address: SubscriberAddress, update: Uint8Array): void {
+    const { binding, name, root } = address;
     if (!binding) return;
-    const ns = (this.env as unknown as Record<string, LobbyNamespace | undefined>)[binding];
+    // SAFETY: `binding` is the lobby's own DO namespace name (registered above);
+    // the platform's `env` carries that namespace under the binding name and
+    // `undefined` for an undeclared name.
+    const ns = this.env[binding] as LobbyNamespace | undefined;
     if (!ns) return;
     const lobby = ns.get(ns.idFromName(name));
     this.ctx.waitUntil(lobby.onShardUpdate(root, update).catch((err) => this.onStorageError(err)));
@@ -99,8 +110,11 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
     if (!emap) return undefined;
     // `id` is not stored as a component (it is the map key); backfill it so
     // callers always get a complete entity. Mirrors `_addEntityFromDoc`.
-    const raw = emap.toJSON() as Record<string, unknown>;
+    const raw = emap.toJSON();
     if (raw.id === undefined) raw.id = id;
+    // SAFETY: `emap` is the entity's component `Y.Map`, populated by
+    // `writeEntityInsert` (which skips only the redundant `id` key); `id` is the
+    // map key and is backfilled here, so `raw` is that entity — an `E`.
     return raw as E;
   }
 
@@ -145,11 +159,11 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
    * `entity.id` is required — the invariant callers previously enforced by hand.
    * Returns the input record unchanged for caller convenience.
    */
-  putEntity(entity: Record<string, unknown>): E {
+  putEntity(entity: E): E {
     const id = entity.id;
-    if (typeof id !== "string" || !id) throw new Error("entity requires a string id");
+    if (!id) throw new Error("entity requires a string id");
     this.doc.transact(() => writeEntityInsert(this.doc, id, entity));
-    return entity as E;
+    return entity;
   }
 
   /**
@@ -171,7 +185,7 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
    * on a missing entity it is a no-op (no transact, no broadcast). Use
    * {@link putEntity} to create.
    */
-  updateEntity(id: string, delta: Record<string, unknown>): boolean {
+  updateEntity(id: string, delta: Partial<E>): boolean {
     const existed = entitiesMap(this.doc).has(id);
     if (existed) this.doc.transact(() => writeUpdate(this.doc, id, delta));
     return existed;
@@ -183,17 +197,15 @@ export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvid
    * Each record needs a non-empty string `id`; the batch is validated up front so
    * a bad record aborts before any partial write. Returns the input records.
    */
-  putEntities(entities: Record<string, unknown>[]): E[] {
-    for (const entity of entities) {
-      const id = entity.id;
-      if (typeof id !== "string" || !id) throw new Error("entity requires a string id");
-    }
-    this.doc.transact(() => {
-      for (const entity of entities) {
-        writeEntityInsert(this.doc, entity.id as string, entity);
-      }
+  putEntities(entities: E[]): E[] {
+    const ids = entities.map((entity) => {
+      if (!entity.id) throw new Error("entity requires a string id");
+      return entity.id;
     });
-    return entities as E[];
+    this.doc.transact(() => {
+      entities.forEach((entity, i) => writeEntityInsert(this.doc, ids[i], entity));
+    });
+    return entities;
   }
 
   /**
