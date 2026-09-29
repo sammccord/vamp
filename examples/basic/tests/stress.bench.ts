@@ -3,6 +3,7 @@ import { ConsoleLogger, TempoLogLevel } from "@tempojs/common";
 import { TempoWSChannel } from "@vampgg/utils/ws-channel";
 import { bench, boxplot, run, summary } from "mitata";
 import { afterAll, beforeAll, test } from "vitest";
+import { HOSTILE_TREE_ID } from "../src/systems";
 import {
   Actions,
   AreaAttack,
@@ -113,6 +114,7 @@ function makeStressEntity(i: number): Entity {
     level: 1 + (i % 10),
     xp: i % 100,
     faction: i % 4,
+    brain: i % 3 === 0 ? { tree: HOSTILE_TREE_ID } : undefined,
   });
 }
 

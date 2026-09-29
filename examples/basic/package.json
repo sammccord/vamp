@@ -18,6 +18,7 @@
     "@tempojs/common": "catalog:",
     "@tempojs/server": "catalog:",
     "@vampgg/ecs": "workspace:*",
+    "@vampgg/rot": "workspace:*",
     "@vampgg/solid": "workspace:*",
     "@vampgg/utils": "workspace:*",
     "@vampgg/worker": "workspace:*",

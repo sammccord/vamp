@@ -1,5 +1,6 @@
 import type { Entity } from "./bebop";
 import { createGameInterestBroadcast, type GameContext } from "./game.worker.generated";
+import type { AIContext } from "./systems";
 
 /**
  * Interest-managed broadcast policy for the basic example.
@@ -21,9 +22,10 @@ import { createGameInterestBroadcast, type GameContext } from "./game.worker.gen
  * The runtime-configurable world context for this example. It is derived per
  * Durable Object at bootstrap from the handler's request (see `resolveContext`
  * in `index.ts`) and survives hibernation via the persisted seed. `faction` is
- * applied as the default faction for entities spawned into this world.
+ * applied as the default faction for entities spawned into this world; `random`
+ * and `frame` drive the hostile behavior trees (see `systems.ts`).
  */
-export type GameWorldContext = { faction: number; seededAt: number };
+export type GameWorldContext = { faction: number; seededAt: number } & AIContext;
 
 /** The example's ECS context tuple, typed with the world context above. */
 export type WorldContext = GameContext<{}, GameWorldContext>;

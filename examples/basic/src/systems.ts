@@ -1,12 +1,27 @@
-import type { ECS } from "@vampgg/ecs";
-import { type Actions, type Entity, Tags } from "./bebop";
+import {
+  type BehaviorRandom,
+  cond,
+  cooldown,
+  type ECS,
+  seq,
+  task,
+  tree,
+  weighted,
+} from "@vampgg/ecs";
+import { Actions, Attack, Condition, type Entity, Tags, Task } from "./bebop";
 import {
   components,
   createGameArchetypeSystem,
   createGameBehavior,
+  createGameBehaviorTreeSystem,
   createGameEntitySystem,
   type EntityDelta,
+  type GameConditions,
+  type GameTasks,
 } from "./game.core.generated";
+
+/** What the hostile AI reads from the world context: its seeded RNG and frame clock. */
+export type AIContext = Record<string, unknown> & { random: BehaviorRandom; frame: number };
 
 /**
  * The concrete ECS world the basic example runs. `UpdateArguments` is `[]`
@@ -16,10 +31,10 @@ import {
  * Generic over `Context` so the same systems install on whatever context the
  * caller's world carries: the durable object hands `registerGameSystems` an ECS
  * whose context is the worker's `RuntimeContext<...>` (the generated
- * `defineGameECSRuntime` enforces this), while tests can pass a plain context.
- * The systems here never read context, so they accept any.
+ * `defineGameECSRuntime` enforces this), while tests can pass a plain context
+ * carrying the {@link AIContext} fields.
  */
-type World<Context extends Record<string, unknown> = Record<string, unknown>> = ECS<
+type World<Context extends AIContext = AIContext> = ECS<
   Context,
   [],
   Actions,
@@ -32,8 +47,28 @@ type World<Context extends Record<string, unknown> = Record<string, unknown>> = 
 // integrated as an integer per frame because `Vec2Delta` is a signed-int CRDT
 // counter (see schema/mutation.bop).
 const HEALTH_REGEN = 1; // health points restored per frame for entities with rate > 0
-const AI_ATTACK_DAMAGE = 1; // damage a hostile deals to the nearest player per frame
-const AI_AGGRO_RADIUS_SQ = 256 * 256; // squared aggro range for the O(hostiles × players) scan
+const AI_ATTACK_DAMAGE = 1; // damage of a hostile's regular hit on the nearest player
+const AI_HEAVY_DAMAGE = 3; // damage of the occasional heavy hit
+const AI_HEAVY_COOLDOWN = 10; // frames before a hostile can land another heavy hit
+const AI_AGGRO_RADIUS = 256; // how close the nearest player must be for a hostile to attack
+
+/** Id of the entity holding the tree every hostile's `brain` points at. */
+export const HOSTILE_TREE_ID = "tree/hostile";
+
+/**
+ * While a player is in aggro range, a hostile usually lands a regular hit and
+ * one time in four a heavy hit, which then cools down. A cooling-down heavy
+ * branch fails, so the regular hit is picked instead.
+ */
+const hostileTree = tree(
+  seq(
+    cond(Condition.PlayerNear, AI_AGGRO_RADIUS),
+    weighted(
+      [3, task(Task.Attack, AI_ATTACK_DAMAGE)],
+      [1, cooldown(AI_HEAVY_COOLDOWN, task(Task.Attack, AI_HEAVY_DAMAGE))],
+    ),
+  ),
+);
 
 /**
  * Register the example's systems and behaviors on the ECS world. Wired into the
@@ -45,12 +80,12 @@ const AI_AGGRO_RADIUS_SQ = 256 * 256; // squared aggro range for the O(hostiles 
  * attribute cost:
  *   1. regen      — cheap per-entity arithmetic + one pool delta.
  *   2. movement   — per-entity read of two components + a vector delta.
- *   3. ai         — once-per-frame O(hostiles × players) nearest-target scan with
- *                   a cross-archetype query and conditional mutation.
+ *   3. ai         — a behavior tree per hostile: an O(players) nearest-target scan,
+ *                   a seeded weighted pick, and an `act` dispatch.
  */
-export function registerGameSystems<
-  Context extends Record<string, unknown> = Record<string, unknown>,
->(ecs: World<Context>): void {
+export function registerGameSystems<Context extends AIContext = AIContext>(
+  ecs: World<Context>,
+): void {
   // ── System 1 (simple): regenerate health toward max for entities with a rate.
   ecs.registerSystem(
     createGameEntitySystem<Context, []>(
@@ -90,45 +125,29 @@ export function registerGameSystems<
     ),
   );
 
-  // ── System 3 (complex): each hostile scans every player for the nearest in
-  // aggro range and chips its health. Archetype system so the player query runs
-  // once per frame; the inner scan is O(hostiles × players).
+  // ── System 3 (complex): hostile AI. Hostiles carry a `brain` pointing at the
+  // shared hostile tree entity; the behavior tree system picks an attack for each
+  // and dispatches it as an `Attack` action to the Attack behavior below. The
+  // upkeep system advances the frame clock that cooldowns compare against and
+  // keeps the tree entity present.
   ecs.registerSystem(
     createGameArchetypeSystem<Context, []>(
-      (archetypes, world) => {
-        const players = world.query((q) =>
-          q.someTag(Tags.PlayerControlled).every(components.position),
-        );
-        if (players.length === 0) return;
-        for (const arch of archetypes) {
-          for (const hostileId of arch.entities) {
-            const hostile = world.entity(hostileId);
-            const hp = hostile?.position;
-            if (!hp) continue;
-            const hx = hp.x ?? 0;
-            const hy = hp.y ?? 0;
-            let bestId: string | undefined;
-            let bestDistSq = Number.POSITIVE_INFINITY;
-            for (let p = 0; p < players.length; p++) {
-              const player = world.entity(players[p]);
-              const pp = player?.position;
-              if (!pp) continue;
-              const dx = (pp.x ?? 0) - hx;
-              const dy = (pp.y ?? 0) - hy;
-              const distSq = dx * dx + dy * dy;
-              if (distSq < bestDistSq) {
-                bestDistSq = distSq;
-                bestId = players[p];
-              }
-            }
-            if (bestId !== undefined && bestDistSq <= AI_AGGRO_RADIUS_SQ) {
-              world.put(bestId, { health: { points: -AI_ATTACK_DAMAGE } });
-            }
-          }
+      (_archetypes, world) => {
+        world.context.frame++;
+        if (!world.entity(HOSTILE_TREE_ID)) {
+          world.insert({ id: HOSTILE_TREE_ID, behaviorTree: hostileTree });
         }
       },
-      (q) => q.someTag(Tags.Hostile).every(components.position, components.health),
+      (q) => q.every(components.brain),
     ),
+  );
+  ecs.registerSystem(
+    createGameBehaviorTreeSystem<Context, []>({
+      ...hostileLeaves<Context>(),
+      random: (world) => world.context.random,
+      now: (world) => world.context.frame,
+      target: (intent) => intent.value.target,
+    }),
   );
 
   // ── Behaviors dispatched via `act(targetId, action)`. The action tag selects
@@ -138,11 +157,58 @@ export function registerGameSystems<
 }
 
 /**
+ * The hostile tree's leaves. Players are queried once per frame and shared by
+ * every hostile's scan.
+ */
+function hostileLeaves<Context extends AIContext>(): {
+  conditions: GameConditions<Context>;
+  tasks: GameTasks<Context>;
+} {
+  let playersFrame = -1;
+  let players: string[] = [];
+  const nearestPlayer = (world: World<Context>, hostile: Entity) => {
+    if (playersFrame !== world.context.frame) {
+      players = world.query((q) => q.someTag(Tags.PlayerControlled).every(components.position));
+      playersFrame = world.context.frame;
+    }
+    const hx = hostile.position?.x ?? 0;
+    const hy = hostile.position?.y ?? 0;
+    let bestId: string | undefined;
+    let bestDistSq = Number.POSITIVE_INFINITY;
+    for (const id of players) {
+      const pp = world.entity(id)?.position;
+      if (!pp) continue;
+      const dx = (pp.x ?? 0) - hx;
+      const dy = (pp.y ?? 0) - hy;
+      const distSq = dx * dx + dy * dy;
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        bestId = id;
+      }
+    }
+    return bestId === undefined ? undefined : { id: bestId, distSq: bestDistSq };
+  };
+  return {
+    conditions: {
+      [Condition.PlayerNear]: (world, hostile, [radius]) =>
+        (nearestPlayer(world, hostile)?.distSq ?? Number.POSITIVE_INFINITY) <= radius * radius,
+    },
+    tasks: {
+      [Task.Attack]: (world, hostile, [damage]) => {
+        const target = nearestPlayer(world, hostile)?.id;
+        if (!hostile.id || !target) return undefined;
+        return Actions.fromAttack(Attack({ source: hostile.id, target, damage }));
+      },
+    },
+  };
+}
+
+/**
  * Behaviors keyed by the `Actions` union tag. Kept current per-entity by the ECS
  * behavior cache (`act` only runs behaviors whose query matches the entity's
  * archetype, here: anything with a health pool).
  */
-function registerBehaviors<Context extends Record<string, unknown>>(ecs: World<Context>): void {
+function registerBehaviors<Context extends AIContext>(ecs: World<Context>): void {
   // tag 1 — Attack: subtract damage from the struck entity's health.
   ecs.registerBehavior(
     createGameBehavior<Context, []>(

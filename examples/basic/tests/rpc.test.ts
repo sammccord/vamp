@@ -2,7 +2,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { ConsoleLogger, TempoLogLevel } from "@tempojs/common";
 import { TempoWSChannel } from "@vampgg/utils/ws-channel";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Actions, Attack, Entity, MutationScope, RpcClient } from "../src/bebop";
+import { Actions, Attack, Entity, MutationScope, RpcClient, Tags, TickRequest } from "../src/bebop";
+import { HOSTILE_TREE_ID } from "../src/systems";
 
 /** Boot a local `wrangler dev` server and resolve once it is ready. */
 function startWranglerDev(): Promise<{ proc: ChildProcess; port: number }> {
@@ -412,5 +413,68 @@ describe("basic RPC service (integration)", () => {
     await bgB.catch(() => {});
     chA.close();
     chB.close();
+  });
+  it("replays a hostile's behavior tree attacks for the same rng seed, through the Attack behavior", async () => {
+    const FRAMES = 30;
+    const healthDeltas = async (rng: number) => {
+      const { channel, client } = createRpcClient(
+        `test-bt-${crypto.randomUUID().slice(0, 8)}`,
+        `&rng=${rng}`,
+      );
+      const stream = await client.observe(MutationScope({}));
+      const scopes: MutationScope[] = [];
+      const bg = (async () => {
+        for await (const scope of stream) scopes.push(scope);
+      })();
+
+      const health = { points: 1000, min: 0, max: 1000, rate: 0, interval: 0 };
+      const pet = Entity({ id: crypto.randomUUID(), tags: [], children: [], health });
+      const player = Entity({
+        id: crypto.randomUUID(),
+        tags: [Tags.PlayerControlled],
+        children: [pet.id as string],
+        position: { x: 0, y: 0 },
+        health,
+      });
+      const hostile = Entity({
+        id: crypto.randomUUID(),
+        tags: [Tags.Hostile],
+        children: [],
+        position: { x: 10, y: 10 },
+        health,
+        brain: { tree: HOSTILE_TREE_ID },
+      });
+      await client.spawn(pet);
+      await client.spawn(player);
+      await client.spawn(hostile);
+      await client.tick(TickRequest({ steps: FRAMES, dtMs: 16 }));
+
+      const deltasFor = (id: string) =>
+        scopes
+          .flatMap((s) => [...(s.mutations ?? [])])
+          .flatMap(([key, rec]) =>
+            key === id && rec.tag === 2 && rec.value.delta.health
+              ? [rec.value.delta.health.points]
+              : [],
+          );
+      await waitFor(() => (deltasFor(pet.id as string).length === FRAMES ? true : undefined), {
+        label: "a health delta per frame on the player's child",
+      });
+
+      await stream.return(undefined);
+      await bg.catch(() => {});
+      channel.close();
+      return { player: deltasFor(player.id as string), pet: deltasFor(pet.id as string) };
+    };
+
+    const first = await healthDeltas(42);
+    const second = await healthDeltas(42);
+
+    expect(second).toEqual(first);
+    expect(first.player).toHaveLength(FRAMES);
+    expect(new Set(first.player)).toEqual(new Set([-1, -3]));
+    // `act` cascades an action to the target's children, so the child mirroring
+    // every hit shows each attack was dispatched to the Attack behavior.
+    expect(first.pet).toEqual(first.player);
   });
 });
