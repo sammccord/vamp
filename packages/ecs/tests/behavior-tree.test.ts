@@ -144,6 +144,19 @@ describe("evaluate", () => {
     expect(brain.last).toBe(2);
   });
 
+  test("a cycle fails the looping branch instead of overflowing the stack", () => {
+    const cyclic = {
+      nodes: [
+        { kind: 1, children: [1, 2] },
+        { kind: 2, children: [0] },
+        { kind: 5, children: [], leaf: Emit, args: [7] },
+      ],
+    };
+    const r = evaluate(cyclic, {}, context(seeded(1)));
+    expect(r.status).toBe("success");
+    expect(r.intents).toEqual([{ tag: 7 }]);
+  });
+
   test("does not mutate the tree or brain it was given", () => {
     const t = tree(seq(cooldown(3), task(Emit, 1)));
     const brain: Brain = { readyAt: [0, 0, 0] };

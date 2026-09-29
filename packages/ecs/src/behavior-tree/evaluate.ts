@@ -60,11 +60,18 @@ export function evaluate<W, E, A>(
     return slice;
   };
 
+  // Trees are data that can be swapped at runtime; a cycle fails the looping
+  // branch instead of overflowing the stack for the whole tick.
+  const onPath = new Set<number>();
+
   const run = (index: number): boolean => {
+    if (onPath.has(index)) return false;
+    onPath.add(index);
     const intentMark = intents.length;
     const cooldownMark = cooldowns.length;
     const lastMark = last;
     const ok = visit(index);
+    onPath.delete(index);
     if (!ok) cut(intentMark, cooldownMark, lastMark);
     return ok;
   };
