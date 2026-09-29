@@ -17,7 +17,8 @@ pnpm add -D @vampgg/cli bebop-tools
 ### `vamp init [--cwd <dir>]`
 
 Scaffolds a new game's schema: creates `schema/` with template `.bop` files
-(`entity.bop`, `actions.bop`, `state.bop`, `tags.bop`) plus `bebop.json` (the
+(`entity.bop`, which imports `@vampgg/utils`' `pool.bop` and `behavior.bop`,
+`actions.bop`, `state.bop`, `tags.bop`) plus `bebop.json` (the
 `bebopc` config) and `vamp.json` (the codegen config). Existing files are left
 untouched, so it's safe to re-run.
 
@@ -44,7 +45,8 @@ TypeScript files from a single `vamp.json` `outFile` (default `./src/game.genera
 | `game.generated.ts`        | re-exports both (barrel)                        | Worker code / convenience   |
 
 The `game.core.generated.ts` file (component map, `EntityDelta`, `materialize/merge/accumulateDelta`,
-`createECSOptions`, the `createGame*` system factories) carries **no** Worker
+`createECSOptions`, the `createGame*` system factories, and
+`createGameBehaviorTreeSystem` when `Entity` has `Brain` and `BehaviorTree` fields) carries **no** Worker
 dependency — import it directly from non-Worker packages to keep `cloudflare:workers`
 out of your dependency graph. `game.worker.generated.ts` holds the `GameECS` durable
 object, runtime, and interest broadcast. The barrel keeps existing `./game.generated`

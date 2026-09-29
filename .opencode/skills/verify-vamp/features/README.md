@@ -43,6 +43,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Join a lobby](./join-lobby.md) covers the websocket upgrade, spawning a player, insert streaming, and per-lobby world context.
 - [Combat actions](./combat-actions.md) covers `act` behaviors: attack, heal, and the area-attack cascade to children.
 - [World tick](./world-tick.md) covers `tick` driving the regen, movement, and hostile-aggro systems.
+- [Hostile behavior](./hostile-behavior.md) covers a hostile's behavior tree: the weighted hit, its cooldown, dispatch through `Attack`, and seeded replay.
 - [Interest routing](./interest-routing.md) covers see-all versus interest-filtered observers and area-of-interest isolation.
 - [Character shards](./character-shards.md) covers cross-lobby shard propagation and the `GET /v1/characters/:id` snapshot.
 - [Codegen CLI](./codegen-cli.md) covers `vamp init` and `vamp generate` in a scratch project.
