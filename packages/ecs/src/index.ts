@@ -64,6 +64,7 @@ export {
   weighted,
 } from "./behavior-tree/builder";
 export { type BehaviorContext, type BehaviorResult, evaluate } from "./behavior-tree/evaluate";
+export { type BehaviorTreeSystemOptions, createBehaviorTreeSystem } from "./behavior-tree/system";
 export {
   type BehaviorCondition,
   type BehaviorNode,

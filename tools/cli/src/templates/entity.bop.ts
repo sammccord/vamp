@@ -1,9 +1,20 @@
+/** `@vampgg/utils/schema` files the entity template imports. */
+export const UTILS_SCHEMA_FILES = ["pool.bop", "behavior.bop"] as const;
+export type UtilsSchemaFile = (typeof UTILS_SCHEMA_FILES)[number];
+
 /**
- * Entity schema template. `__POOL_IMPORT__` is replaced at scaffold time with a
- * path to `@vampgg/utils/schema/pool.bop` resolved via Node module resolution, so
- * it is correct for the actual (hoisted or pnpm) `node_modules` layout.
+ * Placeholder in {@link entityTemplate} replaced at scaffold time with a path to
+ * `@vampgg/utils/schema/<file>` resolved via Node module resolution, so it is
+ * correct for the actual (hoisted or pnpm) `node_modules` layout.
  */
-export const entityTemplate = `import "__POOL_IMPORT__"
+export const utilsSchemaPlaceholder = (file: UtilsSchemaFile): string => `__UTILS_SCHEMA_${file}__`;
+
+/** Literal import path used when `@vampgg/utils` cannot be resolved at init time. */
+export const utilsSchemaFallback = (file: UtilsSchemaFile): string =>
+  `../node_modules/@vampgg/utils/schema/${file}`;
+
+export const entityTemplate = `import "${utilsSchemaPlaceholder("pool.bop")}"
+import "${utilsSchemaPlaceholder("behavior.bop")}"
 import "./tags.bop"
 
 message Entity {
@@ -15,7 +26,3 @@ message Entity {
 \t6 -> Pool health;
 }
 `;
-
-/** Fallback import path used when `@vampgg/utils` cannot be resolved at init time. */
-export const POOL_IMPORT_PLACEHOLDER = "__POOL_IMPORT__";
-export const POOL_IMPORT_FALLBACK = "../node_modules/@vampgg/utils/schema/pool.bop";

@@ -41,11 +41,24 @@ export function applyArrayDelta<T>(base: T[], d?: ArrayDelta<T>): T[];
 export function applyPoolDelta<T>(base: T, delta: Record<string, number>): T;
 export function accumulateArrayDelta<T>(to: ArrayDelta<T> | undefined, from: ArrayDelta<T>): ArrayDelta<T>;
 export function accumulatePoolDelta(to: Record<string, number> | undefined, from: Record<string, number>): Record<string, number>;
+export type BehaviorTreeSystemOptions<State, UpdateArguments extends unknown[], Actions, Tags extends number, E, D, C extends number = number, T extends number = number> = {
+  query: Query | ((b: QueryBuilder) => QueryBuilder);
+  brain: keyof E & string;
+  tree: keyof E & string;
+  conditions: Readonly<Record<C, (world: unknown, entity: E, args: readonly number[]) => boolean>>;
+  tasks: Readonly<Record<T, (world: unknown, entity: E, args: readonly number[]) => Actions | Actions[] | undefined>>;
+  random: (world: unknown) => { getUniform(): number; getWeightedValue(data: Record<number, number>): string | number | undefined };
+  now: (world: unknown) => number;
+  target?: (intent: Actions, agentId: string) => string | undefined;
+};
+export function createBehaviorTreeSystem<State, UpdateArguments extends unknown[], Actions, Tags extends number, E, D, C extends number = number, T extends number = number>(
+  options: BehaviorTreeSystemOptions<State, UpdateArguments, Actions, Tags, E, D, C, T>,
+): ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>;
 export function applyReplaceDelta<T extends object>(base: T, delta: Partial<T>): T;
 export function accumulateReplaceDelta<D extends object>(to: D | undefined, from: D): D;
 
 export type Query = { __query: true };
-export type QueryBuilder = { __builder: true };
+export type QueryBuilder = { __builder: true; every(...components: number[]): QueryBuilder };
 export type EntitySystem<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown> = {
   type: 0;
   query: Query;
@@ -154,11 +167,30 @@ export function createInterestBroadcast<W, Req, Yield = never, E = unknown, D = 
 
 const BEHAVIOR_BOP = resolve(TOOLS_CLI, "../../packages/utils/schema/behavior.bop");
 
+const BEHAVIOR_ENTITY = `import "./pool.bop"
+import "./behavior.bop"
+import "./tags.bop"
+
+enum Condition { Near = 1; }
+enum Task { Attack = 1; Wander = 2; }
+
+message Entity {
+  1 -> guid id;
+  2 -> guid sk;
+  3 -> Tags[] tags;
+  4 -> Pool health;
+  5 -> Brain brain;
+  6 -> BehaviorTree behaviorTree;
+}
+`;
+
 const CF_STUB = `declare namespace Cloudflare { interface Env {} }`;
 
 interface ScratchFiles {
   entity: string;
   pool?: string;
+  /** Extra `src/` files type-checked with the generated output, keyed by file name. */
+  src?: Record<string, string>;
 }
 
 /**
@@ -276,6 +308,9 @@ message PoolDelta {
 
   // 4. tsc --noEmit over the emitted output.
   writeFileSync(join(srcDir, "cloudflare.d.ts"), CF_STUB, "utf-8");
+  for (const [name, content] of Object.entries(files.src ?? {})) {
+    writeFileSync(join(srcDir, name), content, "utf-8");
+  }
   const tsconfig = {
     compilerOptions: {
       target: "es2024",
@@ -340,20 +375,7 @@ message Entity {
   });
 
   it("behavior tree and brain fields merge by replace, not by counter", () => {
-    const entity = `import "./pool.bop"
-import "./behavior.bop"
-import "./tags.bop"
-
-message Entity {
-  1 -> guid id;
-  2 -> guid sk;
-  3 -> Tags[] tags;
-  4 -> Pool health;
-  5 -> Brain brain;
-  6 -> BehaviorTree behaviorTree;
-}
-`;
-    const { paths } = roundtrip({ entity });
+    const { paths } = roundtrip({ entity: BEHAVIOR_ENTITY });
     const core = readFileSync(paths.core, "utf-8");
     expect(core).toContain(
       'import { applyArrayDelta, accumulateArrayDelta, applyPoolDelta, accumulatePoolDelta, applyReplaceDelta, accumulateReplaceDelta } from "@vampgg/ecs";',
@@ -363,6 +385,38 @@ message Entity {
       "to.behaviorTree = accumulateReplaceDelta(to.behaviorTree, from.behaviorTree);",
     );
     expect(core).toContain("entity.health = applyPoolDelta(");
+  });
+
+  it("types createGameBehaviorTreeSystem leaves against the Condition/Task enums", () => {
+    const usage = `import { Actions, Condition, Task } from "./bebop.js";
+import { createGameBehaviorTreeSystem, type GameTasks } from "./game.core.generated.js";
+
+const random = { getUniform: () => 0, getWeightedValue: () => undefined };
+const tasks: GameTasks = {
+  [Task.Attack]: (_world, entity) => Actions.fromNoop({ who: entity.id }),
+  [Task.Wander]: () => undefined,
+};
+createGameBehaviorTreeSystem({
+  conditions: { [Condition.Near]: (_world, _entity, args) => args[0] > 0 },
+  tasks,
+  random: () => random,
+  now: () => 0,
+});
+createGameBehaviorTreeSystem({
+  conditions: { [Condition.Near]: () => true },
+  // @ts-expect-error every Task needs an implementation
+  tasks: { [Task.Attack]: () => undefined },
+  random: () => random,
+  now: () => 0,
+});
+`;
+    const { paths } = roundtrip({ entity: BEHAVIOR_ENTITY, src: { "usage.ts": usage } });
+    const core = readFileSync(paths.core, "utf-8");
+    expect(core).toContain(
+      'import type { Entity, Actions, Tags, PoolDelta, BrainDelta, BehaviorTreeDelta, Condition, Task } from "./bebop.js";',
+    );
+    expect(core).toContain('brain: "brain",');
+    expect(core).toContain("query: (q) => q.every(components.brain),");
   });
 
   it("throws before emitting when a custom component delta cannot be resolved (Case D)", () => {

@@ -2,9 +2,11 @@ import { defineCommand } from "citty";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import {
-  POOL_IMPORT_FALLBACK,
-  POOL_IMPORT_PLACEHOLDER,
   entityTemplate,
+  UTILS_SCHEMA_FILES,
+  type UtilsSchemaFile,
+  utilsSchemaFallback,
+  utilsSchemaPlaceholder,
 } from "../templates/entity.bop";
 import { actionsTemplate } from "../templates/actions.bop";
 import { stateTemplate } from "../templates/state.bop";
@@ -13,7 +15,7 @@ import { resolveBebopImport } from "../generators/resolve-imports";
 
 /**
  * Resolve a bebop import path (relative to `schemaDir`) for
- * `@vampgg/utils/schema/pool.bop` using Node module resolution, so the scaffolded
+ * `@vampgg/utils/schema/<file>` using Node module resolution, so the scaffolded
  * import is correct under hoisted or pnpm `node_modules` layouts. Falls back to
  * a literal path (with a warning) when resolution fails.
  *
@@ -21,19 +23,20 @@ import { resolveBebopImport } from "../generators/resolve-imports";
  * (Node resolution from a temp dir is environment-dependent — it may still find
  * a `@vampgg/utils` in an ancestor `node_modules`).
  */
-export function resolvePoolImport(
+export function resolveUtilsSchemaImport(
+  file: UtilsSchemaFile,
   cwd: string,
   schemaDir: string,
   resolveImport: (specifier: string, fromDir: string) => string | null = resolveBebopImport,
 ): string {
-  const resolved = resolveImport("@vampgg/utils/schema/pool.bop", cwd);
+  const resolved = resolveImport(`@vampgg/utils/schema/${file}`, cwd);
   if (!resolved) {
     console.warn(
-      "Warning: could not resolve '@vampgg/utils/schema/pool.bop'. Scaffolding a literal " +
+      `Warning: could not resolve '@vampgg/utils/schema/${file}'. Scaffolding a literal ` +
         "import path that may not resolve under your node_modules layout — fix the import " +
         "in schema/entity.bop if `bebopc build` fails.",
     );
-    return POOL_IMPORT_FALLBACK;
+    return utilsSchemaFallback(file);
   }
   const rel = relative(schemaDir, resolved).split("\\").join("/");
   return rel.startsWith(".") ? rel : `./${rel}`;
@@ -59,9 +62,14 @@ export const initCommand = defineCommand({
     mkdirSync(schemaDir, { recursive: true });
     console.log("Created schema/");
 
-    // Resolve the pool.bop import path for the actual node_modules layout.
-    const poolImport = resolvePoolImport(cwd, schemaDir);
-    const entityContent = entityTemplate.replace(POOL_IMPORT_PLACEHOLDER, poolImport);
+    // Resolve the @vampgg/utils schema imports for the actual node_modules layout.
+    let entityContent = entityTemplate;
+    for (const file of UTILS_SCHEMA_FILES) {
+      entityContent = entityContent.replace(
+        utilsSchemaPlaceholder(file),
+        resolveUtilsSchemaImport(file, cwd, schemaDir),
+      );
+    }
 
     // Write template .bop files (skip if they exist)
     const files = [

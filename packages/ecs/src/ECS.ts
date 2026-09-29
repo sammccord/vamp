@@ -1094,6 +1094,16 @@ export class ECS<
   }
 
   /**
+   * Hold the active {@link withScope} open until `work` settles, so async work a
+   * synchronous system starts during `update()` (such as dispatching `act`)
+   * commits in that scope's batch instead of landing after it closed. A
+   * rejection aborts the scope. Outside a scope nothing waits for `work`.
+   */
+  waitUntil(work: Promise<unknown>): void {
+    this.context.scope?.pending.push(work);
+  }
+
+  /**
    * Create a new mutation scope for tracking entity changes.
    * Mutations recorded in a scope can be coalesced and flushed together.
    */
@@ -1129,6 +1139,7 @@ export class ECS<
         cb(scope);
       }
       const result = await fn();
+      while (scope.pending.length > 0) await Promise.all(scope.pending.splice(0));
       succeeded = true;
       return { result, mutations: scope.mutations };
     } finally {
