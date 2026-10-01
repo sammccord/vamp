@@ -119,7 +119,7 @@ export function generate(
   // --- Core (pure): only `@vampgg/ecs` + `./bebop`. ---
   const coreSections = [
     AUTOGEN_HEADER,
-    `import type { ECSOptions, EntitySystem, ArchetypeSystem, Behavior, System, Query, QueryBuilder${behaviorTree ? ", BehaviorTreeSystemOptions" : ""} } from "@vampgg/ecs";`,
+    `import type { ECSOptions, EntitySystem, ArchetypeSystem, Behavior, BehaviorHandler, System, Query, QueryBuilder${behaviorTree ? ", BehaviorTreeSystemOptions" : ""} } from "@vampgg/ecs";`,
     `import { createEntitySystem, createArchetypeSystem, createBehavior${behaviorTree ? ", createBehaviorTreeSystem" : ""} } from "@vampgg/ecs";`,
     ...(helperImports ? [helperImports] : []),
     `import type { Entity, Actions, Tags${bebopImportTypes}${leafTypes} } from "${bebopImport}";`,
@@ -132,7 +132,7 @@ export function generate(
     "",
     emitFactory(),
     "",
-    emitSystems(),
+    emitSystems(actionsDef),
     "",
     ...(behaviorTree ? [emitBehaviorTreeSystem(behaviorTree, schema), ""] : []),
   ];

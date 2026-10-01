@@ -16,9 +16,24 @@ import type { ParsedSchema, SchemaDefinition } from "./parse-bop";
  * parameter types are read back off the emitted aliases (e.g.
  * `GameEntitySystem<...>["execute"]`) so they cannot drift from `System.ts` and
  * we avoid importing `ECS`/`Archetype`/`CustomAction` just to restate them.
+ *
+ * `ActionTag` names each `Actions` branch's discriminator as a literal, so
+ * `createGameBehavior(ActionTag.Heal, handler, ...)` infers `Tag` and hands the
+ * handler `event.detail.value: Heal`.
  */
-export function emitSystems(): string {
+export function emitSystems(actions: SchemaDefinition): string {
+  const branches = (actions.branches ?? [])
+    .map((b) => `  ${b.typeName}: ${b.discriminator},`)
+    .join("\n");
   return `/**
+ * {@link Actions} discriminators by branch name. Passing one to
+ * {@link createGameBehavior} narrows the handler's \`event.detail\` to that branch.
+ */
+export const ActionTag = {
+${branches}
+} as const;
+
+/**
  * {@link EntitySystem} for this schema — runs per matching entity each update.
  * \`Actions\`/\`Tags\`/\`Entity\`/\`EntityDelta\` are baked in; \`State\`/\`UpdateArguments\`
  * stay open. Build one with {@link createGameEntitySystem}.
@@ -84,13 +99,17 @@ export function createGameArchetypeSystem<
 /**
  * Create an action-tag behavior. \`handler(world, entity, event)\` runs when
  * \`act(tag)\` strikes a matching entity; higher \`priority\` runs first.
+ * \`event.detail\` is narrowed to the \`Actions\` branch for \`tag\`. Leave the type
+ * arguments off so \`Tag\` is inferred from a literal like \`ActionTag.Heal\`;
+ * \`State\`/\`UpdateArguments\` are inferred from \`registerBehavior\`.
  */
 export function createGameBehavior<
   State extends Record<string, unknown> = {},
   UpdateArguments extends Array<unknown> = [],
+  Tag extends Actions["tag"] = Actions["tag"],
 >(
-  tag: number,
-  handler: GameBehavior<State, UpdateArguments>["handler"],
+  tag: Tag,
+  handler: BehaviorHandler<State, UpdateArguments, Actions, Tags, Entity, EntityDelta, Tag>,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
   priority?: number,
 ): GameBehavior<State, UpdateArguments> {

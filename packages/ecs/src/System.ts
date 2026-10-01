@@ -82,6 +82,24 @@ export type Behavior<
   priority: number | undefined; // Higher priority runs first
 };
 
+/**
+ * The handler {@link createBehavior} accepts: `event.detail` is narrowed to the
+ * `Actions` member whose tag is `Tag`.
+ */
+export type BehaviorHandler<
+  State extends Record<string, unknown>,
+  UpdateArguments extends unknown[],
+  Actions extends GenericAction,
+  Tags extends number = number,
+  E extends BaseEntity<Tags> = BaseEntity<Tags>,
+  D = unknown,
+  Tag extends Actions["tag"] = Actions["tag"],
+> = (
+  world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
+  entity: E,
+  event: CustomAction<Extract<Actions, { tag: Tag }>>,
+) => void | Promise<void>;
+
 export type System<
   State extends Record<string, unknown>,
   UpdateArguments extends unknown[],
@@ -202,8 +220,9 @@ export function createLifecycleSystem(
 /**
  * Create an event-driven {@link Behavior} for {@link ECS.registerBehavior}, keyed
  * by an action `tag`. When {@link ECS.act} dispatches that tag to an entity
- * matching `query`, `handler(world, entity, event)` runs. An optional `priority`
- * orders behaviors sharing a tag.
+ * matching `query`, `handler(world, entity, event)` runs with `event.detail`
+ * narrowed to the `Actions` member for `tag`. An optional `priority` orders
+ * behaviors sharing a tag.
  * @param tag action tag this behavior responds to
  * @param handler runs against the world + struck entity + action payload
  * @param query which entities this behavior applies to
@@ -216,20 +235,20 @@ export function createBehavior<
   Tags extends number = number,
   E extends BaseEntity<Tags> = BaseEntity<Tags>,
   D = unknown,
+  Tag extends Actions["tag"] = Actions["tag"],
 >(
-  tag: number,
-  handler: (
-    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
-    entity: E,
-    event: CustomAction<Actions>,
-  ) => void | Promise<void>,
+  tag: Tag,
+  handler: BehaviorHandler<State, UpdateArguments, Actions, Tags, E, D, Tag>,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
   priority?: number,
 ): Behavior<State, UpdateArguments, Actions, Tags, E, D> {
   query = query instanceof Function ? buildQuery(query) : query;
   return Object.freeze({
     tag,
-    handler,
+    // SAFETY: ECS.act looks behaviors up by the dispatched action's own tag
+    // (ECS.ts behavior cache), so this handler only ever receives actions whose
+    // tag is `Tag`, i.e. `Extract<Actions, { tag: Tag }>`.
+    handler: handler as Behavior<State, UpdateArguments, Actions, Tags, E, D>["handler"],
     query,
     priority,
     type: SystemType.Behavior,

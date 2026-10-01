@@ -185,8 +185,22 @@ describe("emitGameContext", () => {
   });
 });
 
+const ACTIONS_UNION: SchemaDefinition = {
+  name: "Actions",
+  kind: "union",
+  fields: [],
+  branches: [
+    { discriminator: 1, typeName: "Attack" },
+    { discriminator: 3, typeName: "Heal" },
+  ],
+};
+
 describe("emitSystems", () => {
-  const result = emitSystems();
+  const result = emitSystems(ACTIONS_UNION);
+
+  it("emits ActionTag naming each Actions branch discriminator as a literal", () => {
+    expect(result).toContain("export const ActionTag = {\n  Attack: 1,\n  Heal: 3,\n} as const;");
+  });
 
   it("bakes concrete Actions/Tags/Entity/EntityDelta into each generic system alias", () => {
     expect(result).toContain(
@@ -212,7 +226,10 @@ describe("emitSystems", () => {
     expect(result).toContain("return createArchetypeSystem(execute, query);");
 
     expect(result).toContain("export function createGameBehavior<");
-    expect(result).toContain('handler: GameBehavior<State, UpdateArguments>["handler"],');
+    expect(result).toContain("tag: Tag,");
+    expect(result).toContain(
+      "handler: BehaviorHandler<State, UpdateArguments, Actions, Tags, Entity, EntityDelta, Tag>,",
+    );
     expect(result).toContain("return createBehavior(tag, handler, query, priority);");
   });
 });
@@ -242,9 +259,9 @@ describe("jsdoc on public exports", () => {
   });
 
   it("documents every generated system alias and factory", () => {
-    const result = emitSystems();
+    const result = emitSystems(ACTIONS_UNION);
     eachExportHasJsdoc(result);
-    // 4 aliases + 3 factories, each with its own block.
-    expect((result.match(/\/\*\*/g) ?? []).length).toBe(7);
+    // ActionTag + 4 aliases + 3 factories, each with its own block.
+    expect((result.match(/\/\*\*/g) ?? []).length).toBe(8);
   });
 });
