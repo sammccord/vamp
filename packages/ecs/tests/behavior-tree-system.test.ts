@@ -21,6 +21,7 @@ import {
   tree,
   weighted,
 } from "../src/index.ts";
+import { treeFingerprint } from "../src/behavior-tree/evaluate.ts";
 
 type Entity = {
   id?: string;
@@ -127,7 +128,12 @@ describe("createBehaviorTreeSystem", () => {
     expect(new Set(mutations.keys())).toEqual(new Set(["mob", "pet", "player"]));
     expect(w.entities.get("player")?.hp).toBe(17);
     expect(w.entities.get("pet")?.hp).toBe(17);
-    expect(w.entities.get("mob")?.brain).toEqual({ tree: "hostile-tree", last: 2 });
+    expect(w.entities.get("mob")?.brain).toEqual({
+      tree: "hostile-tree",
+      fingerprint: treeFingerprint(w.entities.get("hostile-tree")!.behaviorTree!),
+      readyAt: [],
+      last: 2,
+    });
   });
 
   test("cooldown state lives on the brain and gates later ticks", async () => {
@@ -136,6 +142,20 @@ describe("createBehaviorTreeSystem", () => {
     for (let i = 0; i < 7; i++) await w.step();
     expect(w.entities.get("player")?.hp).toBe(17);
     expect(w.entities.get("mob")?.brain?.readyAt).toEqual([0, 9, 0]);
+  });
+
+  test("editing the shared tree drops cooldowns set by the old one", async () => {
+    const w = world(1);
+    await spawn(w, seq(cooldown(100), task(Task.Attack, 1)));
+    await w.step();
+    await w.step();
+    expect(w.entities.get("player")?.hp).toBe(19);
+
+    await w.ecs.withScope(() =>
+      w.ecs.put("hostile-tree", { behaviorTree: tree(seq(cooldown(100), task(Task.Attack, 2))) }),
+    );
+    await w.step();
+    expect(w.entities.get("player")?.hp).toBe(17);
   });
 
   test("the same seed replays the same damage", async () => {

@@ -151,21 +151,24 @@ export const BEBOP_SCHEMA = new Uint8Array ([
 0, 0, 0, 1, 66, 101, 104, 97, 118, 105, 111, 114, 84, 114,
 101, 101, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 1,
 110, 111, 100, 101, 115, 0, 242, 255, 255, 255, 0, 25, 0,
-0, 0, 0, 1, 66, 114, 97, 105, 110, 0, 2, 0, 5, 0, 0, 0, 3,
+0, 0, 0, 1, 66, 114, 97, 105, 110, 0, 2, 0, 5, 0, 0, 0, 4,
 116, 114, 101, 101, 0, 245, 255, 255, 255, 0, 1, 114, 101,
 97, 100, 121, 65, 116, 0, 242, 255, 255, 255, 0, 251, 255,
 255, 255, 0, 2, 108, 97, 115, 116, 0, 253, 255, 255, 255,
-0, 3, 66, 114, 97, 105, 110, 68, 101, 108, 116, 97, 0, 2,
-0, 5, 0, 0, 0, 3, 116, 114, 101, 101, 0, 245, 255, 255,
-255, 0, 1, 114, 101, 97, 100, 121, 65, 116, 0, 242, 255,
-255, 255, 0, 251, 255, 255, 255, 0, 2, 108, 97, 115, 116,
-0, 253, 255, 255, 255, 0, 3, 1, 0, 0, 0, 82, 112, 99, 0,
-0, 4, 0, 0, 0, 115, 112, 97, 119, 110, 0, 0, 0, 19, 0, 0,
-0, 19, 0, 0, 0, 62, 226, 118, 138, 97, 99, 116, 0, 0, 0,
-13, 0, 0, 0, 13, 0, 0, 0, 48, 15, 87, 211, 116, 105, 99,
-107, 0, 0, 0, 14, 0, 0, 0, 15, 0, 0, 0, 202, 1, 167, 146,
-111, 98, 115, 101, 114, 118, 101, 0, 0, 1, 8, 0, 0, 0, 8,
-0, 0, 0, 214, 29, 17, 28
+0, 3, 102, 105, 110, 103, 101, 114, 112, 114, 105, 110,
+116, 0, 251, 255, 255, 255, 0, 4, 66, 114, 97, 105, 110,
+68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 4, 116, 114,
+101, 101, 0, 245, 255, 255, 255, 0, 1, 114, 101, 97, 100,
+121, 65, 116, 0, 242, 255, 255, 255, 0, 251, 255, 255,
+255, 0, 2, 108, 97, 115, 116, 0, 253, 255, 255, 255, 0, 3,
+102, 105, 110, 103, 101, 114, 112, 114, 105, 110, 116, 0,
+251, 255, 255, 255, 0, 4, 1, 0, 0, 0, 82, 112, 99, 0, 0,
+4, 0, 0, 0, 115, 112, 97, 119, 110, 0, 0, 0, 19, 0, 0, 0,
+19, 0, 0, 0, 62, 226, 118, 138, 97, 99, 116, 0, 0, 0, 13,
+0, 0, 0, 13, 0, 0, 0, 48, 15, 87, 211, 116, 105, 99, 107,
+0, 0, 0, 14, 0, 0, 0, 15, 0, 0, 0, 202, 1, 167, 146, 111,
+98, 115, 101, 114, 118, 101, 0, 0, 1, 8, 0, 0, 0, 8, 0, 0,
+0, 214, 29, 17, 28
 ]);
 
 export interface StringArrayDelta {
@@ -2445,6 +2448,8 @@ export interface Brain {
   readyAt?: number[];
 
   last?: number;
+
+  fingerprint?: number;
 }
 
 export const Brain = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
@@ -2487,6 +2492,10 @@ export const Brain = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
         view.writeByte(3);
         view.writeUint16(record.last);
       }
+      if (record.fingerprint !== undefined) {
+        view.writeByte(4);
+        view.writeUint32(record.fingerprint);
+      }
       view.writeByte(0);
       const end = view.length;
       view.fillMessageLength(pos, end - start);
@@ -2528,6 +2537,10 @@ export const Brain = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
             message.last = view.readUint16();
             break;
 
+          case 4:
+            message.fingerprint = view.readUint32();
+            break;
+
           default:
             view.index = end;
             return message;
@@ -2545,6 +2558,8 @@ export interface BrainDelta {
   readyAt?: number[];
 
   last?: number;
+
+  fingerprint?: number;
 }
 
 export const BrainDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
@@ -2587,6 +2602,10 @@ export const BrainDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assig
         view.writeByte(3);
         view.writeUint16(record.last);
       }
+      if (record.fingerprint !== undefined) {
+        view.writeByte(4);
+        view.writeUint32(record.fingerprint);
+      }
       view.writeByte(0);
       const end = view.length;
       view.fillMessageLength(pos, end - start);
@@ -2626,6 +2645,10 @@ export const BrainDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assig
 
           case 3:
             message.last = view.readUint16();
+            break;
+
+          case 4:
+            message.fingerprint = view.readUint32();
             break;
 
           default:

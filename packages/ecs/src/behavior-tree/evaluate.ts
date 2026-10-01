@@ -26,6 +26,42 @@ export interface BehaviorResult<A> {
   brain: Brain;
 }
 
+const fingerprints = new WeakMap<BehaviorTree, number>();
+const float = new Float32Array(1);
+const floatBits = new Uint32Array(float.buffer);
+
+/**
+ * A 32-bit FNV-1a fingerprint of the tree's nodes, cached per tree object.
+ * Absent fields hash like their wire defaults, so a built tree and its decoded
+ * copy share a fingerprint.
+ */
+export function treeFingerprint(tree: BehaviorTree): number {
+  const cached = fingerprints.get(tree);
+  if (cached !== undefined) return cached;
+  let hash = 0x811c9dc5;
+  const mix = (word: number) => {
+    hash = Math.imul(hash ^ word, 0x01000193) >>> 0;
+  };
+  const nodes = tree.nodes ?? [];
+  mix(nodes.length);
+  for (const node of nodes) {
+    mix(node.kind ?? 0);
+    mix(node.weight ?? 0);
+    mix(node.leaf ?? 0);
+    const children = node.children ?? [];
+    mix(children.length);
+    for (const child of children) mix(child);
+    const args = node.args ?? [];
+    mix(args.length);
+    for (const arg of args) {
+      float[0] = arg;
+      mix(floatBits[0]);
+    }
+  }
+  fingerprints.set(tree, hash);
+  return hash;
+}
+
 interface Slice<A> {
   intents: A[];
   cooldowns: number[];
@@ -36,7 +72,8 @@ interface Slice<A> {
  * Evaluate `tree` from the root for one agent. Pure apart from the RNG: tasks
  * only return intents, and a subtree's intents and cooldowns take effect only
  * when that subtree succeeds, so a failed sequence or an unpicked weighted
- * branch leaves no trace.
+ * branch leaves no trace. A brain whose `fingerprint` differs from the tree's was
+ * built against another tree, so it is evaluated as fresh and fully rewritten.
  */
 export function evaluate<W, E, A>(
   tree: BehaviorTree,
@@ -44,11 +81,13 @@ export function evaluate<W, E, A>(
   ctx: BehaviorContext<W, E, A>,
 ): BehaviorResult<A> {
   const nodes = tree.nodes ?? [];
-  const readyAt = brain.readyAt ?? [];
+  const fingerprint = treeFingerprint(tree);
+  const stale = brain.fingerprint !== fingerprint;
+  const readyAt = stale ? [] : (brain.readyAt ?? []);
   const intents: A[] = [];
   // Flattened [nodeIndex, readyAtTick] pairs from cooldowns that fired.
   const cooldowns: number[] = [];
-  let last = brain.last;
+  let last = stale ? undefined : brain.last;
 
   const cut = (intentMark: number, cooldownMark: number, lastMark: number | undefined) => {
     const slice: Slice<A> = {
@@ -135,12 +174,14 @@ export function evaluate<W, E, A>(
   };
 
   const status: BehaviorStatus = run(0) ? "success" : "failure";
-  const delta: Brain = {};
+  // Replace deltas skip undefined fields, so a stale brain's `last` is cleared
+  // to 0, the value a brain that never fired a task materializes with.
+  const delta: Brain = stale ? { fingerprint, readyAt: [], last: last ?? 0 } : {};
   if (cooldowns.length > 0) {
     const next = Array.from({ length: nodes.length }, (_, i) => readyAt[i] ?? 0);
     for (let i = 0; i < cooldowns.length; i += 2) next[cooldowns[i]] = cooldowns[i + 1];
     delta.readyAt = next;
   }
-  if (last !== brain.last) delta.last = last;
+  if (!stale && last !== brain.last) delta.last = last;
   return { status, intents, brain: delta };
 }
