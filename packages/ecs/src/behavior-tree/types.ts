@@ -27,11 +27,15 @@ export interface BehaviorTree {
   nodes?: BehaviorNode[];
 }
 
-/** Per-agent state: which tree it runs and when each cooldown node is ready again. */
+/**
+ * Per-agent state: which tree it runs and when each cooldown node is ready again.
+ * `readyAt` and `last` index into the tree whose fingerprint is `fingerprint`.
+ */
 export interface Brain {
   tree?: string;
   readyAt?: number[];
   last?: number;
+  fingerprint?: number;
 }
 
 /**

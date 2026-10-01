@@ -33,6 +33,7 @@ message Brain {
   1 -> string tree;         // id of the entity that holds the BehaviorTree
   2 -> uint32[] readyAt;    // per-node cooldown expiry tick
   3 -> uint16 last;         // last task node that fired
+  4 -> uint32 fingerprint;  // of the tree that readyAt and last index into
 }
 
 // Brain delta - every field is last-write-wins
@@ -40,4 +41,5 @@ message BrainDelta {
   1 -> string tree;
   2 -> uint32[] readyAt;
   3 -> uint16 last;
+  4 -> uint32 fingerprint;
 }

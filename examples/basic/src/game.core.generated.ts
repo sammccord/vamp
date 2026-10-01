@@ -54,7 +54,7 @@ export function materializeDelta(delta: EntityDelta, base?: Partial<Entity>): En
     level: delta.level ?? base?.level ?? 0,
     xp: delta.xp ?? base?.xp ?? 0,
     faction: delta.faction ?? base?.faction ?? 0,
-    brain: delta.brain ? applyReplaceDelta(base?.brain ?? { tree: '', readyAt: [], last: 0 }, delta.brain) : base?.brain ?? { tree: '', readyAt: [], last: 0 },
+    brain: delta.brain ? applyReplaceDelta(base?.brain ?? { tree: '', readyAt: [], last: 0, fingerprint: 0 }, delta.brain) : base?.brain ?? { tree: '', readyAt: [], last: 0, fingerprint: 0 },
     behaviorTree: delta.behaviorTree ? applyReplaceDelta(base?.behaviorTree ?? { nodes: [] }, delta.behaviorTree) : base?.behaviorTree ?? { nodes: [] },
   } as Entity;
 }

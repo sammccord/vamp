@@ -165,6 +165,9 @@ A behavior tree decides which actions an entity takes; behaviors still carry the
 out. The tree is data (`BehaviorTree` from `@vampgg/utils/schema/behavior.bop`)
 stored on its own entity. Each agent holds a `Brain` whose `tree` field names that
 entity, so one tree serves every agent and can be swapped with a single `put`.
+The brain also records the tree's `fingerprint`. When a `put` edits the tree or points
+the brain at another one, the next evaluation sees a new fingerprint and discards the
+cooldowns and last task recorded against the old tree.
 
 Build a tree with the builder. `weighted` runs every branch, drops the ones that
 fail, and picks one of the rest by weight.

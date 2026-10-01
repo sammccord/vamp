@@ -15,6 +15,7 @@ import {
   tree,
   weighted,
 } from "../src/index.ts";
+import { treeFingerprint } from "../src/behavior-tree/evaluate.ts";
 
 type Intent = { tag: number };
 type Agent = { near: boolean; calls: number[] };
@@ -64,7 +65,7 @@ describe("evaluate", () => {
 
   test("a failed sequence drops the intents its earlier tasks emitted", () => {
     const t = tree(seq(task(Emit, 1), cond(Never)));
-    const r = evaluate(t, {}, context(seeded(1)));
+    const r = evaluate(t, { fingerprint: treeFingerprint(t) }, context(seeded(1)));
     expect(r).toEqual({ status: "failure", intents: [], brain: {} });
   });
 
@@ -106,7 +107,7 @@ describe("evaluate", () => {
   test("weighted keeps only the chosen branch's intents and cooldowns", () => {
     const t = tree(weighted([1, cooldown(5, task(Emit, 1))], [1, cooldown(7, task(Emit, 2))]));
     const agent: Agent = { near: true, calls: [] };
-    const r = evaluate(t, {}, context(fixed(1), agent, 10));
+    const r = evaluate(t, { fingerprint: treeFingerprint(t) }, context(fixed(1), agent, 10));
     expect(agent.calls).toEqual([1, 2]);
     expect(r.intents).toEqual([{ tag: 2 }]);
     expect(r.brain).toEqual({ readyAt: [0, 0, 0, 17, 0], last: 4 });
@@ -144,6 +145,35 @@ describe("evaluate", () => {
     expect(brain.last).toBe(2);
   });
 
+  test("a brain built against another tree starts fresh", () => {
+    const before = tree(seq(task(Emit, 1), cooldown(100, task(Emit, 2))));
+    const brain = evaluate(before, {}, context(seeded(1))).brain;
+    expect(brain).toEqual({
+      fingerprint: treeFingerprint(before),
+      readyAt: [0, 0, 100, 0],
+      last: 3,
+    });
+
+    const after = tree(seq(task(Emit, 1), cooldown(5, task(Emit, 2))));
+    const r = evaluate(after, brain, context(seeded(1), undefined, 50));
+    expect(r.status).toBe("success");
+    expect(r.brain).toEqual({
+      fingerprint: treeFingerprint(after),
+      readyAt: [0, 0, 55, 0],
+      last: 3,
+    });
+  });
+
+  test("a stale brain is cleared even when nothing fires", () => {
+    const t = tree(cond(Never));
+    const r = evaluate(
+      t,
+      { fingerprint: treeFingerprint(t) + 1, readyAt: [9], last: 3 },
+      context(seeded(1)),
+    );
+    expect(r.brain).toEqual({ fingerprint: treeFingerprint(t), readyAt: [], last: 0 });
+  });
+
   test("a cycle fails the looping branch instead of overflowing the stack", () => {
     const cyclic = {
       nodes: [
@@ -177,5 +207,33 @@ describe("tree", () => {
         { kind: 5, children: [], leaf: Emit, args: [2] },
       ],
     });
+  });
+});
+
+describe("treeFingerprint", () => {
+  test("a built tree and its decoded copy share a fingerprint", () => {
+    const built = tree(seq(cond(Near), cooldown(10, task(Emit, 1))));
+    const decoded = {
+      nodes: [
+        { kind: 2, children: [1, 2], weight: 0, leaf: 0, args: [] },
+        { kind: 4, children: [], weight: 0, leaf: Near, args: [] },
+        { kind: 8, children: [3], weight: 10, leaf: 0, args: [] },
+        { kind: 5, children: [], weight: 0, leaf: Emit, args: [1] },
+      ],
+    };
+    expect(treeFingerprint(decoded)).toBe(treeFingerprint(built));
+  });
+
+  test("changing any node changes the fingerprint", () => {
+    const fingerprint = treeFingerprint(tree(seq(cond(Near), cooldown(10, task(Emit, 1)))));
+    expect(treeFingerprint(tree(seq(cond(Near), cooldown(11, task(Emit, 1)))))).not.toBe(
+      fingerprint,
+    );
+    expect(treeFingerprint(tree(seq(cond(Near), cooldown(10, task(Emit, 1.5)))))).not.toBe(
+      fingerprint,
+    );
+    expect(treeFingerprint(tree(seq(cooldown(10, task(Emit, 1)), cond(Near))))).not.toBe(
+      fingerprint,
+    );
   });
 });
