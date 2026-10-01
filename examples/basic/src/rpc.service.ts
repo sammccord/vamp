@@ -1,4 +1,5 @@
 import type { ServerContext } from "@tempojs/server";
+import type { BebopRecord } from "bebop";
 import {
   type Actions,
   BaseRpcService,
@@ -40,8 +41,10 @@ export class RpcService extends BaseRpcService {
 
     // Strip the bebop `encode` method so the record is a plain, cloneable data
     // object (the ECS structuredClones inserts, and functions cannot be cloned).
-    const entity = { ...(record as Entity) } as Entity;
-    delete (entity as Record<string, unknown>).encode;
+    // The spread copies the factory record's own `encode` property, so the
+    // local type carries it as optional until the delete removes it.
+    const entity: Entity & Partial<BebopRecord> = { ...record };
+    delete entity.encode;
 
     // Default the entity's faction to the world's runtime-configured faction
     // (derived per-DO from the handler request; see `resolveContext`). Only when

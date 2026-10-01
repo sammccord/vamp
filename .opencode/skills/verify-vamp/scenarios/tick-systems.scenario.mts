@@ -5,6 +5,7 @@ import {
   Tags,
   TickRequest,
 } from "../../../../examples/basic/src/bebop";
+import { HOSTILE_TREE_ID } from "../../../../examples/basic/src/systems";
 import { artifact, collect, connect, makeEntity, newNs, waitFor } from "./harness.mts";
 
 function deltasFor(seen: MutationScope[], id: string) {
@@ -51,17 +52,21 @@ it("lets a hostile chip the nearest player when it ticks inside aggro range", as
   const observed = collect(await client.observe(MutationScope({})));
 
   const player = makeEntity({ tags: [Tags.PlayerControlled], position: { x: 0, y: 0 } });
-  const hostile = makeEntity({ tags: [Tags.Hostile], position: { x: 10, y: 10 } });
+  const hostile = makeEntity({
+    tags: [Tags.Hostile],
+    position: { x: 10, y: 10 },
+    brain: { tree: HOSTILE_TREE_ID },
+  });
   await client.spawn(player);
   await client.spawn(hostile);
 
   await client.tick(TickRequest({ steps: 1, dtMs: 16 }));
 
   const chip = await waitFor(
-    () => deltasFor(observed.seen, player.id as string).find((d) => d?.health?.points === -1),
+    () => deltasFor(observed.seen, player.id as string).find((d) => d?.health?.points),
     { label: "aggro damage on the player" },
   );
-  expect(chip.health?.points).toBe(-1);
+  expect([-1, -3]).toContain(chip.health?.points);
 
   artifact("tick-aggro.json", { player: player.id, hostile: hostile.id, delta: chip });
 

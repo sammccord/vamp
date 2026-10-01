@@ -159,6 +159,57 @@ world.registerBehavior(onAttack);
 await world.act("goblin", { tag: 1, value: { damage: 5 } }); // + every child
 ```
 
+### Behavior trees
+
+A behavior tree decides which actions an entity takes; behaviors still carry them
+out. The tree is data (`BehaviorTree` from `@vampgg/utils/schema/behavior.bop`)
+stored on its own entity. Each agent holds a `Brain` whose `tree` field names that
+entity, so one tree serves every agent and can be swapped with a single `put`.
+
+Build a tree with the builder. `weighted` runs every branch, drops the ones that
+fail, and picks one of the rest by weight.
+
+```ts
+import { cond, cooldown, seq, task, tree, weighted } from "@vampgg/ecs";
+
+const hostile = tree(
+  seq(
+    cond(Condition.PlayerNear, 256),
+    weighted([3, task(Task.Attack, 1)], [1, cooldown(10, task(Task.Attack, 3))]),
+  ),
+);
+world.insert({ id: "tree/hostile", behaviorTree: hostile });
+world.insert({ id: "goblin", brain: { tree: "tree/hostile" }, tags: [] });
+```
+
+Leaves are registered functions keyed by app enums. A condition returns a
+boolean. A task returns the `Actions` to dispatch, or `undefined` to fail. Leaves
+never call `act`, and a branch's actions and cooldowns count only when that branch
+succeeds.
+
+```ts
+world.registerSystem(
+  createBehaviorTreeSystem({
+    query: (q) => q.every(components.brain),
+    brain: "brain",
+    tree: "behaviorTree",
+    conditions: { [Condition.PlayerNear]: (world, e, [radius]) => nearest(world, e) <= radius },
+    tasks: { [Task.Attack]: (world, e, [damage]) => attackNearest(world, e, damage) },
+    random: (world) => world.context.random, // e.g. new RNGClass().setSeed(seed) from @vampgg/rot
+    now: (world) => world.context.frame,
+    target: (action) => action.value.target, // which entity `act` receives it
+  }),
+);
+```
+
+The system dispatches the chosen actions through `act` after every system has
+run. Within `withScope(() => world.update())`, the scope waits for those
+dispatches (`world.waitUntil`), so their mutations commit in the same batch. The
+randomness comes only from `random`, so a world with a seeded RNG replays the same
+choices. With `Brain` and `BehaviorTree` fields on `Entity`, `vamp generate` emits
+`createGameBehaviorTreeSystem`, which fills in `query`, `brain` and `tree`. It
+requires a leaf for every member of the schema's `Condition` and `Task` enums.
+
 ### Mutation scopes & syncing worlds
 
 `withScope(fn)` batches every change made inside `fn` into one coalesced
@@ -198,8 +249,10 @@ CRDT write → broadcast). A single Durable Object holds **~18k rich entities**.
 `createQueryMembershipTracker` (membership diffing for reactive clients) ·
 `MutationRecord`, `MutationType`, `InsertMutation`, `UpdateMutation`,
 `DeleteMutation`, `BaseEntity` · `applyMutation`, `createBaseMutator` ·
-`accumulateArrayDelta`, `applyArrayDelta`, `accumulatePoolDelta`, `applyPoolDelta`
-· archetype helpers (`archetypeId`, `createArchetype`, `transformArchetype`, …).
+`accumulateArrayDelta`, `applyArrayDelta`, `accumulatePoolDelta`, `applyPoolDelta`,
+`accumulateReplaceDelta`, `applyReplaceDelta` · `evaluate`, `createBehaviorTreeSystem`,
+the tree builder (`tree`, `selector`, `seq`, `weighted`, `cond`, `task`, `invert`,
+`chance`, `cooldown`), `BehaviorNodeKind`, `BehaviorRandom` · archetype helpers (`archetypeId`, `createArchetype`, `transformArchetype`, …).
 
 ## Development
 

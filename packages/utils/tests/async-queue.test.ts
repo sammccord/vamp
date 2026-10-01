@@ -1,3 +1,4 @@
+import type { BebopRecord } from "bebop";
 import { describe, expect, test } from "vitest";
 import { AsyncQueue, AsyncQueueOverflowError } from "../src/async-queue.ts";
 import { createEventIterator } from "../src/create-event-iterator.ts";
@@ -11,6 +12,10 @@ async function* fromArray<T>(items: T[]): AsyncGenerator<T, void, undefined> {
   for (const item of items) yield item;
 }
 
+function records<T extends object>(...fields: T[]): (T & BebopRecord)[] {
+  return fields.map((f) => ({ ...f, encode: () => new Uint8Array() }));
+}
+
 describe("AsyncQueue", () => {
   test("FIFO order across ring-buffer wraps with no leaked references", async () => {
     const q = new AsyncQueue<number>({ highWaterMark: 4 });
@@ -19,12 +24,13 @@ describe("AsyncQueue", () => {
     for (let i = 0; i < 100; i++) {
       q.push(i);
       const r = await q.next();
-      seen.push(r.value as number);
+      if (r.done) throw new Error("queue ended early");
+      seen.push(r.value);
     }
     q.close();
     expect(seen).toEqual([...Array(100).keys()]);
     // Buffer slots are released after consumption (count back to zero).
-    expect((q as unknown as { count: number }).count).toBe(0);
+    expect(q["count"]).toBe(0);
   });
 
   test("push returns false past highWaterMark (drop-latest)", () => {
@@ -156,9 +162,10 @@ describe("createDuplexIterator", () => {
 
   test("outgoing send with no incoming reply does not deadlock", async () => {
     const sent: unknown[] = [];
+    const outgoing = records({ a: 1 }, { a: 2 }, { a: 3 });
     const it = createDuplexIterator<number>(
       // 3 outgoing records, never any incoming reply
-      fromArray([{ a: 1 }, { a: 2 }, { a: 3 }] as never[]),
+      fromArray(outgoing),
       (rec) => sent.push(rec),
       ({ cancel }) => {
         // Close the incoming side once the outgoing pump is expected to be done.
@@ -173,13 +180,14 @@ describe("createDuplexIterator", () => {
     })();
     const result = await Promise.race([drain, timeout(500)]);
     expect(result).toBe("done"); // pump ran to completion, no hang
-    expect(sent).toEqual([{ a: 1 }, { a: 2 }, { a: 3 }]); // all outgoing emitted
+    expect(sent).toEqual(outgoing); // all outgoing emitted
   });
 
   test("interleave preserves order on both sides", async () => {
     const sent: unknown[] = [];
+    const outgoing = records({ o: "A" }, { o: "B" }, { o: "C" });
     const it = createDuplexIterator<number>(
-      fromArray([{ o: "A" }, { o: "B" }, { o: "C" }] as never[]),
+      fromArray(outgoing),
       (rec) => sent.push(rec),
       ({ emit, cancel }) => {
         emit(1);
@@ -191,7 +199,7 @@ describe("createDuplexIterator", () => {
     const seen: number[] = [];
     for await (const v of it) seen.push(v);
     expect(seen).toEqual([1, 2, 3]);
-    expect(sent).toEqual([{ o: "A" }, { o: "B" }, { o: "C" }]);
+    expect(sent).toEqual(outgoing);
   });
 
   test("early break halts outgoing pump and runs cleanup", async () => {
@@ -201,7 +209,7 @@ describe("createDuplexIterator", () => {
     const outgoing = (async function* () {
       try {
         for (let i = 0; i < 1_000_000; i++) {
-          yield { i } as never;
+          yield { i, encode: () => new Uint8Array() };
           await new Promise((r) => setTimeout(r, 1));
         }
       } finally {

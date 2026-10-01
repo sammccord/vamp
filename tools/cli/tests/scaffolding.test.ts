@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { emitHelpers } from "../src/generators/emit-helpers.js";
 import { classifyType } from "../src/generators/parse-bop-source.js";
-import { resolvePoolImport } from "../src/commands/init.js";
+import { resolveUtilsSchemaImport } from "../src/commands/init.js";
 import { createWatchScheduler } from "../src/commands/generate.js";
 import type { SchemaDefinition } from "../src/generators/parse-bop.js";
 
@@ -109,7 +109,7 @@ describe("recursive value classification (Case B, 4b)", () => {
   });
 });
 
-// --- Case C/D (resolution half): resolvePoolImport across layouts (4c) ---
+// --- Case C/D (resolution half): resolveUtilsSchemaImport across layouts (4c) ---
 
 /** Lay down a fake @vampgg/utils package with a schema/pool.bop at the given node_modules root. */
 function fakeUtils(nmRoot: string): void {
@@ -134,9 +134,9 @@ describe("pool.bop import resolution (Case C/D, 4c)", () => {
     mkdirSync(schemaDir, { recursive: true });
     fakeUtils(join(proj, "node_modules"));
 
-    const importPath = resolvePoolImport(proj, schemaDir);
+    const importPath = resolveUtilsSchemaImport("pool.bop", proj, schemaDir);
     expect(importPath).toContain("pool.bop");
-    expect(importPath).not.toContain("__POOL_IMPORT__");
+    expect(importPath).not.toContain("__UTILS_SCHEMA_");
     // The resolved path should point at a real file relative to the schema dir.
     const abs = join(schemaDir, importPath);
     expect(readFileSync(abs, "utf-8")).toContain("message Pool");
@@ -162,7 +162,7 @@ describe("pool.bop import resolution (Case C/D, 4c)", () => {
       return;
     }
 
-    const importPath = resolvePoolImport(proj, schemaDir);
+    const importPath = resolveUtilsSchemaImport("pool.bop", proj, schemaDir);
     expect(importPath).toContain("pool.bop");
     // Must resolve to the stable symlinked node_modules path, NOT the realpath
     // through pnpm's version-pinned `.pnpm/<pkg>@<version>` store (which would
@@ -180,8 +180,26 @@ describe("pool.bop import resolution (Case C/D, 4c)", () => {
     // Force resolution failure deterministically — relying on the temp dir being
     // unable to resolve @vampgg/utils is environment-dependent (an ancestor
     // node_modules may still resolve it).
-    const importPath = resolvePoolImport(proj, schemaDir, () => null);
+    const importPath = resolveUtilsSchemaImport("pool.bop", proj, schemaDir, () => null);
     expect(importPath).toBe("../node_modules/@vampgg/utils/schema/pool.bop");
+  });
+
+  it("resolves behavior.bop from the same package", () => {
+    const proj = mkdtempSync(join(tmpdir(), "vamp-behavior-"));
+    const schemaDir = join(proj, "schema");
+    mkdirSync(schemaDir, { recursive: true });
+    fakeUtils(join(proj, "node_modules"));
+    writeFileSync(
+      join(proj, "node_modules", "@vampgg", "utils", "schema", "behavior.bop"),
+      "message Brain { 1 -> string tree; }",
+      "utf-8",
+    );
+
+    const importPath = resolveUtilsSchemaImport("behavior.bop", proj, schemaDir);
+    expect(readFileSync(join(schemaDir, importPath), "utf-8")).toContain("message Brain");
+    expect(resolveUtilsSchemaImport("behavior.bop", proj, schemaDir, () => null)).toBe(
+      "../node_modules/@vampgg/utils/schema/behavior.bop",
+    );
   });
 });
 

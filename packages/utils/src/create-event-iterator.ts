@@ -5,7 +5,7 @@ export type Context<T> = {
   /** Terminate the stream as a clean completion. */
   cancel: () => void;
   /** Terminate the stream with an error thrown into the consumer's `for await`. */
-  error: (e: unknown) => void;
+  error: (cause: unknown) => void;
 };
 
 export type CleanupFn = () => void | Promise<void>;
@@ -40,26 +40,31 @@ export function queueIterator<T>(
     started ??= start();
     return started;
   };
-  const iterator = {
+  const iterator: AsyncIterableIterator<T> = {
     async next(): Promise<IteratorResult<T>> {
       await ensureStarted();
       return queue.next();
     },
-    async return(value?: unknown): Promise<IteratorResult<T>> {
+    async return(value?: undefined): Promise<IteratorResult<T>> {
       // If iteration began, let a pending subscription settle first so its
       // cleanup is captured before dispose runs (tolerate a failed start).
       if (started !== undefined) await started.catch(() => {});
       return queue.return(value);
     },
-    async throw(e?: unknown): Promise<IteratorResult<T>> {
+    async throw(cause?: unknown): Promise<IteratorResult<T>> {
       if (started !== undefined) await started.catch(() => {});
-      return queue.throw(e);
+      return queue.throw(cause);
     },
     [Symbol.asyncIterator]() {
       return this;
     },
   };
-  return iterator as unknown as AsyncGenerator<T>;
+  // SAFETY: the hand-written iterator implements the async-iteration surface an
+  // AsyncGenerator consumer uses — next(), return(), throw(), and
+  // [Symbol.asyncIterator] returning itself. Callers only consume it via
+  // for-await / next / return / throw, never the generator-runtime
+  // [Symbol.asyncDispose], so it behaves as an AsyncGenerator<T>.
+  return iterator as AsyncGenerator<T>;
 }
 
 /**
@@ -80,7 +85,7 @@ export function createEventIterator<T>(
       queue.push(value);
     },
     cancel: () => queue.close(),
-    error: (e) => queue.fail(e),
+    error: (cause) => queue.fail(cause),
   };
 
   // Subscribe on the first pull; capture the cleanup so the queue's dispose can

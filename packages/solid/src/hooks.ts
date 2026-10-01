@@ -34,7 +34,7 @@ export function createQuery<E extends BaseEntity = BaseEntity>(input: QueryInput
     const result: E[] = [];
     for (const id of handle.ids()) {
       const entity = game.store.state[id];
-      if (entity !== undefined) result.push(entity as E);
+      if (entity !== undefined) result.push(entity);
     }
     return result;
   });
@@ -45,8 +45,8 @@ export function createEntity<E extends BaseEntity = BaseEntity>(
   id: string | Accessor<string>,
 ): Accessor<E | undefined> {
   const game = useGame<E, unknown>();
-  const read = typeof id === "function" ? id : () => id;
-  return createMemo(() => game.store.state[read()] as E | undefined);
+  const read = id instanceof Function ? id : () => id;
+  return createMemo(() => game.store.state[read()]);
 }
 
 /**

@@ -46,6 +46,11 @@ export interface InterestSub {
   viewerId?: string;
 }
 
+/** The slice of a socket attachment this module owns; other keys are the app's session. */
+interface InterestAttachment {
+  [ATTACHMENT_KEY]?: InterestSub;
+}
+
 /** Extract the entity type `E` from an ECS world type. */
 type EntityOf<W> = W extends ECS<any, any, any, any, infer E, any> ? E : never;
 /** Extract the delta type `D` from an ECS world type. */
@@ -136,19 +141,24 @@ export function createInterestBroadcast<
     };
   }
 
+  function readAttachment(ws: WebSocket): InterestAttachment | null {
+    // SAFETY: only `persistSub` writes `ATTACHMENT_KEY`, always with an
+    // `InterestSub`; the rest of the attachment is the app's session object.
+    return ws.deserializeAttachment() as InterestAttachment | null;
+  }
+
   function persistSub(ws: WebSocket, sub: InterestSub): void {
-    const attachment = (ws.deserializeAttachment() ?? {}) as Record<string, unknown>;
+    const attachment = readAttachment(ws) ?? {};
     attachment[ATTACHMENT_KEY] = sub;
     ws.serializeAttachment(attachment);
   }
 
   function readSub(ws: WebSocket): InterestSub | undefined {
-    const attachment = ws.deserializeAttachment() as Record<string, unknown> | null;
-    return (attachment?.[ATTACHMENT_KEY] as InterestSub | undefined) ?? undefined;
+    return readAttachment(ws)?.[ATTACHMENT_KEY];
   }
 
   function clearSub(ws: WebSocket): void {
-    const attachment = ws.deserializeAttachment() as Record<string, unknown> | null;
+    const attachment = readAttachment(ws);
     if (attachment && ATTACHMENT_KEY in attachment) {
       delete attachment[ATTACHMENT_KEY];
       ws.serializeAttachment(attachment);
@@ -164,6 +174,9 @@ export function createInterestBroadcast<
    */
   function frame(methodId: number, messageId: string, batch: MutationBatch<E, D>): ArrayBuffer {
     const bytes = encodeServerStreamFrame({ methodId, messageId, data: config.encodeBatch(batch) });
+    // SAFETY: `encodeServerStreamFrame` returns `new Uint8Array(Message.encode(...))`,
+    // a freshly-allocated, exact-size `Uint8Array`, so `bytes.buffer` is a plain
+    // (non-shared) `ArrayBuffer`.
     return bytes.buffer as ArrayBuffer;
   }
 
@@ -224,7 +237,12 @@ export function createInterestBroadcast<
     // the generator-free broadcast path can frame server->client pushes the
     // client matches by messageId. Without them we cannot push hibernation-safe
     // frames; bail (the client's call surfaces the empty stream).
+    // SAFETY: clientMetadata maps stream keys to their first header value (a
+    // string from the client's metadata map), so [0] is that string, not an
+    // arbitrary value.
     const messageId = context.clientMetadata?.get(STREAM_MESSAGE_ID_KEY)?.[0] as string | undefined;
+    // SAFETY: same metadata contract as the message id above: the first value
+    // under the stream method key is a numeric string.
     const methodIdRaw = context.clientMetadata?.get(STREAM_METHOD_ID_KEY)?.[0] as
       | string
       | undefined;

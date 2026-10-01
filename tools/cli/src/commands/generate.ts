@@ -6,6 +6,10 @@ import { loadBebopConfig, loadVampConfig } from "../config/loader";
 import { generate } from "../generators/codegen";
 import { generateMutationSchema } from "../generators/generate-mutation-schema";
 
+export interface WatchScheduler {
+  onChange: () => void;
+}
+
 /**
  * Build a watch-mode scheduler that runs `run` on each change, never dropping a
  * change saved while a run is in flight: a mid-run change sets a pending flag
@@ -18,7 +22,7 @@ export function createWatchScheduler(
   run: () => boolean,
   debounce: (fn: () => void) => void,
   onComplete?: (ok: boolean) => void,
-): { onChange: () => void } {
+): WatchScheduler {
   let isRunning = false;
   let pending = false;
 
@@ -97,8 +101,8 @@ export const generateCommand = defineCommand({
           execSync("npx --no-install bebopc build", { cwd, stdio: "inherit" });
         } catch (err) {
           console.error("bebopc build failed:");
-          const e = err as { stderr?: Buffer; stdout?: Buffer };
-          if (e.stderr?.length) console.error(e.stderr.toString());
+          const stderr = err instanceof Error && "stderr" in err ? err.stderr : undefined;
+          if (Buffer.isBuffer(stderr) && stderr.length) console.error(stderr.toString());
           return false;
         }
         // 3. Validate the output exists before continuing.

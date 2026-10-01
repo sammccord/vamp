@@ -10,7 +10,12 @@ import { emitClasses } from "./emit-classes";
 import { emitGameContext } from "./emit-game-context";
 import { emitInterest } from "./emit-interest";
 import { emitRuntime } from "./emit-runtime";
-import { emitSystems } from "./emit-systems";
+import {
+  behaviorLeafType,
+  behaviorTreeFields,
+  emitBehaviorTreeSystem,
+  emitSystems,
+} from "./emit-systems";
 
 /** Absolute paths of the three files `generate` writes. */
 export interface GeneratedPaths {
@@ -89,6 +94,13 @@ export function generate(
   const bebopImport = "./bebop.js";
 
   const helperImports = emitHelperImports(entityDef, schema);
+  const behaviorTree = behaviorTreeFields(entityDef);
+  const leafTypes = behaviorTree
+    ? (["Condition", "Task"] as const)
+        .filter((name) => behaviorLeafType(schema, name) === name)
+        .map((name) => `, ${name}`)
+        .join("")
+    : "";
 
   // The output is split into a pure ECS file and a Worker-runtime file, with a
   // backward-compatible barrel re-exporting both. Non-Worker packages import the
@@ -107,10 +119,10 @@ export function generate(
   // --- Core (pure): only `@vampgg/ecs` + `./bebop`. ---
   const coreSections = [
     AUTOGEN_HEADER,
-    `import type { ECSOptions, EntitySystem, ArchetypeSystem, Behavior, System, Query, QueryBuilder } from "@vampgg/ecs";`,
-    `import { createEntitySystem, createArchetypeSystem, createBehavior } from "@vampgg/ecs";`,
+    `import type { ECSOptions, EntitySystem, ArchetypeSystem, Behavior, System, Query, QueryBuilder${behaviorTree ? ", BehaviorTreeSystemOptions" : ""} } from "@vampgg/ecs";`,
+    `import { createEntitySystem, createArchetypeSystem, createBehavior${behaviorTree ? ", createBehaviorTreeSystem" : ""} } from "@vampgg/ecs";`,
     ...(helperImports ? [helperImports] : []),
-    `import type { Entity, Actions, Tags${bebopImportTypes} } from "${bebopImport}";`,
+    `import type { Entity, Actions, Tags${bebopImportTypes}${leafTypes} } from "${bebopImport}";`,
     "",
     emitComponents(entityDef),
     "",
@@ -122,6 +134,7 @@ export function generate(
     "",
     emitSystems(),
     "",
+    ...(behaviorTree ? [emitBehaviorTreeSystem(behaviorTree, schema), ""] : []),
   ];
 
   // --- Worker: the DO/runtime/interest, depends on `@vampgg/worker`. Imports the

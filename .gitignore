@@ -27,3 +27,4 @@ dist-ssr
 
 # verify-vamp run state and evidence (see .opencode/skills/verify-vamp/SKILL.md)
 .opencode/skills/verify-vamp/.verify/
+.audit

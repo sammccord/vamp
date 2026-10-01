@@ -18,10 +18,11 @@ import { TempoWsRouter } from "@vampgg/utils/ws-router";
 import { HookRegistry, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
 import { DurableObject } from "cloudflare:workers";
-import { YStreamClient } from "y-durablestream";
+import { YStreamClient, type YStreamClientOptions } from "y-durablestream";
 import { applyUpdate, mergeUpdates } from "yjs";
-import type { Doc, Map as YMap, YMapEvent } from "yjs";
+import type { Doc, Transaction, Map as YMap, YMapEvent } from "yjs";
 import { entitiesMap, removeEntity, writeEntityInsert, writeUpdate } from "./entity-doc";
+import { toError } from "./errors";
 import { ShardManager } from "./shard-manager";
 import {
   applyKeyChange,
@@ -50,6 +51,35 @@ export type RPCContext<
   ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Actions, Tags, Entity, EntityDelta>,
   WebSocket,
 ];
+
+/**
+ * A remote "update" reconcile entry pending drain into the next scope. Holds the
+ * component keys a remote change added/removed so the reconcile path can route
+ * them through `addComponent`/`removeComponent`.
+ */
+interface PendingUpdateEntry {
+  type: "update";
+  addedKeys: Set<string>;
+  removedKeys: Set<string>;
+}
+
+/** A structured-clone-safe value a context seed may hold: it crosses DO RPC and DO storage. */
+export type ContextSeedValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ContextSeedValue[]
+  | { [key: string]: ContextSeedValue };
+
+/** The serializable seed passed to `setup()` and persisted for re-derivation on wake. */
+export type ContextSeed = { [key: string]: ContextSeedValue };
+
+/** The durable key/value pair persisted at first bootstrap (namespace + optional seed). */
+type PersistedBootstrap = {
+  "__vamp:namespace": string;
+  "__vamp:context"?: ContextSeed;
+};
 
 /**
  * The non-serializable runtime configuration required to bootstrap an
@@ -93,7 +123,7 @@ export interface ECSRuntimeConfiguration<
   // hibernation wake, so the world is re-derived with fresh data — only the seed
   // is persisted/serialized, the resolved context need not be. If omitted, the
   // seed itself is spread directly as the context (the plain query-params case).
-  resolveContext?: (seed: Record<string, unknown>) => Context | Promise<Context>;
+  resolveContext?: (seed: ContextSeed) => Context | Promise<Context>;
   // Register systems/behaviors/subscriptions on the ECS world during bootstrap,
   // before it is initialized. Invoked synchronously inside the DO isolate with
   // the freshly-constructed world, so apps can wire `registerSystem`,
@@ -214,7 +244,14 @@ export function defineECSRuntime<
     EntityDelta
   >,
 ): void {
-  _runtimeProvider = provider as unknown as () => ErasedRuntimeConfiguration;
+  _runtimeProvider = provider;
+}
+
+/** The part of `YStreamClient` a lobby drives to sync one shard's doc. */
+export interface ShardSyncClient {
+  syncOnce(): Promise<void>;
+  pushLocalUpdate(update: Uint8Array): Promise<void>;
+  disconnect(): void;
 }
 
 export class ECSDurableObject<
@@ -382,6 +419,8 @@ export class ECSDurableObject<
     // Get all WebSocket connections from the DO
     const hibernating = this.ctx.getWebSockets();
     for (const ws of hibernating) {
+      // SAFETY: this DO only serializes a `UserSession` onto its sockets (see
+      // `saveSession`); interest management adds its own namespaced key to it.
       const attachment = ws.deserializeAttachment() as UserSession | null;
       if (attachment) {
         // If we previously attached state to our WebSocket,
@@ -418,7 +457,7 @@ export class ECSDurableObject<
           // `resolveContext` can re-derive the world's context with fresh data.
           // Absent (older DOs / never seeded) yields `undefined`, which falls back
           // to the static `config.context` — identical to the pre-seed behavior.
-          const seed = await this.ctx.storage.get<Record<string, unknown>>("__vamp:context");
+          const seed = await this.ctx.storage.get<ContextSeed>("__vamp:context");
           // Read the persisted shard sets BEFORE setup(): initialize() opens the
           // lobby's own default shard and re-persists `__vamp:shards` for that root
           // alone, which would clobber the additional players' roots (character/*
@@ -461,13 +500,13 @@ export class ECSDurableObject<
               try {
                 this._rehydrateConnection(this.ecs, ws);
               } catch (err) {
-                this.log.error("Error rehydrating connection on wake", {}, err as Error);
+                this.log.error("Error rehydrating connection on wake", {}, toError(err));
               }
             }
           }
         })
         .catch((err) => {
-          this.log.error("Hibernation re-bootstrap failed", {}, err as Error);
+          this.log.error("Hibernation re-bootstrap failed", {}, toError(err));
         });
     }
   }
@@ -505,7 +544,7 @@ export class ECSDurableObject<
       context: Context;
       // The serializable seed that produced `context`, persisted so a
       // hibernation-recreated constructor can re-derive context via resolveContext.
-      seed?: Record<string, unknown>;
+      seed?: ContextSeed;
       // Register systems/behaviors on the world during bootstrap (see
       // ECSRuntimeConfiguration.registerSystems).
       registerSystems?: (
@@ -563,12 +602,11 @@ export class ECSDurableObject<
     // lets the wake path distinguish "no seed" from "empty seed"). This write sits
     // behind the `if (this.ecs) return` guard above, so it is first-bootstrap-only
     // — matching the first-connection-wins semantics of the per-world context.
-    this.ctx.waitUntil(
-      this.ctx.storage.put({
-        "__vamp:namespace": namespace,
-        ...(configuration.seed !== undefined ? { "__vamp:context": configuration.seed } : {}),
-      }),
-    );
+    const persisted: PersistedBootstrap = {
+      "__vamp:namespace": namespace,
+    };
+    if (configuration.seed !== undefined) persisted["__vamp:context"] = configuration.seed;
+    this.ctx.waitUntil(this.ctx.storage.put(persisted));
 
     // Create ECS with shared entity store
     const entities = this._entityStore;
@@ -695,7 +733,10 @@ export class ECSDurableObject<
               scope.mutations.set(
                 id,
                 MutationRecord.fromUpdate<Entity, EntityDelta>({
-                  delta: cloned as unknown as EntityDelta,
+                  // SAFETY: a remote update carries the entity's full component
+                  // snapshot; a delta sets components by key, so a complete
+                  // entity is the maximal delta for it.
+                  delta: cloned as Entity & EntityDelta,
                 }),
               );
               scope.shadowEntities.set(id, cloned);
@@ -761,10 +802,8 @@ export class ECSDurableObject<
     // over this setup-time interval. There is no alarm to arm: ticks are driven
     // from request scope by `_maybeTick` (called from `webSocketMessage`).
     this._tickIntervalMs = configuration.tickIntervalMs ?? 0;
-    this._tickArgsProvider = configuration.tickArgs as (() => UpdateArguments) | undefined;
-    this._broadcastTick = configuration.broadcastTick as
-      | ((mutations: Map<string, MutationRecord<Entity, EntityDelta>>) => void)
-      | undefined;
+    this._tickArgsProvider = configuration.tickArgs;
+    this._broadcastTick = configuration.broadcastTick;
     this._compactEveryNTicks = configuration.compactEveryNTicks ?? 0;
   }
 
@@ -788,7 +827,7 @@ export class ECSDurableObject<
    * calls with a different seed are no-ops. Per-client state belongs in
    * `UserSession` (which survives hibernation via `serializeAttachment`), not here.
    */
-  async setup(namespace: string, seed?: Record<string, unknown>, document?: string): Promise<void> {
+  async setup(namespace: string, seed?: ContextSeed, document?: string): Promise<void> {
     if (!this.ecs) {
       if (!_runtimeProvider) {
         throw new Error(
@@ -801,7 +840,7 @@ export class ECSDurableObject<
       // readonly), so the fully-resolved object must exist first. resolveContext may
       // be async (e.g. a DB lookup) and may throw — the throw propagates to the
       // caller (handler 500) or, on the wake path, to blockConcurrencyWhile's catch.
-      let resolved: Record<string, unknown> | undefined;
+      let resolved: Context | ContextSeed | undefined;
       if (seed !== undefined) {
         resolved = config.resolveContext ? await config.resolveContext(seed) : seed;
       }
@@ -813,41 +852,16 @@ export class ECSDurableObject<
         lobbyBinding: config.lobbyBinding,
         serviceRegistry: config.serviceRegistry,
         hooks: config.hooks,
-        ecs: config.ecs as ECSOptions<Entity, EntityDelta>,
-        context: context as Context,
+        ecs: config.ecs,
+        context: context,
         seed,
-        registerSystems: config.registerSystems as
-          | ((
-              ecs: ECS<
-                RuntimeContext<UserSession, Context>,
-                UpdateArguments,
-                Actions,
-                Tags,
-                Entity,
-                EntityDelta
-              >,
-            ) => void)
-          | undefined,
+        registerSystems: config.registerSystems,
         tickIntervalMs: config.tickIntervalMs,
-        tickArgs: config.tickArgs as (() => UpdateArguments) | undefined,
-        broadcastTick: config.broadcastTick as
-          | ((mutations: Map<string, MutationRecord<Entity, EntityDelta>>) => void)
-          | undefined,
+        tickArgs: config.tickArgs,
+        broadcastTick: config.broadcastTick,
         compactEveryNTicks: config.compactEveryNTicks,
         onConnectionClose: config.onConnectionClose,
-        rehydrateConnection: config.rehydrateConnection as
-          | ((
-              ecs: ECS<
-                RuntimeContext<UserSession, Context>,
-                UpdateArguments,
-                Actions,
-                Tags,
-                Entity,
-                EntityDelta
-              >,
-              ws: WebSocket,
-            ) => void)
-          | undefined,
+        rehydrateConnection: config.rehydrateConnection,
       });
 
       // Apply any persisted runtime tick override (set via setTickInterval /
@@ -968,6 +982,9 @@ export class ECSDurableObject<
    */
   async stepTick(args?: UpdateArguments): Promise<void> {
     await this.ready();
+    // SAFETY: `[]` is the empty argument list used when no per-tick args
+    // provider is registered; it is a valid `UpdateArguments` (which defaults to
+    // `[]`) and is spread into `ecs.update(...)` as the no-arguments case.
     const tickArgs = args ?? ((this._tickArgsProvider?.() ?? []) as UpdateArguments);
     await this._runTick(tickArgs);
   }
@@ -981,16 +998,13 @@ export class ECSDurableObject<
    * seeds its entities into the one ECS world (see {@link _onShardSynced}).
    */
   private _initShardManager() {
-    const bindings = this.env as CloudflareBindings;
     this.shards = new ShardManager({
       gracePeriodMs: this._shardGraceMs,
       createClient: (root, doc) => {
-        // `GAME_STORAGE` is typed as `DurableObjectNamespace<YStreamProviderStub>`
-        // in the shim, so `get` returns a correctly-typed stub without a cast.
-        const stub = bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(root));
+        const stub = this._shardStub(root);
         // clientId = this lobby's namespace, so the provider suppresses echoing
         // our own writes back and matches us to our `register()` entry.
-        const client = new YStreamClient(doc, {
+        const client = this.createSyncClient(doc, {
           stub,
           clientId: this._namespace,
           maxFrameSize: this._maxFrameSize,
@@ -1016,7 +1030,7 @@ export class ECSDurableObject<
           pending = [];
           this.ctx.waitUntil(client.pushLocalUpdate(merged));
         };
-        const forwarder = (update: Uint8Array, origin: unknown) => {
+        const forwarder = (update: Uint8Array, origin: Transaction["origin"]) => {
           if (origin !== ECSDurableObject.LOCAL_ORIGIN) return;
           pending.push(update);
           if (timer === null) timer = setTimeout(flushForward, this._forwardDebounceMs);
@@ -1040,6 +1054,11 @@ export class ECSDurableObject<
       onShardOpen: (root, doc) => this._observeShardEntitySet(root, doc),
       onShardClose: (root, doc) => this._closeShard(root, doc),
     });
+  }
+
+  /** Create the sync client for one shard's doc; overridable to substitute the transport. */
+  protected createSyncClient(doc: Doc, options: YStreamClientOptions): ShardSyncClient {
+    return new YStreamClient(doc, options);
   }
 
   /** Open (pin) `root`, returning its shard doc, and (de)register for notify-push. */
@@ -1214,6 +1233,8 @@ export class ECSDurableObject<
   }
 
   private _shardStub(root: string) {
+    // SAFETY: every Worker hosting this DO must bind its storage provider as
+    // `GAME_STORAGE`; `Env` stays open only so apps can add their own bindings.
     const bindings = this.env as CloudflareBindings;
     return bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(root));
   }
@@ -1226,7 +1247,7 @@ export class ECSDurableObject<
         root,
       });
     } catch (err) {
-      this.log.error("Failed to register shard for notify-push", { root }, err as Error);
+      this.log.error("Failed to register shard for notify-push", { root }, toError(err));
     }
   }
 
@@ -1234,7 +1255,7 @@ export class ECSDurableObject<
     try {
       await this._shardStub(root).deregister(this._namespace);
     } catch (err) {
-      this.log.error("Failed to deregister shard", { root }, err as Error);
+      this.log.error("Failed to deregister shard", { root }, toError(err));
     }
   }
 
@@ -1349,9 +1370,11 @@ export class ECSDurableObject<
     const map = entitiesMap(doc).get(id);
     if (!map) return;
     this._trackEntityRoot(id, root);
+    // SAFETY: `map` is this entity's component Y.Map, populated by
+    // `writeEntityInsert` (which skips only the `id` key, backfilled below).
     const raw = map.toJSON() as Entity;
     // ensure id is set (it is the map key, dropped from the component data)
-    if (!raw.id) (raw as Record<string, unknown>).id = id;
+    if (!raw.id) raw.id = id;
     // If entity doesn't exist locally, register it in the ECS archetype graph.
     if (!this.ecs.hasEntity(id)) {
       this.ecs.insert(raw);
@@ -1395,11 +1418,15 @@ export class ECSDurableObject<
       const pending = this._getOrCreatePendingUpdate(id);
       for (const key of event.keysChanged) {
         const change = event.changes.keys.get(key);
-        const existed = key in (entity as Record<string, unknown>);
+        const existed = key in entity;
+        // SAFETY: `key` names one of this entity's Y.Map components and the value
+        // is that cell's current content, so `entity` keeps mirroring the doc.
+        const component = key as keyof Entity;
         if (change && change.action === "delete") {
-          delete (entity as Record<string, unknown>)[key];
+          delete entity[component];
         } else {
-          (entity as Record<string, unknown>)[key] = map.get(key);
+          // SAFETY: as above, the cell under `key` holds that component's value.
+          entity[component] = map.get(key) as Entity[keyof Entity];
         }
         applyKeyChange(pending, key, change?.action, existed);
       }
@@ -1413,11 +1440,7 @@ export class ECSDurableObject<
    * an existing update entry so multiple remote bursts before the next scope
    * accumulate their added/removed keys.
    */
-  private _getOrCreatePendingUpdate(id: string): {
-    type: "update";
-    addedKeys: Set<string>;
-    removedKeys: Set<string>;
-  } {
+  private _getOrCreatePendingUpdate(id: string): PendingUpdateEntry {
     const existing = this._pendingReconcile.get(id);
     if (existing && existing.type === "update") return existing;
     const entry = {
@@ -1439,9 +1462,12 @@ export class ECSDurableObject<
   private _reconcileComponentKeys(id: string, addedKeys: Set<string>, removedKeys: Set<string>) {
     if (!this.ecs) return;
     for (const key of componentKeysToReconcile(addedKeys)) {
+      // SAFETY: `key` is a Y.Map component name with `id`/`tags` filtered out,
+      // and the ECS no-ops for a key that is not a registered component.
       this.ecs.addComponent(id, key as Exclude<keyof Entity, "tags">, false);
     }
     for (const key of componentKeysToReconcile(removedKeys)) {
+      // SAFETY: same filtered component-name contract as the add loop above.
       this.ecs.removeComponent(id, key as Exclude<keyof Entity, "tags">, false);
     }
   }
@@ -1475,8 +1501,8 @@ export class ECSDurableObject<
    */
   private _rootForMutation(id: string, mutation: MutationRecord<Entity, EntityDelta>): string {
     if (mutation.tag === MutationType.Insert) {
-      const entity = mutation.value.entity as Record<string, unknown>;
-      return (entity.sk as string | undefined) ?? this._entityRoot.get(id) ?? this._defaultRoot;
+      const entity = mutation.value.entity;
+      return entity.sk ?? this._entityRoot.get(id) ?? this._defaultRoot;
     }
     return this._entityRoot.get(id) ?? this._defaultRoot;
   }
@@ -1496,7 +1522,7 @@ export class ECSDurableObject<
   ) {
     switch (mutation.tag) {
       case MutationType.Insert: {
-        const entity = mutation.value.entity as Record<string, unknown>;
+        const entity = mutation.value.entity;
         // Stamp the resolved home shard onto the entity so subscribers (and a
         // later read) see where it lives; defaults the lobby's own shard.
         if (entity.sk === undefined) entity.sk = root;
@@ -1508,7 +1534,7 @@ export class ECSDurableObject<
         break;
       }
       case MutationType.Update: {
-        writeUpdate(doc, id, mutation.value.delta as Record<string, unknown>);
+        writeUpdate(doc, id, mutation.value.delta);
         break;
       }
       case MutationType.Delete: {
@@ -1567,9 +1593,11 @@ export class ECSDurableObject<
       // and a socket is connected. This is what replaces the alarm loop.
       await this._maybeTick();
       // Provide the ecs instance and underlying websocket as context to the service.
+      // SAFETY: the tempo client transport sends only binary frames; a stray text
+      // frame fails decode inside `process` and lands in the catch below.
       await this.router.process(message as ArrayBuffer, Message({}), [this.ecs, ws]);
     } catch (err) {
-      this.log.error("Error processing WebSocket message", {}, err as Error);
+      this.log.error("Error processing WebSocket message", {}, toError(err));
       this._sendFramedError(ws, "internal");
     }
   }
@@ -1580,8 +1608,8 @@ export class ECSDurableObject<
     ws.close(code, "Durable Object is closing WebSocket");
   }
 
-  async webSocketError(ws: WebSocket, error: unknown) {
-    this.log.error("WebSocket errored; tearing down", {}, error as Error);
+  async webSocketError(ws: WebSocket, cause: unknown) {
+    this.log.error("WebSocket errored; tearing down", {}, toError(cause));
     await this._teardownConnection(ws);
     // The socket is already errored; closing is best-effort.
     try {
@@ -1603,14 +1631,14 @@ export class ECSDurableObject<
     try {
       await this.router?.closeConnection();
     } catch (err) {
-      this.log.error("Error tearing down connection streams", {}, err as Error);
+      this.log.error("Error tearing down connection streams", {}, toError(err));
     }
     // App-level teardown (e.g. observer sinks registered by the `observe` RPC).
     if (this._onConnectionClose) {
       try {
         this._onConnectionClose(ws);
       } catch (err) {
-        this.log.error("Error in app connection-close hook", {}, err as Error);
+        this.log.error("Error in app connection-close hook", {}, toError(err));
       }
     }
     this.sessions.delete(ws);
@@ -1631,7 +1659,7 @@ export class ECSDurableObject<
       // readyState 1 === OPEN; skip if not open.
       if (ws.readyState !== 1) return;
       const frame = Message({ status: TempoStatusCode.INTERNAL, msg });
-      ws.send(new Uint8Array(Message.encode(frame)) as unknown as ArrayBuffer);
+      ws.send(new Uint8Array(Message.encode(frame)));
     } catch {
       /* best-effort: socket may be gone */
     }
@@ -1673,6 +1701,9 @@ export class ECSDurableObject<
     // `now` so we don't keep trying to catch up an unbounded backlog (spiral).
     this._lastTickAt = count < due ? now : this._lastTickAt + count * this._tickIntervalMs;
 
+    // SAFETY: `[]` is the empty argument list used when no per-tick args
+    // provider is registered; it is a valid `UpdateArguments` (which defaults to
+    // `[]`) and is spread into `ecs.update(...)` as the no-arguments case.
     const args = (this._tickArgsProvider?.() ?? []) as UpdateArguments;
     for (let i = 0; i < count; i++) await this._runTick(args);
   }
@@ -1699,7 +1730,7 @@ export class ECSDurableObject<
       });
       this._broadcastTick?.(mutations);
     } catch (err) {
-      this.log.error("Error during tick", {}, err as Error);
+      this.log.error("Error during tick", {}, toError(err));
     }
 
     // Periodic compaction backstop: force the provider to compact the world doc
@@ -1733,14 +1764,12 @@ export class ECSDurableObject<
    * alone cannot provide for single-large-update and quiet-but-large worlds.
    */
   private async _commitDoc(): Promise<void> {
-    const bindings = this.env as CloudflareBindings;
     await Promise.all(
       this.shards.activeRoots().map(async (root) => {
         try {
-          const stub = bindings.GAME_STORAGE.get(bindings.GAME_STORAGE.idFromName(root));
-          await stub.compact();
+          await this._shardStub(root).compact();
         } catch (err) {
-          this.log.error("Error committing shard for compaction", { root }, err as Error);
+          this.log.error("Error committing shard for compaction", { root }, toError(err));
         }
       }),
     );

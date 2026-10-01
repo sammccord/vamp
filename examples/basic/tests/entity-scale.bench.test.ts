@@ -115,14 +115,16 @@ const components = {
 function makeOptions(): ECSOptions<Entity, EntityDelta> {
   return {
     createId: () => crypto.randomUUID(),
-    components: components as unknown as Record<Exclude<keyof Entity, "tags">, number>,
-    // Inserts (what seed measures) never call these; minimal correct stubs.
+    components,
+    // SAFETY: the measured paths only call ecs.initialize/hasEntity/insert, and the
+    // Insert branch (applyMutation) stores the entity as-is — the delta hooks are
+    // never invoked here, so these stubs only need to type-check against ECSOptions.
     materializeDelta: (delta, base) => ({ ...base, ...(delta as object) }) as Entity,
     mergeDelta: (entity, delta) => {
-      Object.assign(entity as object, delta as object);
+      Object.assign(entity, delta);
     },
     accumulateDelta: (from, to) => {
-      Object.assign(to as object, from as object);
+      Object.assign(to, from);
       return to;
     },
   };
@@ -130,8 +132,11 @@ function makeOptions(): ECSOptions<Entity, EntityDelta> {
 
 // ── entity factories ─────────────────────────────────────────────────────────
 
+/** A factory-built entity: the Entity component set with `id` always present. */
+type SeededEntity = Entity & { id: string };
+
 /** Rich entity (mirrors stress.bench.ts makeStressEntity): the realistic case. */
-function richEntity(i: number): Entity {
+function richEntity(i: number): SeededEntity {
   const tags: Tags[] = [];
   if (i % 7 === 0) tags.push(Tags.PlayerControlled, Tags.Human);
   if (i % 3 === 0) tags.push(Tags.Hostile);
@@ -148,17 +153,17 @@ function richEntity(i: number): Entity {
     level: 1 + (i % 10),
     xp: i % 100,
     faction: i % 4,
-  } as Entity;
+  };
 }
 
 /** Lean entity: id + position + health only. */
-function leanEntity(i: number): Entity {
+function leanEntity(i: number): SeededEntity {
   return {
     id: nanoid(16),
     tags: [],
     position: { x: (i * 13) % 512, y: (i * 7) % 512 },
     health: { points: 100, min: 0, max: 100, rate: 0, interval: 0 },
-  } as Entity;
+  };
 }
 
 // ── measurement helpers ──────────────────────────────────────────────────────
@@ -167,12 +172,12 @@ function leanEntity(i: number): Entity {
  * Build ONE shard doc with N entities, exactly as a D1b provider holds it:
  * entity DATA only (no refcount/membership index), via the real `writeEntityInsert`.
  */
-function buildDoc(n: number, make: (i: number) => Entity): Doc {
+function buildDoc(n: number, make: (i: number) => SeededEntity): Doc {
   const doc = new Doc();
   doc.transact(() => {
     for (let i = 0; i < n; i++) {
       const e = make(i);
-      writeEntityInsert(doc, e.id as string, e as Record<string, unknown>);
+      writeEntityInsert(doc, e.id, { ...e });
     }
   });
   return doc;
@@ -200,14 +205,14 @@ function legacyMembers(doc: Doc, namespace: string): YMap<boolean> {
  * cross-namespace refcount + membership index. Used to quantify the per-entity
  * bytes the sharded entity-data-only model SAVES by dropping it.
  */
-function buildWithIndex(n: number, make: (i: number) => Entity): Doc {
+function buildWithIndex(n: number, make: (i: number) => SeededEntity): Doc {
   const doc = new Doc();
   doc.transact(() => {
     for (let i = 0; i < n; i++) {
       const e = make(i);
-      writeEntityInsert(doc, e.id as string, e as Record<string, unknown>);
-      legacyAddRef(doc, A, e.id as string);
-      legacyMembers(doc, A).set(e.id as string, true);
+      writeEntityInsert(doc, e.id, { ...e });
+      legacyAddRef(doc, A, e.id);
+      legacyMembers(doc, A).set(e.id, true);
     }
   });
   return doc;
@@ -228,13 +233,12 @@ function buildOldScheme(n: number, make: (i: number) => Entity): Doc {
   const entities = entitiesMap(doc);
   doc.transact(() => {
     for (let i = 0; i < n; i++) {
-      const e = make(i) as Record<string, unknown>;
-      e.id = crypto.randomUUID(); // 36-char uuid
+      const e = { ...make(i), id: crypto.randomUUID() }; // 36-char uuid
       const map = new YMap<unknown>();
-      entities.set(e.id as string, map);
-      for (const k in e) if (e[k] !== undefined) map.set(k, e[k]); // INCLUDING id
-      legacyAddRef(doc, A, e.id as string);
-      legacyMembers(doc, A).set(e.id as string, true);
+      entities.set(e.id, map);
+      for (const [k, v] of Object.entries(e)) if (v !== undefined) map.set(k, v); // INCLUDING id
+      legacyAddRef(doc, A, e.id);
+      legacyMembers(doc, A).set(e.id, true);
     }
   });
   return doc;
@@ -252,10 +256,14 @@ function seedMs(doc: Doc): number {
   const t0 = performance.now();
   // The shard's entity-set IS its membership in the D1b model — seed from it.
   for (const id of parent.keys()) {
-    const map = parent.get(id) as YMap<unknown> | undefined;
+    const map = parent.get(id);
     if (!map) continue;
+    // SAFETY: `map` is one entity's component Y.Map, populated by writeEntityInsert
+    // from a richEntity/leanEntity literal (every defined non-`id` field, cloned),
+    // so toJSON() yields exactly that entity's Entity-typed fields; `id` is the map
+    // key and is backfilled on the next line.
     const raw = map.toJSON() as Entity;
-    if (!raw.id) (raw as Record<string, unknown>).id = id; // id is not stored as a component
+    if (!raw.id) raw.id = id; // id is not stored as a component
     if (!ecs.hasEntity(id)) ecs.insert(raw);
     map.observe(handler); // per-entity observer attach (the DO does this)
   }
@@ -277,7 +285,12 @@ interface Row {
   compactMs: number;
 }
 
-function measure(make: (i: number) => Entity, sizes: number[]): Row[] {
+interface FrameCaps {
+  def: number;
+  vamp: number;
+}
+
+function measure(make: (i: number) => SeededEntity, sizes: number[]): Row[] {
   const rows: Row[] = [];
   for (const n of sizes) {
     const doc = buildDoc(n, make);
@@ -290,7 +303,7 @@ function measure(make: (i: number) => Entity, sizes: number[]): Row[] {
   return rows;
 }
 
-function report(title: string, rows: Row[]): { def: number; vamp: number } {
+function report(title: string, rows: Row[]): FrameCaps {
   const perEntity = rows.reduce((s, r) => s + r.perEntity, 0) / rows.length;
   const nDefault = Math.floor(DEFAULT_FRAME_CAP / perEntity);
   const nVamp = Math.floor(VAMP_FRAME_CAP / perEntity);
@@ -437,10 +450,12 @@ describe("entity scale (per-shard cap + sharded global)", () => {
   // current batched flow (one transaction per flush), in the tick worst case —
   // updating K of a lobby's entities each frame.
   it("Spike: per-entity vs batched update authoring overhead", () => {
-    const captureUpdates = (
-      doc: Doc,
-      fn: () => void,
-    ): { count: number; bytes: number; ms: number } => {
+    interface UpdateCost {
+      count: number;
+      bytes: number;
+      ms: number;
+    }
+    const captureUpdates = (doc: Doc, fn: () => void): UpdateCost => {
       const updates: Uint8Array[] = [];
       const onUpdate = (u: Uint8Array) => updates.push(u);
       doc.on("update", onUpdate);
@@ -458,6 +473,8 @@ describe("entity scale (per-shard cap + sharded global)", () => {
     for (const K of [10, 100, 1000]) {
       const doc = buildDoc(K, richEntity);
       const ids = [...entitiesMap(doc).keys()];
+      // SAFETY: every id was just read from entitiesMap(doc).keys(), and buildDoc
+      // stored a YMap per id via writeEntityInsert, so get() cannot return undefined.
       const at = (id: string) => entitiesMap(doc).get(id) as YMap<unknown>;
 
       // Batched: one transaction touching one field on each of K entities → 1 update.
@@ -495,6 +512,9 @@ describe("entity scale (per-shard cap + sharded global)", () => {
   // derive the cap against a 100 MB working budget of the 128 MB isolate.
   it("Memory footprint per entity → DO-memory cap", () => {
     const BUDGET = 100 * 1024 * 1024; // usable heap within the 128 MB isolate
+    // SAFETY: node's --expose-gc (the `bench` script's NODE_OPTIONS) injects a global
+    // gc() function; without the flag the property is absent, exactly as the optional
+    // `gc?` type states.
     const gc = (globalThis as { gc?: () => void }).gc;
     const N = 50000;
 
@@ -516,9 +536,14 @@ describe("entity scale (per-shard cap + sharded global)", () => {
     const parent = entitiesMap(doc);
     const observers: Array<() => void> = [];
     for (const id of parent.keys()) {
+      // SAFETY: `id` comes from parent.keys() and buildDoc stored a YMap per id via
+      // writeEntityInsert, so get() cannot return undefined.
       const map = parent.get(id) as YMap<unknown>;
+      // SAFETY: `map` is one entity's component Y.Map, populated by writeEntityInsert
+      // from a richEntity literal (every defined non-`id` field, cloned), so toJSON()
+      // yields exactly that entity's Entity-typed fields; `id` is stamped on next.
       const raw = map.toJSON() as Entity;
-      (raw as Record<string, unknown>).id = id;
+      raw.id = id;
       if (!ecs.hasEntity(id)) ecs.insert(raw);
       const h = () => {};
       map.observe(h);

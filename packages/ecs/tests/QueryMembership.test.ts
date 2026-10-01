@@ -9,6 +9,7 @@ import {
   createQueryMembershipTracker,
   ECS,
   type ECSOptions,
+  type MutationScope,
   MutationType,
 } from "../src/index.ts";
 import { query } from "../src/Query.ts";
@@ -20,7 +21,7 @@ const components = { id: 1, a: 2, b: 3 } as const;
 const A = components.a;
 
 function materializeDelta(delta: EntityDelta, base: Partial<Entity> = {}): Entity {
-  return { ...base, ...delta } as Entity;
+  return { ...base, ...delta };
 }
 function mergeDelta(entity: Entity, delta: EntityDelta): void {
   Object.assign(entity, delta);
@@ -29,14 +30,8 @@ function accumulateDelta(from: EntityDelta, to: EntityDelta): EntityDelta {
   return { ...from, ...to };
 }
 
-type World = ECS<
-  Record<string, unknown>,
-  [],
-  { tag: number; value: unknown },
-  number,
-  Entity,
-  EntityDelta
->;
+type State = { scope?: MutationScope<Entity, EntityDelta> };
+type World = ECS<State, [], { tag: number; value: unknown }, number, Entity, EntityDelta>;
 
 function makeWorld(): World {
   const entities = new Map<string, Entity>();
@@ -96,7 +91,7 @@ describe("createQueryMembershipTracker", () => {
 
     // Remove component `a`: the entity still exists but its new archetype no
     // longer matches `every(a)` — the case a `subscribe(Q)` event system misses.
-    world.put("e1", { a: undefined } as EntityDelta, true);
+    world.put("e1", { a: undefined }, true);
     const changed = tracker.update(new Map([["e1", { tag: MutationType.Update }]]));
     expect(changed).toHaveLength(1);
     expect(tracked.members.has("e1")).toBe(false);
@@ -108,7 +103,7 @@ describe("createQueryMembershipTracker", () => {
     const tracked = tracker.track(query((b) => b.every(A)));
     expect(tracked.members.has("e1")).toBe(true);
 
-    world.delete({ id: "e1" } as Entity);
+    world.delete({ id: "e1" });
     const changed = tracker.update(new Map([["e1", { tag: MutationType.Delete }]]));
     expect(changed).toHaveLength(1);
     expect(tracked.members.has("e1")).toBe(false);

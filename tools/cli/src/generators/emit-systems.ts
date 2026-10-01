@@ -1,3 +1,5 @@
+import type { ParsedSchema, SchemaDefinition } from "./parse-bop";
+
 /**
  * Emits app-typed aliases for the generic system types and factories from
  * `@vampgg/ecs` (`System.ts`). Each underlying type is generic over
@@ -93,5 +95,70 @@ export function createGameBehavior<
   priority?: number,
 ): GameBehavior<State, UpdateArguments> {
   return createBehavior(tag, handler, query, priority);
+}`;
+}
+
+export interface BehaviorTreeFields {
+  brain: string;
+  tree: string;
+}
+
+/** The Entity fields holding a `Brain` and a `BehaviorTree`, when the schema has both. */
+export function behaviorTreeFields(entity: SchemaDefinition): BehaviorTreeFields | undefined {
+  const brain = entity.fields.find((f) => !f.isArray && !f.isMap && f.typeName === "Brain");
+  const tree = entity.fields.find((f) => !f.isArray && !f.isMap && f.typeName === "BehaviorTree");
+  return brain && tree ? { brain: brain.name, tree: tree.name } : undefined;
+}
+
+/** Leaf-id type for `conditions`/`tasks`: the app's enum when declared, else any number. */
+export function behaviorLeafType(schema: ParsedSchema, name: "Condition" | "Task"): string {
+  return schema.definitions.get(name)?.kind === "enum" ? name : "number";
+}
+
+/**
+ * Emit `createGameBehaviorTreeSystem`, which pins the schema's types and the
+ * Brain/BehaviorTree field names onto `createBehaviorTreeSystem`. With
+ * `Condition`/`Task` enums in the schema, `conditions` and `tasks` must
+ * implement every member.
+ */
+export function emitBehaviorTreeSystem(fields: BehaviorTreeFields, schema: ParsedSchema): string {
+  const condition = behaviorLeafType(schema, "Condition");
+  const task = behaviorLeafType(schema, "Task");
+  const options = `BehaviorTreeSystemOptions<State, UpdateArguments, Actions, Tags, Entity, EntityDelta, ${condition}, ${task}>`;
+  return `/**
+ * Options for {@link createGameBehaviorTreeSystem}. The \`${fields.brain}\`/\`${fields.tree}\`
+ * fields are filled in and \`query\` defaults to every entity with a \`${fields.brain}\`.
+ */
+export type GameBehaviorTreeOptions<
+  State extends Record<string, unknown> = {},
+  UpdateArguments extends Array<unknown> = [],
+> = Omit<${options}, "brain" | "tree" | "query"> & Partial<Pick<${options}, "query">>;
+
+/** Predicates keyed by every \`${condition}\` a tree can test. */
+export type GameConditions<
+  State extends Record<string, unknown> = {},
+  UpdateArguments extends Array<unknown> = [],
+> = GameBehaviorTreeOptions<State, UpdateArguments>["conditions"];
+
+/** Tasks keyed by every \`${task}\` a tree can run; each returns \`Actions\` intents. */
+export type GameTasks<
+  State extends Record<string, unknown> = {},
+  UpdateArguments extends Array<unknown> = [],
+> = GameBehaviorTreeOptions<State, UpdateArguments>["tasks"];
+
+/**
+ * Create a system that runs each agent's behavior tree every update and
+ * dispatches the chosen intents through \`act\`, so existing behaviors execute them.
+ */
+export function createGameBehaviorTreeSystem<
+  State extends Record<string, unknown> = {},
+  UpdateArguments extends Array<unknown> = [],
+>(options: GameBehaviorTreeOptions<State, UpdateArguments>): GameArchetypeSystem<State, UpdateArguments> {
+  return createBehaviorTreeSystem<State, UpdateArguments, Actions, Tags, Entity, EntityDelta, ${condition}, ${task}>({
+    query: (q) => q.every(components.${fields.brain}),
+    ...options,
+    brain: "${fields.brain}",
+    tree: "${fields.tree}",
+  });
 }`;
 }

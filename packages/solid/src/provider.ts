@@ -36,7 +36,7 @@ export function GameProvider<E extends BaseEntity, D, C>(
   if (!world.initialized) world.initialize();
 
   const seed: Record<string, E> = {};
-  for (const [id, entity] of world.entities) seed[id] = clonePlainValue(entity) as E;
+  for (const [id, entity] of world.entities) seed[id] = clonePlainValue(entity);
   const store = createEntityStore<E>(seed);
   const registry = createQueryRegistry<E, D>(world);
   const [connection, setConnection] = createSignal<ConnectionStatus>("connecting");
@@ -57,7 +57,7 @@ export function GameProvider<E extends BaseEntity, D, C>(
         store.remove(id);
       } else {
         const entity = world.entity(id);
-        if (entity) store.upsert(id, entity as E);
+        if (entity) store.upsert(id, entity);
       }
     }
     registry.update(mutations);
@@ -103,7 +103,7 @@ export function GameProvider<E extends BaseEntity, D, C>(
   };
 
   return createComponent(GameContext, {
-    value: value as unknown as GameContextValue<BaseEntity, unknown, unknown>,
+    value,
     get children() {
       return props.children;
     },

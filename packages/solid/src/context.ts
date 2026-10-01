@@ -12,7 +12,11 @@ export interface GameContextValue<E extends BaseEntity, D, C> {
   readonly connection: Accessor<ConnectionStatus>;
 }
 
-export const GameContext = createContext<GameContextValue<BaseEntity, unknown, unknown>>();
+/**
+ * One runtime slot serves every `<GameProvider<E, D, C>>`, so the stored value's
+ * type parameters are erased here and recovered by {@link useGame}.
+ */
+export const GameContext = createContext<unknown>();
 
 /**
  * Read the game context. Throws when called outside a {@link GameProvider}. The
@@ -26,7 +30,10 @@ export function useGame<
   C = unknown,
 >(): GameContextValue<E, D, C> {
   try {
-    return useContext(GameContext) as unknown as GameContextValue<E, D, C>;
+    // SAFETY: `useContext` throws when no provider is mounted (caught below), and
+    // `GameProvider` is the only writer of `GameContext`, so a returned value is
+    // the `GameContextValue<E, D, C>` a `<GameProvider<E, D, C>>` stored.
+    return useContext(GameContext) as GameContextValue<E, D, C>;
   } catch {
     throw new Error("[@vampgg/solid] hooks must be called within a <GameProvider>.");
   }

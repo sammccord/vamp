@@ -23,9 +23,18 @@ import {
   type System,
   SystemType,
 } from "./System";
+import type { ArrayDelta } from "./delta";
 import { type BaseEntity, type EntityMutator, MutationRecord, MutationType } from "./types";
 
-export type EntityCallback = (entity: string, archetype: Archetype) => Promise<unknown>;
+/** A tags delta: a replacement tag list, or the ArrayDelta set/add/remove form. */
+type TagsDelta<Tags extends number> = Tags[] | ArrayDelta<Tags>;
+
+/** Parse the `tags` field read off an opaque delta record into a {@link TagsDelta}. */
+function isTagsDelta<Tags extends number>(value: unknown): value is TagsDelta<Tags> {
+  return Array.isArray(value) || Object(value) === value;
+}
+
+export type EntityCallback = (entity: string, archetype: Archetype) => Promise<void>;
 
 // Shared frozen empty array for behavior-cache misses. Iterating it with
 // `for...of` is a no-op and allocates nothing, replacing the `|| []` idiom that
@@ -381,8 +390,8 @@ export class ECS<
     mutate = false,
   ): E {
     const components: number[] = [];
-    for (const component in delta as object) {
-      if ((delta as Record<string, unknown>)[component] === undefined) continue;
+    for (const component in delta) {
+      if (delta[component] === undefined) continue;
       // Skip keys that aren't real components (e.g. `tags`, or a stray delta key);
       // pushing an `undefined` id here would corrupt the query/cache key downstream.
       if (!(component in this.options.components)) continue;
@@ -466,8 +475,8 @@ export class ECS<
     this._mutate(id, MutationRecord.fromInsert<E, D>({ entity: committed }));
     for (const component in committed) {
       if (component === "tags") continue;
-      if (committed[component as keyof E] === undefined) continue;
-      this.addComponent(id, component as unknown as Exclude<keyof E, "tags">, false);
+      if (committed[component] === undefined) continue;
+      this._addComponent(id, component, false);
     }
     if (committed.tags) {
       for (const tag of committed.tags) {
@@ -493,37 +502,46 @@ export class ECS<
     if (!entity || entity.id !== id) return this.insert(this.options.materializeDelta(delta));
     // patch the existing entity
     let executing = false;
-    const base: Record<string, unknown> = {};
+    const base: Partial<E> = {};
 
-    for (const component in delta as object) {
+    for (const component in delta) {
       if (component === "tags") continue;
-      const deltaValue = (delta as Record<string, unknown>)[component];
-      const entityValue = (entity as Record<string, unknown>)[component];
+      const deltaValue = delta[component];
+      // SAFETY: delta keys are entity field names (the delta record `D` mirrors
+      // `E` field by field), so each non-"tags" delta key is a key of `E`.
+      const key = component as keyof E;
+      const entityValue = entity[key];
 
       // are we changing the component structure into another archetype?
       if (mutating && deltaValue === undefined) {
-        base[component] = undefined;
-        this.removeComponent(id, component as Exclude<keyof E, "tags">, false);
+        base[key] = undefined;
+        this._removeComponent(id, component, false);
         executing = true;
       } else {
         // TODO maybe _.clone() this to prevent accidental mutation of object components
-        base[component] = entityValue;
+        base[key] = entityValue;
         // If value was previously undefined, add component and execute systems
         if (entityValue === undefined) {
-          this.addComponent(id, component as Exclude<keyof E, "tags">, false);
+          this._addComponent(id, component, false);
           executing = true;
         }
       }
     }
 
-    const rawDelta = delta as Record<string, unknown>;
-    if (rawDelta.tags !== undefined) {
-      this._reconcileTags(id, rawDelta.tags);
+    // SAFETY: `delta` is the consumer's delta record (`D`), an object keyed by
+    // field name; this reads its optional `tags` field, the one delta key handled
+    // outside the component loop above. `isTagsDelta` parses it before use.
+    const tagsDelta = (delta as { tags?: unknown }).tags;
+    if (isTagsDelta<Tags>(tagsDelta)) {
+      this._reconcileTags(id, tagsDelta);
     }
 
     this._mutate(id, MutationRecord.fromUpdate<E, D>({ delta }));
     if (executing) this.executeEventSystems(id);
 
+    // SAFETY: `base` collects, per touched component name, that component's
+    // pre-change value (or undefined for removed components), so it is a partial
+    // `E` over those keys.
     return base as E;
   }
 
@@ -560,7 +578,7 @@ export class ECS<
    * set incrementally as archetypes appear.
    */
   public query(_query: Query | ((builder: QueryBuilder) => QueryBuilder)): string[] {
-    const q = typeof _query === "function" ? query(_query) : _query;
+    const q = _query instanceof Function ? query(_query) : _query;
     const archetypes: Archetype[] = [];
     traverseArchetypeGraph(this.rootArchetype, (archetype) => {
       if (q.tryAdd(archetype, false)) archetypes.push(archetype);
@@ -766,14 +784,18 @@ export class ECS<
     return current;
   }
 
-  private _reconcileTags(id: string, tagsDelta: unknown): void {
+  private _reconcileTags(id: string, tagsDelta: TagsDelta<Tags>): void {
     const archetype = this.entityArchetype.get(id);
     if (!archetype) return;
-    const currentTags = archetype.tagMask.array();
-    let targetTags: number[];
+    // SAFETY: an archetype's tag bits are only ever set from `Tags` values
+    // (addTag/removeTag/_reconcileTags all take `Tags`), so every set bit is a `Tags`.
+    const currentTags = archetype.tagMask.array() as Tags[];
+    let targetTags: Tags[];
 
-    if (typeof tagsDelta === "object" && tagsDelta !== null && !Array.isArray(tagsDelta)) {
-      const d = tagsDelta as { set?: number[]; add?: number[]; remove?: number[] };
+    if (Array.isArray(tagsDelta)) {
+      targetTags = tagsDelta;
+    } else {
+      const d = tagsDelta;
       if (d.set !== undefined) {
         targetTags = d.set;
       } else {
@@ -788,17 +810,13 @@ export class ECS<
           }
         if (d.remove) targetTags = targetTags.filter((t) => !d.remove!.includes(t));
       }
-    } else if (Array.isArray(tagsDelta)) {
-      targetTags = tagsDelta;
-    } else {
-      return;
     }
 
     for (const tag of currentTags) {
-      if (!targetTags.includes(tag)) this.removeTag(id, tag as Tags, false);
+      if (!targetTags.includes(tag)) this.removeTag(id, tag, false);
     }
     for (const tag of targetTags) {
-      if (!currentTags.includes(tag)) this.addTag(id, tag as Tags, false);
+      if (!currentTags.includes(tag)) this.addTag(id, tag, false);
     }
   }
 
@@ -1094,6 +1112,16 @@ export class ECS<
   }
 
   /**
+   * Hold the active {@link withScope} open until `work` settles, so async work a
+   * synchronous system starts during `update()` (such as dispatching `act`)
+   * commits in that scope's batch instead of landing after it closed. A
+   * rejection aborts the scope. Outside a scope nothing waits for `work`.
+   */
+  waitUntil(work: Promise<unknown>): void {
+    this.context.scope?.pending.push(work);
+  }
+
+  /**
    * Create a new mutation scope for tracking entity changes.
    * Mutations recorded in a scope can be coalesced and flushed together.
    */
@@ -1129,6 +1157,7 @@ export class ECS<
         cb(scope);
       }
       const result = await fn();
+      while (scope.pending.length > 0) await Promise.all(scope.pending.splice(0));
       succeeded = true;
       return { result, mutations: scope.mutations };
     } finally {
@@ -1200,7 +1229,7 @@ export class ECS<
       entity = this.options.createId();
     }
 
-    const archetype = prefabricate as Archetype;
+    const archetype = prefabricate;
     archetype.entities.add(entity);
     this.entityArchetype.set(entity, archetype);
 
@@ -1268,7 +1297,7 @@ export class ECS<
 
     // Transform resets all components on the entity to that of the prefab..
     this.entityArchetype.get(entity)?.entities.delete(entity);
-    const archetype = prefabricate as Archetype;
+    const archetype = prefabricate;
     archetype.entities.add(entity);
     this.entityArchetype.set(entity, archetype);
     // The entity moved to a different archetype, so the set of behaviors that
@@ -1283,6 +1312,9 @@ export class ECS<
    * Check if the entity has a componentId
    */
   hasComponent(entity: string, _component: Exclude<keyof E, "tags">): boolean {
+    // SAFETY: component names are string keys of `E` (schema-generated field
+    // names), so `_component` is a string and indexes the string-keyed
+    // `options.components` map.
     const component = this.options.components[_component as string];
     const entityArchetype = this.entityArchetype.get(entity);
 
@@ -1297,8 +1329,15 @@ export class ECS<
    * @throws {EntityUndefinedError | EntityDeletedError | EntityNotExistError}
    */
   addComponent(entity: string, _component: Exclude<keyof E, "tags">, executeSystems = true) {
+    // SAFETY: component names are string keys of `E` (schema-generated field
+    // names), so `_component` is a string and indexes the string-keyed
+    // `options.components` map.
+    this._addComponent(entity, _component as string, executeSystems);
+  }
+
+  private _addComponent(entity: string, name: string, executeSystems: boolean) {
     const archetype = this.entityArchetype.get(entity);
-    const component = this.options.components[_component as string];
+    const component = this.options.components[name];
     // if there's a difference between client entities and server entities
     if (component === undefined) return;
 
@@ -1316,8 +1355,15 @@ export class ECS<
    * @throws {EntityUndefinedError | EntityDeletedError | EntityNotExistError}
    */
   removeComponent(entity: string, _component: Exclude<keyof E, "tags">, executeSystems = true) {
+    // SAFETY: component names are string keys of `E` (schema-generated field
+    // names), so `_component` is a string and indexes the string-keyed
+    // `options.components` map.
+    this._removeComponent(entity, _component as string, executeSystems);
+  }
+
+  private _removeComponent(entity: string, name: string, executeSystems: boolean) {
     const archetype = this.entityArchetype.get(entity);
-    const component = this.options.components[_component as string];
+    const component = this.options.components[name];
 
     if (component === undefined) return;
 
@@ -1335,7 +1381,7 @@ export class ECS<
   hasTag(entity: string, tag: Tags): boolean {
     const entityArchetype = this.entityArchetype.get(entity);
     if (!entityArchetype) return false;
-    return entityArchetype.tagMask.has(tag as number);
+    return entityArchetype.tagMask.has(tag);
   }
 
   /**
@@ -1344,6 +1390,8 @@ export class ECS<
   getTags(entity: string): Tags[] {
     const entityArchetype = this.entityArchetype.get(entity);
     if (!entityArchetype) return [];
+    // SAFETY: an archetype's tag ids are only ever set from `Tags` values
+    // (addTag/removeTag/_reconcileTags all take `Tags`), so each id is a `Tags`.
     return entityArchetype.tagIds() as Tags[];
   }
 
@@ -1354,9 +1402,9 @@ export class ECS<
   addTag(entity: string, tag: Tags, executeSystems = true) {
     const archetype = this.entityArchetype.get(entity);
     if (!archetype) return;
-    if (archetype.tagMask.has(tag as number)) return;
+    if (archetype.tagMask.has(tag)) return;
 
-    const next = this._transformEntityForTag(archetype, entity, tag as number);
+    const next = this._transformEntityForTag(archetype, entity, tag);
     this._deferredCacheRebuilds.add(entity);
     if (executeSystems) this._executeEventSystems(next);
   }
@@ -1368,9 +1416,9 @@ export class ECS<
   removeTag(entity: string, tag: Tags, executeSystems = true) {
     const archetype = this.entityArchetype.get(entity);
     if (!archetype) return;
-    if (!archetype.tagMask.has(tag as number)) return;
+    if (!archetype.tagMask.has(tag)) return;
 
-    const next = this._transformEntityForTag(archetype, entity, tag as number);
+    const next = this._transformEntityForTag(archetype, entity, tag);
     this._deferredCacheRebuilds.add(entity);
     if (executeSystems) this._executeEventSystems(next);
   }
@@ -1386,18 +1434,24 @@ export class ECS<
     const child = this.entity(childId);
     if (!parent || !child) return;
     if (!parent.children) {
+      // SAFETY: the literal is a `children` delta in the ArrayDelta `{ set }` form,
+      // which is the shape `D`'s `children` field takes; `put` routes it through the
+      // configured `mergeDelta`.
       return this.put(id, {
         children: {
           set: [childId],
         },
-      } as unknown as D);
+      } as D);
     } else {
       if (parent.children.includes(childId)) return parent;
+      // SAFETY: the literal is a `children` delta in the ArrayDelta `{ add }` form,
+      // which is the shape `D`'s `children` field takes; `put` routes it through the
+      // configured `mergeDelta`.
       return this.put(id, {
         children: {
           add: [childId],
         },
-      } as unknown as D);
+      } as D);
     }
   }
 
@@ -1405,11 +1459,14 @@ export class ECS<
     const parent = this.entity(id);
     if (!parent) return;
     if (parent.children) {
+      // SAFETY: the literal is a `children` delta in the ArrayDelta `{ remove }`
+      // form, which is the shape `D`'s `children` field takes; `put` routes it
+      // through the configured `mergeDelta`.
       return this.put(id, {
         children: {
           remove: [childId],
         },
-      } as unknown as D);
+      } as D);
     }
   }
 }

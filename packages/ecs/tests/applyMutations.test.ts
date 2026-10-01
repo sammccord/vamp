@@ -60,7 +60,7 @@ function createWorld() {
   };
   const options: ECSOptions<Entity, EntityDelta> = {
     createId: () => crypto.randomUUID(),
-    components: components as unknown as Record<Exclude<keyof Entity, "tags">, number>,
+    components: components,
     materializeDelta,
     mergeDelta,
     accumulateDelta,

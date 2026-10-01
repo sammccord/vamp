@@ -42,6 +42,7 @@ export default class DividedMaze extends Map {
 
   _process() {
     while (this._stack.length) {
+      // SAFETY: _stack is non-empty (guarded by the while condition), so shift() cannot return undefined.
       let room = this._stack.shift() as Room; /* [left, top, right, bottom] */
       this._partitionRoom(room);
     }
@@ -71,7 +72,9 @@ export default class DividedMaze extends Map {
       return;
     }
 
+    // SAFETY: availX is non-empty (the guard above returns when it is empty), so getItem returns a number, not null.
     let x = RNG.getItem(availX) as number;
+    // SAFETY: availY is non-empty (the guard above returns when it is empty), so getItem returns a number, not null.
     let y = RNG.getItem(availY) as number;
 
     this._map[x][y] = 1;
@@ -113,6 +116,7 @@ export default class DividedMaze extends Map {
         continue;
       }
 
+      // SAFETY: w is non-empty — every wall segment starts at an odd boundary (room[0]/room[1] are odd, x/y are even), so it receives at least one cell and getItem returns a Point, not null.
       let hole = RNG.getItem(w) as Point;
       this._map[hole[0]][hole[1]] = 0;
     }

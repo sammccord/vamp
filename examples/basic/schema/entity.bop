@@ -1,4 +1,5 @@
 import "../node_modules/@vampgg/utils/schema/pool.bop"
+import "../node_modules/@vampgg/utils/schema/behavior.bop"
 import "./tags.bop"
 
 // A 2D vector component. Numeric-only, so `vamp generate` synthesizes a
@@ -7,6 +8,16 @@ import "./tags.bop"
 message Vec2 {
 	1 -> float32 x;
 	2 -> float32 y;
+}
+
+// Leaf ids a BehaviorTree can reference. Codegen keys `GameConditions` and
+// `GameTasks` by these, so every member must have an implementation.
+enum Condition {
+	PlayerNear = 1;
+}
+
+enum Task {
+	Attack = 1;
 }
 
 message Entity {
@@ -23,4 +34,6 @@ message Entity {
 	11 -> uint32 level;
 	12 -> uint32 xp;
 	13 -> uint32 faction;
+	14 -> Brain brain;
+	15 -> BehaviorTree behaviorTree;
 }

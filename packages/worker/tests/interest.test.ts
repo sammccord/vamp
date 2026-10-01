@@ -10,7 +10,7 @@ import {
 import { Message } from "@vampgg/utils/bebop";
 import { STREAM_MESSAGE_ID_KEY, STREAM_METHOD_ID_KEY } from "@vampgg/utils/ws-router";
 import { describe, expect, test } from "vitest";
-import { createInterestBroadcast } from "../src/interest.ts";
+import { createInterestBroadcast, type InterestSub } from "../src/interest.ts";
 
 /**
  * Unit coverage for the generic interest-managed broadcast factory. Uses a real
@@ -23,7 +23,7 @@ import { createInterestBroadcast } from "../src/interest.ts";
 type TestEntity = BaseEntity & { position?: { x: number; y: number } };
 type TestDelta = Partial<TestEntity>;
 type TestReq = { viewerId?: string };
-type World = ECS<Record<string, unknown>, [], GenericAction, number, TestEntity, TestDelta>;
+type World = ECS<{}, [], GenericAction, number, TestEntity, TestDelta>;
 
 const AOI_RADIUS_SQ = 100 * 100;
 
@@ -50,12 +50,12 @@ function encodeBatch(batch: Map<string, MutationRecord<TestEntity, TestDelta>>):
 const options = {
   createId: () => crypto.randomUUID(),
   components: {},
-  materializeDelta: (delta: TestDelta): TestEntity => delta as TestEntity,
+  materializeDelta: (delta: TestDelta): TestEntity => delta,
   mergeDelta: (entity: TestEntity, delta: TestDelta): void => {
-    Object.assign(entity as Record<string, unknown>, delta);
+    Object.assign(entity, delta);
   },
   accumulateDelta: (from: TestDelta, to: TestDelta): TestDelta => ({ ...to, ...from }),
-} as unknown as ECSOptions<TestEntity, TestDelta>;
+} satisfies ECSOptions<TestEntity, TestDelta>;
 
 /** A bare ECS world wired like the durable object's, minus Yjs/flush. */
 function makeWorld(): World {
@@ -75,7 +75,7 @@ function makeWorld(): World {
         break;
     }
   };
-  const ecs = new ECS<Record<string, unknown>, [], GenericAction, number, TestEntity, TestDelta>(
+  const ecs = new ECS<{}, [], GenericAction, number, TestEntity, TestDelta>(
     entities,
     mutate,
     {},
@@ -87,11 +87,13 @@ function makeWorld(): World {
 
 /** A minimal hibernatable-WebSocket stand-in capturing attachment + sends. */
 function makeFakeWs() {
-  let attachment: unknown = null;
+  let attachment: WebSocketAttachment | null = null;
   const sent: ArrayBuffer[] = [];
+  // SAFETY: `interest.ts` touches only `readyState`, `send`, and the attachment
+  // pair on a socket, all implemented here.
   const ws = {
     readyState: 1,
-    serializeAttachment(v: unknown) {
+    serializeAttachment(v: WebSocketAttachment) {
       attachment = structuredClone(v);
     },
     deserializeAttachment() {
@@ -100,7 +102,7 @@ function makeFakeWs() {
     send(data: ArrayBuffer) {
       sent.push(data);
     },
-  } as unknown as WebSocket;
+  } as WebSocket;
   return { ws, sent };
 }
 
@@ -110,25 +112,33 @@ function makeCtx(world: World, ws: WebSocket, messageId: string, methodId: numbe
     [STREAM_MESSAGE_ID_KEY, [messageId]],
     [STREAM_METHOD_ID_KEY, [String(methodId)]],
   ]);
+  // SAFETY: `observe` reads only `clientMetadata.get` and `getEnvironment` from
+  // its context, and both are implemented here.
   return {
     clientMetadata: { get: (k: string) => meta.get(k) },
     getEnvironment: () => [world, ws],
-  } as unknown as ServerContext;
+  } as ServerContext;
 }
 
-function frameInfo(frame: ArrayBuffer): {
-  messageId?: string;
-  status?: number;
-  keys: string[];
-} {
+function frameInfo(frame: ArrayBuffer) {
   const m = Message.decode(new Uint8Array(frame));
-  const text = new TextDecoder().decode((m.data ?? new Uint8Array()) as Uint8Array);
+  const text = new TextDecoder().decode(m.data ?? new Uint8Array());
   return { messageId: m.messageId, status: m.status, keys: text ? text.split(",") : [] };
 }
 
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 const ATTACHMENT_KEY = "__vamp:interest";
+
+interface InterestAttachment {
+  [ATTACHMENT_KEY]?: InterestSub;
+}
+
+function persistedSub(ws: WebSocket): InterestSub | undefined {
+  // SAFETY: the broadcast under test is the only writer of `ATTACHMENT_KEY` and
+  // always stores an `InterestSub` there; every caller persisted one first.
+  return (ws.deserializeAttachment() as InterestAttachment)[ATTACHMENT_KEY];
+}
 
 describe("createInterestBroadcast", () => {
   test("rehydrateConnection rebuilds observers and routes framed pushes to the right sockets", async () => {
@@ -223,8 +233,7 @@ describe("createInterestBroadcast", () => {
     await tick();
 
     // The subscription is persisted under the namespaced attachment key.
-    const attachment = ws.deserializeAttachment() as Record<string, unknown>;
-    expect(attachment[ATTACHMENT_KEY]).toMatchObject({ messageId: msgId, methodId: 42, viewerId });
+    expect(persistedSub(ws)).toMatchObject({ messageId: msgId, methodId: 42, viewerId });
     expect(world.observerCount).toBe(1);
 
     // Initial snapshot frame: viewer + near, NOT far.
@@ -248,7 +257,7 @@ describe("createInterestBroadcast", () => {
     broadcast.onConnectionClose(ws);
     await parked;
     expect(world.observerCount).toBe(0);
-    expect((ws.deserializeAttachment() as Record<string, unknown>)[ATTACHMENT_KEY]).toBeUndefined();
+    expect(persistedSub(ws)).toBeUndefined();
   });
 
   test("default policy broadcasts globally (no canSee / resolveViewer)", async () => {
@@ -292,7 +301,7 @@ describe("createInterestBroadcast", () => {
 
     broadcast.onConnectionClose(ws);
     expect(world.observerCount).toBe(0);
-    expect((ws.deserializeAttachment() as Record<string, unknown>)[ATTACHMENT_KEY]).toBeUndefined();
+    expect(persistedSub(ws)).toBeUndefined();
 
     // A later commit reaches no one.
     await world.withScope(() => world.insert({ id: crypto.randomUUID() }));

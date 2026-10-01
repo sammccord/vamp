@@ -28,6 +28,8 @@ message EntityDelta {
   11 -> uint32 level;
   12 -> uint32 xp;
   13 -> uint32 faction;
+  14 -> BrainDelta brain;
+  15 -> BehaviorTreeDelta behaviorTree;
 }
 
 enum MutationType {

@@ -18,7 +18,8 @@ pnpm run dev                    # wrangler dev (serves ws://localhost:8787/v1/ga
 
 Connect a client to `ws://localhost:8787/v1/game?ns=<room>`. Everything in the
 query string except `ns` is forwarded to the DO as the runtime context seed (see
-`resolveContext` in `src/index.ts`).
+`resolveContext` in `src/index.ts`). `rng=<n>` seeds the world's RNG, so hostiles
+(entities with `brain: { tree: HOSTILE_TREE_ID }`) replay the same attacks.
 
 ## Tests & benchmark
 

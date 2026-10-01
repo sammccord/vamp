@@ -37,6 +37,7 @@
   "devDependencies": {
     "@types/node": "^25.5.0",
     "@typescript/native-preview": "7.0.0-dev.20260315.1",
+    "@vampgg/rot": "workspace:*",
     "typescript": "^5.9.3",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

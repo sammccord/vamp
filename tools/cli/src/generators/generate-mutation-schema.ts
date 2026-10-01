@@ -22,6 +22,11 @@ function entityImportPath(entityPath: string, mutationPath: string): string {
   return normalized.startsWith(".") ? normalized : `./${normalized}`;
 }
 
+export interface SchemaContext {
+  userDeltas: Set<string>;
+  components: Map<string, SourceMessage>;
+}
+
 /**
  * From the reachable schema source, collect:
  *  - `userDeltas`: every `<Type>Delta` message name already declared.
@@ -31,7 +36,7 @@ function entityImportPath(entityPath: string, mutationPath: string): string {
 export function collectSchemaContext(
   entity: SourceMessage,
   reachableSource: string,
-): { userDeltas: Set<string>; components: Map<string, SourceMessage> } {
+): SchemaContext {
   const declared = collectMessageNames(reachableSource);
   const userDeltas = new Set<string>([...declared].filter((n) => n.endsWith("Delta")));
 

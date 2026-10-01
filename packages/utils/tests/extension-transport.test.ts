@@ -3,37 +3,46 @@ import { ConsoleLogger, MethodType, TempoError, TempoStatusCode } from "@tempojs
 import { ServiceRegistry } from "@tempojs/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Message } from "../src/bebop.ts";
-import { TempoExtensionChannel } from "../src/extension-channel.ts";
-import { createExtensionListener, TempoExtensionRouter } from "../src/extension-router.ts";
 
 /**
  * In-process loopback for the browser-extension transport
  * (`TempoExtensionChannel` + `TempoExtensionRouter`). `webextension-polyfill`
- * throws if imported outside an extension, and the router has no inbound
- * listener of its own, so we mock the polyfill: the channel's
- * `runtime.sendMessage` feeds a background handler that decodes and calls
- * `router.process(...)`, and the router's `tabs.sendMessage` is routed back into
- * the channel's `runtime.onMessage` listeners. Wire format is `number[]` both
- * ways (matching `Array.apply(null, Message.encode(...))`).
+ * throws outside an extension, but it hands back `globalThis.browser` unchanged
+ * when that global already exposes `runtime.id` (the native Firefox path). So
+ * the test installs a fake `browser` global before importing the transport: the
+ * channel's `runtime.sendMessage` feeds a background handler that decodes and
+ * calls `router.process(...)`, and the router's `tabs.sendMessage` is routed back
+ * into the channel's `runtime.onMessage` listeners. Wire format is `number[]`
+ * both ways (matching `Array.apply(null, Message.encode(...))`).
  */
 
-// Shared mock state, hoisted so the vi.mock factory can close over it.
-const ext = vi.hoisted(() => ({
-  runtimeListeners: new Set<(msg: unknown) => void>(),
+// The loopback's wire frame is `number[]` both ways (see header): the fake
+// tabs.sendMessage replays verbatim the payload runtime.sendMessage received.
+type RuntimeListener = (msg: number[]) => void;
+
+interface ExtFakeState {
+  runtimeListeners: Set<RuntimeListener>;
+  background: (payload: number[]) => void;
+  removeListenerSpy: ((fn: RuntimeListener) => void) | undefined;
+  runtimeSent: number[][];
+}
+
+const ext: ExtFakeState = {
+  runtimeListeners: new Set<RuntimeListener>(),
   // Set per-test: handles a frame the channel sends toward the "background".
   background: (_payload: number[]) => {},
-  removeListenerSpy: undefined as undefined | ((fn: (msg: unknown) => void) => void),
+  removeListenerSpy: undefined,
   // Every payload passed to runtime.sendMessage (client->background frames and
   // the router's broadcast replies to tabless senders).
-  runtimeSent: [] as number[][],
-}));
+  runtimeSent: [],
+};
 
-vi.mock("webextension-polyfill", () => ({
+const fakeBrowser = {
   runtime: {
     id: "test-ext",
     onMessage: {
-      addListener: (fn: (msg: unknown) => void) => ext.runtimeListeners.add(fn),
-      removeListener: (fn: (msg: unknown) => void) => {
+      addListener: (fn: RuntimeListener) => ext.runtimeListeners.add(fn),
+      removeListener: (fn: RuntimeListener) => {
         ext.removeListenerSpy?.(fn);
         ext.runtimeListeners.delete(fn);
       },
@@ -52,7 +61,12 @@ vi.mock("webextension-polyfill", () => ({
       return Promise.resolve();
     },
   },
-}));
+};
+
+Object.assign(globalThis, { chrome: { runtime: { id: "test-ext" } }, browser: fakeBrowser });
+const { TempoExtensionChannel } = await import("../src/extension-channel.ts");
+const { createExtensionListener, TempoExtensionRouter } =
+  await import("../src/extension-router.ts");
 
 const ECHO_METHOD_ID = 1234;
 
@@ -62,10 +76,14 @@ const decode = (b: Uint8Array): Message => Message.decode(b);
 
 class EchoRegistry extends ServiceRegistry {
   init(): void {
-    (this as unknown as { methods: Map<number, unknown> }).methods.set(ECHO_METHOD_ID, {
+    // SAFETY: `methods` is the base ServiceRegistry's own `protected readonly
+    // methods: Map<number, BebopMethodAny>`; widening only the value type lets
+    // the test register a literal that omits `stringify`/`fromJSON`, which the
+    // router never calls (RouterCore uses only deserialize/invoke/serialize/type).
+    (this.methods as Map<number, unknown>).set(ECHO_METHOD_ID, {
       name: "echo",
       service: "Test",
-      invoke: async (record: unknown) => record,
+      invoke: async (record: Message) => record,
       serialize: encode,
       deserialize: decode,
       type: MethodType.Unary,
@@ -73,7 +91,7 @@ class EchoRegistry extends ServiceRegistry {
   }
   // biome-ignore lint/suspicious/noExplicitAny: base getMethod returns BebopMethodAny
   getMethod(id: number): any {
-    return (this as unknown as { methods: Map<number, unknown> }).methods.get(id);
+    return this.methods.get(id);
   }
 }
 
@@ -81,6 +99,10 @@ class EchoRegistry extends ServiceRegistry {
 // duplicate names.
 const logger = new ConsoleLogger("extension-transport-test");
 
+// SAFETY: BaseChannel.startUnary reads only method.id/serialize/deserialize/type
+// (channel-core.ts); this literal supplies all four. The omitted
+// stringify/fromJSON serve the JSON wire path, which this binary transport test
+// never exercises.
 // biome-ignore lint/suspicious/noExplicitAny: test record stands in for a BebopRecord
 const echoMethodInfo: MethodInfo<any, any> = {
   name: "echo",
@@ -92,6 +114,10 @@ const echoMethodInfo: MethodInfo<any, any> = {
 } as any;
 
 // A sender with a real tab id, or the router's `send` drops the response.
+// SAFETY: TempoExtensionRouter.send reads only sender.tab?.id and
+// sender.tab.discarded (extension-router.ts), and RouterCore passes the ctx to
+// ServerContext without inspecting it; this stand-in supplies both tab fields
+// and no other MessageSender field is dereferenced.
 // biome-ignore lint/suspicious/noExplicitAny: partial Runtime.MessageSender stand-in
 const senderCtx = { sender: { tab: { id: 1, discarded: false } } } as any;
 
@@ -129,7 +155,7 @@ describe("extension transport (TempoExtensionChannel + TempoExtensionRouter)", (
     new TempoExtensionRouter(logger, new EchoRegistry(logger));
     ext.background = () => {}; // never reply
 
-    const removed: Array<(msg: unknown) => void> = [];
+    const removed: RuntimeListener[] = [];
     ext.removeListenerSpy = (fn) => removed.push(fn);
 
     const channel = new TempoExtensionChannel({ logger });
@@ -157,6 +183,9 @@ describe("extension transport (TempoExtensionChannel + TempoExtensionRouter)", (
     });
 
     // A popup/options sender has no `tab`; the old router dropped the reply.
+    // SAFETY: TempoExtensionRouter.send reads only sender.tab?.id/discarded and
+    // takes the runtime.sendMessage broadcast branch when `tab` is absent
+    // (extension-router.ts); no other MessageSender field is dereferenced.
     await router.process(req, Message({}), { sender: {} } as any);
 
     expect(ext.runtimeSent.length).toBe(1);
@@ -178,6 +207,9 @@ describe("createExtensionListener", () => {
   const validFrame = Array.from(
     Message.encode(Message({ methodId: ECHO_METHOD_ID, messageId: "x", data: new Uint8Array() })),
   );
+  // SAFETY: createExtensionListener reads only sender.id, comparing it against
+  // runtime.id ("test-ext" in the mock), before dispatching anything
+  // (extension-router.ts); no other MessageSender field is dereferenced.
   const self = { id: "test-ext" } as any;
 
   test("dispatches a valid frame from this extension", () => {
@@ -188,6 +220,9 @@ describe("createExtensionListener", () => {
 
   test("rejects frames from another extension", () => {
     const { listener, processSpy } = setup();
+    // SAFETY: the listener reads only sender.id; "other-ext" fails the runtime.id
+    // equality check and the frame is dropped before any other field is touched
+    // (extension-router.ts createExtensionListener).
     listener(validFrame, { id: "other-ext" } as any);
     expect(processSpy).not.toHaveBeenCalled();
   });

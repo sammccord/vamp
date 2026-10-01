@@ -7,6 +7,8 @@ export class MutationScope<E, D> {
   readonly mutations = new Map<string, MutationRecord<E, D>>();
   readonly shadowEntities = new Map<string, E>();
   readonly deletedIds = new Set<string>();
+  /** Async work the scope waits for before it commits (see `ECS.waitUntil`). */
+  readonly pending: Promise<unknown>[] = [];
 
   constructor(
     private readonly _mergeDelta: MergeDeltaFn<E, D>,

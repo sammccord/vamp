@@ -19,7 +19,7 @@ vp run build         # regenerate schema then build (runs: bebopc build && vp pa
 
 ## Schema (`schema/`)
 
-Two bebop types define the wire format for all RPC in this framework.
+Two bebop types define the wire format for all RPC in this framework. The remaining files are entity components that apps import into their own schema.
 
 ### `Error` (struct — `schema/error.bop`)
 
@@ -49,6 +49,24 @@ The universal envelope for all RPC calls. Fields are optional (bebop message typ
 | `authorization` | `string` | Auth header value                       |
 | `credential`    | `string` | Serialized credential for storage       |
 | `headers`       | `string` | HTTP-style metadata header string       |
+
+### Behavior trees (`schema/behavior.bop`)
+
+Entity components for `@vampgg/ecs` behavior trees. Import the file from your
+`entity.bop` (as `vamp init` does), then add `Brain` and `BehaviorTree` fields to
+`Entity`. `vamp generate` merges both of their deltas as last-write-wins, never
+as counters.
+
+| Type               | Fields                                                                                  | Role                                                      |
+| ------------------ | --------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `BehaviorNodeKind` | `Selector`, `Sequence`, `Weighted`, `Condition`, `Task`, `Invert`, `Chance`, `Cooldown` | What a node does                                          |
+| `BehaviorNode`     | `kind`, `children`, `weight`, `leaf`, `args`                                            | One node; `children` are indices into `nodes`             |
+| `BehaviorTree`     | `nodes`                                                                                 | A flat tree whose root is `nodes[0]`, stored on an entity |
+| `Brain`            | `tree`, `readyAt`, `last`                                                               | An agent's tree id, cooldown expiry ticks, and last task  |
+
+`weight` is a `Chance` percentage or a `Cooldown` length in ticks. A `Weighted`
+node keeps its per-child weights in `args`. `leaf` is the app's `Condition` or
+`Task` enum value.
 
 ---
 

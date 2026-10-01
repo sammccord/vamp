@@ -1,6 +1,7 @@
 /**
- * Canonical delta algebra for entity components: set/add/remove on array fields
- * and additive merge on pool (`Record<string, number>`) fields.
+ * Canonical delta algebra for entity components: set/add/remove on array fields,
+ * additive merge on pool (`Record<string, number>`) fields, and last-write-wins
+ * replace on fields such as behavior trees whose values must not be summed.
  *
  * This is the SINGLE source of truth for those semantics. Generated code
  * (`materializeDelta`, `mergeDelta`, `accumulateDelta` in each app's
@@ -55,18 +56,27 @@ export function applyArrayDelta<T>(base: T[], d?: ArrayDelta<T>): T[] {
   return out;
 }
 
+/** A numeric pool field: a string-keyed map of numbers (health, position, ...). */
+export interface NumberPool {
+  [key: string]: number;
+}
+
 /**
  * Additively merge a pool delta onto a base pool (entity-level), returning a new
  * object: `result[k] = (base[k] ?? 0) + delta[k]` for each key present in `delta`.
  */
 export function applyPoolDelta<T>(base: T, delta: Record<string, number>): T {
-  const result = { ...base } as Record<string, number>;
+  // SAFETY: base is a pool field (string-keyed numbers) by applyPoolDelta's
+  // contract, so its spread is a NumberPool we can add delta values onto.
+  const result = { ...base } as NumberPool;
   for (const key in delta) {
     if (delta[key] !== undefined) {
       result[key] = (result[key] ?? 0) + delta[key];
     }
   }
-  return result as unknown as T;
+  // SAFETY: result is base's spread with only numeric additions on its keys, so
+  // it keeps base's pool shape and is still a T.
+  return result as T;
 }
 
 /**
@@ -97,10 +107,38 @@ export function accumulateArrayDelta<T>(
 export function accumulatePoolDelta(
   to: Record<string, number> | undefined,
   from: Record<string, number>,
-): Record<string, number> {
+): NumberPool {
   if (!to) return { ...from };
   for (const key in from) {
     if (from[key] !== undefined) to[key] = (to[key] ?? 0) + from[key];
   }
   return to;
+}
+
+/**
+ * Last-write-wins merge of a replace delta onto a base component (entity-level):
+ * each field the delta defines overwrites the base's, including whole arrays.
+ * Returns a new object and never mutates `base`.
+ */
+export function applyReplaceDelta<T extends object>(base: T, delta: Partial<T>): T {
+  const result = { ...base };
+  for (const key in delta) {
+    if (delta[key] !== undefined) result[key] = delta[key];
+  }
+  return result;
+}
+
+/**
+ * Accumulate a replace delta INTO another (delta-on-delta): the later delta's
+ * defined fields win. Returns a fresh object when `to` is absent, else mutates
+ * and returns `to`.
+ */
+export function accumulateReplaceDelta<D extends object>(to: D | undefined, from: D): D {
+  // SAFETY: {} is only the seed for a freshly-built D; the loop below copies
+  // every defined field of from (a D) into it, so out is a valid D when returned.
+  const out = to ?? ({} as D);
+  for (const key in from) {
+    if (from[key] !== undefined) out[key] = from[key];
+  }
+  return out;
 }

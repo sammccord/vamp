@@ -20,7 +20,7 @@ import {  BaseClient, MethodInfo, CallOptions } from "@tempojs/client";
 import { ServiceRegistry, BaseService, ServerContext, BebopMethodAny, BebopMethod } from "@tempojs/server";
 
 export const BEBOP_SCHEMA = new Uint8Array ([
-3, 22, 0, 0, 0, 83, 116, 114, 105, 110, 103, 65, 114, 114,
+3, 30, 0, 0, 0, 83, 116, 114, 105, 110, 103, 65, 114, 114,
 97, 121, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 3,
 115, 101, 116, 0, 242, 255, 255, 255, 0, 245, 255, 255,
 255, 0, 1, 97, 100, 100, 0, 242, 255, 255, 255, 0, 245,
@@ -29,104 +29,143 @@ export const BEBOP_SCHEMA = new Uint8Array ([
 50, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 2, 120, 0,
 250, 255, 255, 255, 0, 1, 121, 0, 250, 255, 255, 255, 0,
 2, 69, 110, 116, 105, 116, 121, 68, 101, 108, 116, 97, 0,
-2, 0, 5, 0, 0, 0, 13, 105, 100, 0, 245, 255, 255, 255, 0,
+2, 0, 5, 0, 0, 0, 15, 105, 100, 0, 245, 255, 255, 255, 0,
 1, 115, 107, 0, 245, 255, 255, 255, 0, 2, 116, 97, 103,
-115, 0, 242, 255, 255, 255, 0, 19, 0, 0, 0, 0, 3, 112, 97,
+115, 0, 242, 255, 255, 255, 0, 21, 0, 0, 0, 0, 3, 112, 97,
 114, 101, 110, 116, 0, 245, 255, 255, 255, 0, 4, 99, 104,
 105, 108, 100, 114, 101, 110, 0, 0, 0, 0, 0, 0, 5, 104,
-101, 97, 108, 116, 104, 0, 21, 0, 0, 0, 0, 6, 112, 111,
+101, 97, 108, 116, 104, 0, 23, 0, 0, 0, 0, 6, 112, 111,
 115, 105, 116, 105, 111, 110, 0, 1, 0, 0, 0, 0, 7, 118,
 101, 108, 111, 99, 105, 116, 121, 0, 1, 0, 0, 0, 0, 8,
-109, 97, 110, 97, 0, 21, 0, 0, 0, 0, 9, 115, 116, 97, 109,
-105, 110, 97, 0, 21, 0, 0, 0, 0, 10, 108, 101, 118, 101,
+109, 97, 110, 97, 0, 23, 0, 0, 0, 0, 9, 115, 116, 97, 109,
+105, 110, 97, 0, 23, 0, 0, 0, 0, 10, 108, 101, 118, 101,
 108, 0, 251, 255, 255, 255, 0, 11, 120, 112, 0, 251, 255,
 255, 255, 0, 12, 102, 97, 99, 116, 105, 111, 110, 0, 251,
-255, 255, 255, 0, 13, 77, 117, 116, 97, 116, 105, 111,
-110, 84, 121, 112, 101, 0, 4, 0, 251, 255, 255, 255, 0, 4,
-0, 0, 0, 3, 73, 110, 115, 101, 114, 116, 0, 0, 1, 0, 0, 0,
-85, 112, 100, 97, 116, 101, 0, 0, 2, 0, 0, 0, 68, 101,
-108, 101, 116, 101, 0, 0, 3, 0, 0, 0, 73, 110, 115, 101,
-114, 116, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 101, 110, 116,
-105, 116, 121, 0, 17, 0, 0, 0, 0, 85, 112, 100, 97, 116,
-101, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 100, 101, 108, 116, 97,
-0, 2, 0, 0, 0, 0, 68, 101, 108, 101, 116, 101, 0, 1, 0, 0,
-5, 0, 0, 0, 0, 1, 101, 110, 116, 105, 116, 121, 0, 17, 0,
-0, 0, 0, 77, 117, 116, 97, 116, 105, 111, 110, 82, 101,
-99, 111, 114, 100, 0, 3, 0, 10, 0, 0, 0, 3, 1, 4, 0, 0, 0,
-2, 5, 0, 0, 0, 3, 6, 0, 0, 0, 77, 117, 116, 97, 116, 105,
-111, 110, 83, 99, 111, 112, 101, 0, 2, 0, 5, 0, 0, 0, 1,
-109, 117, 116, 97, 116, 105, 111, 110, 115, 0, 241, 255,
-255, 255, 244, 255, 255, 255, 7, 0, 0, 0, 0, 1, 65, 116,
-116, 97, 99, 107, 0, 2, 0, 5, 0, 0, 0, 3, 115, 111, 117,
-114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116, 97, 114,
-103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 100, 97, 109,
-97, 103, 101, 0, 251, 255, 255, 255, 0, 3, 84, 97, 107,
-101, 68, 97, 109, 97, 103, 101, 0, 2, 0, 5, 0, 0, 0, 3,
-115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1,
-116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2,
-100, 97, 109, 97, 103, 101, 0, 251, 255, 255, 255, 0, 3,
-72, 101, 97, 108, 0, 2, 0, 5, 0, 0, 0, 3, 115, 111, 117,
-114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116, 97, 114,
-103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 97, 109, 111,
-117, 110, 116, 0, 251, 255, 255, 255, 0, 3, 65, 114, 101,
-97, 65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0, 0, 0, 4,
-115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1,
-116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2,
-100, 97, 109, 97, 103, 101, 0, 251, 255, 255, 255, 0, 3,
-114, 97, 100, 105, 117, 115, 0, 251, 255, 255, 255, 0, 4,
-65, 99, 116, 105, 111, 110, 115, 0, 3, 0, 10, 0, 0, 0, 4,
-1, 9, 0, 0, 0, 2, 10, 0, 0, 0, 3, 11, 0, 0, 0, 4, 12, 0,
-0, 0, 84, 105, 99, 107, 82, 101, 113, 117, 101, 115, 116,
-0, 2, 0, 5, 0, 0, 0, 2, 115, 116, 101, 112, 115, 0, 251,
-255, 255, 255, 0, 1, 100, 116, 77, 115, 0, 251, 255, 255,
-255, 0, 2, 84, 105, 99, 107, 82, 101, 115, 117, 108, 116,
-0, 2, 0, 5, 0, 0, 0, 3, 102, 114, 97, 109, 101, 115, 0,
-251, 255, 255, 255, 0, 1, 101, 110, 116, 105, 116, 105,
+255, 255, 255, 0, 13, 98, 114, 97, 105, 110, 0, 29, 0, 0,
+0, 0, 14, 98, 101, 104, 97, 118, 105, 111, 114, 84, 114,
+101, 101, 0, 27, 0, 0, 0, 0, 15, 77, 117, 116, 97, 116,
+105, 111, 110, 84, 121, 112, 101, 0, 4, 0, 251, 255, 255,
+255, 0, 4, 0, 0, 0, 3, 73, 110, 115, 101, 114, 116, 0, 0,
+1, 0, 0, 0, 85, 112, 100, 97, 116, 101, 0, 0, 2, 0, 0, 0,
+68, 101, 108, 101, 116, 101, 0, 0, 3, 0, 0, 0, 73, 110,
+115, 101, 114, 116, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 101,
+110, 116, 105, 116, 121, 0, 19, 0, 0, 0, 0, 85, 112, 100,
+97, 116, 101, 0, 1, 0, 0, 5, 0, 0, 0, 0, 1, 100, 101, 108,
+116, 97, 0, 2, 0, 0, 0, 0, 68, 101, 108, 101, 116, 101, 0,
+1, 0, 0, 5, 0, 0, 0, 0, 1, 101, 110, 116, 105, 116, 121,
+0, 19, 0, 0, 0, 0, 77, 117, 116, 97, 116, 105, 111, 110,
+82, 101, 99, 111, 114, 100, 0, 3, 0, 10, 0, 0, 0, 3, 1, 4,
+0, 0, 0, 2, 5, 0, 0, 0, 3, 6, 0, 0, 0, 77, 117, 116, 97,
+116, 105, 111, 110, 83, 99, 111, 112, 101, 0, 2, 0, 5, 0,
+0, 0, 1, 109, 117, 116, 97, 116, 105, 111, 110, 115, 0,
+241, 255, 255, 255, 244, 255, 255, 255, 7, 0, 0, 0, 0, 1,
+65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0, 0, 0, 3, 115,
+111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116,
+97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 100,
+97, 109, 97, 103, 101, 0, 251, 255, 255, 255, 0, 3, 84,
+97, 107, 101, 68, 97, 109, 97, 103, 101, 0, 2, 0, 5, 0, 0,
+0, 3, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255,
+0, 1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255,
+0, 2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255, 255,
+0, 3, 72, 101, 97, 108, 0, 2, 0, 5, 0, 0, 0, 3, 115, 111,
+117, 114, 99, 101, 0, 244, 255, 255, 255, 0, 1, 116, 97,
+114, 103, 101, 116, 0, 244, 255, 255, 255, 0, 2, 97, 109,
+111, 117, 110, 116, 0, 251, 255, 255, 255, 0, 3, 65, 114,
+101, 97, 65, 116, 116, 97, 99, 107, 0, 2, 0, 5, 0, 0, 0,
+4, 115, 111, 117, 114, 99, 101, 0, 244, 255, 255, 255, 0,
+1, 116, 97, 114, 103, 101, 116, 0, 244, 255, 255, 255, 0,
+2, 100, 97, 109, 97, 103, 101, 0, 251, 255, 255, 255, 0,
+3, 114, 97, 100, 105, 117, 115, 0, 251, 255, 255, 255, 0,
+4, 65, 99, 116, 105, 111, 110, 115, 0, 3, 0, 10, 0, 0, 0,
+4, 1, 9, 0, 0, 0, 2, 10, 0, 0, 0, 3, 11, 0, 0, 0, 4, 12,
+0, 0, 0, 84, 105, 99, 107, 82, 101, 113, 117, 101, 115,
+116, 0, 2, 0, 5, 0, 0, 0, 2, 115, 116, 101, 112, 115, 0,
+251, 255, 255, 255, 0, 1, 100, 116, 77, 115, 0, 251, 255,
+255, 255, 0, 2, 84, 105, 99, 107, 82, 101, 115, 117, 108,
+116, 0, 2, 0, 5, 0, 0, 0, 3, 102, 114, 97, 109, 101, 115,
+0, 251, 255, 255, 255, 0, 1, 101, 110, 116, 105, 116, 105,
 101, 115, 0, 251, 255, 255, 255, 0, 2, 109, 105, 99, 114,
 111, 115, 0, 251, 255, 255, 255, 0, 3, 86, 101, 99, 50, 0,
 2, 0, 5, 0, 0, 0, 2, 120, 0, 247, 255, 255, 255, 0, 1,
-121, 0, 247, 255, 255, 255, 0, 2, 69, 110, 116, 105, 116,
-121, 0, 2, 0, 5, 0, 0, 0, 13, 105, 100, 0, 245, 255, 255,
-255, 0, 1, 115, 107, 0, 245, 255, 255, 255, 0, 2, 116, 97,
-103, 115, 0, 242, 255, 255, 255, 0, 19, 0, 0, 0, 0, 3,
-112, 97, 114, 101, 110, 116, 0, 245, 255, 255, 255, 0, 4,
-99, 104, 105, 108, 100, 114, 101, 110, 0, 242, 255, 255,
-255, 0, 245, 255, 255, 255, 0, 5, 104, 101, 97, 108, 116,
-104, 0, 20, 0, 0, 0, 0, 6, 112, 111, 115, 105, 116, 105,
-111, 110, 0, 16, 0, 0, 0, 0, 7, 118, 101, 108, 111, 99,
-105, 116, 121, 0, 16, 0, 0, 0, 0, 8, 109, 97, 110, 97, 0,
-20, 0, 0, 0, 0, 9, 115, 116, 97, 109, 105, 110, 97, 0, 20,
-0, 0, 0, 0, 10, 108, 101, 118, 101, 108, 0, 251, 255, 255,
-255, 0, 11, 120, 112, 0, 251, 255, 255, 255, 0, 12, 102,
-97, 99, 116, 105, 111, 110, 0, 251, 255, 255, 255, 0, 13,
-83, 116, 97, 116, 101, 0, 2, 0, 5, 0, 0, 0, 1, 110, 115,
-0, 245, 255, 255, 255, 0, 1, 84, 97, 103, 115, 0, 4, 0,
-251, 255, 255, 255, 0, 4, 0, 0, 0, 8, 72, 117, 109, 97,
-110, 0, 0, 1, 0, 0, 0, 80, 108, 97, 121, 101, 114, 67,
-111, 110, 116, 114, 111, 108, 108, 101, 100, 0, 0, 2, 0,
-0, 0, 72, 111, 115, 116, 105, 108, 101, 0, 0, 3, 0, 0, 0,
-85, 110, 100, 101, 97, 100, 0, 0, 4, 0, 0, 0, 70, 108,
-121, 105, 110, 103, 0, 0, 5, 0, 0, 0, 66, 111, 115, 115,
-0, 0, 6, 0, 0, 0, 73, 110, 118, 117, 108, 110, 101, 114,
-97, 98, 108, 101, 0, 0, 7, 0, 0, 0, 83, 116, 117, 110,
-110, 101, 100, 0, 0, 8, 0, 0, 0, 80, 111, 111, 108, 0, 2,
-0, 5, 0, 0, 0, 5, 112, 111, 105, 110, 116, 115, 0, 251,
-255, 255, 255, 0, 1, 109, 105, 110, 0, 251, 255, 255, 255,
-0, 2, 109, 97, 120, 0, 251, 255, 255, 255, 0, 3, 114, 97,
-116, 101, 0, 250, 255, 255, 255, 0, 4, 105, 110, 116, 101,
-114, 118, 97, 108, 0, 251, 255, 255, 255, 0, 5, 80, 111,
-111, 108, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 5,
-112, 111, 105, 110, 116, 115, 0, 250, 255, 255, 255, 0, 1,
-109, 105, 110, 0, 250, 255, 255, 255, 0, 2, 109, 97, 120,
-0, 250, 255, 255, 255, 0, 3, 114, 97, 116, 101, 0, 250,
-255, 255, 255, 0, 4, 105, 110, 116, 101, 114, 118, 97,
-108, 0, 250, 255, 255, 255, 0, 5, 1, 0, 0, 0, 82, 112, 99,
-0, 0, 4, 0, 0, 0, 115, 112, 97, 119, 110, 0, 0, 0, 17, 0,
-0, 0, 17, 0, 0, 0, 62, 226, 118, 138, 97, 99, 116, 0, 0,
-0, 13, 0, 0, 0, 13, 0, 0, 0, 48, 15, 87, 211, 116, 105,
-99, 107, 0, 0, 0, 14, 0, 0, 0, 15, 0, 0, 0, 202, 1, 167,
-146, 111, 98, 115, 101, 114, 118, 101, 0, 0, 1, 8, 0, 0,
-0, 8, 0, 0, 0, 214, 29, 17, 28
+121, 0, 247, 255, 255, 255, 0, 2, 67, 111, 110, 100, 105,
+116, 105, 111, 110, 0, 4, 0, 251, 255, 255, 255, 0, 4, 0,
+0, 0, 1, 80, 108, 97, 121, 101, 114, 78, 101, 97, 114, 0,
+0, 1, 0, 0, 0, 84, 97, 115, 107, 0, 4, 0, 251, 255, 255,
+255, 0, 4, 0, 0, 0, 1, 65, 116, 116, 97, 99, 107, 0, 0, 1,
+0, 0, 0, 69, 110, 116, 105, 116, 121, 0, 2, 0, 5, 0, 0, 0,
+15, 105, 100, 0, 245, 255, 255, 255, 0, 1, 115, 107, 0,
+245, 255, 255, 255, 0, 2, 116, 97, 103, 115, 0, 242, 255,
+255, 255, 0, 21, 0, 0, 0, 0, 3, 112, 97, 114, 101, 110,
+116, 0, 245, 255, 255, 255, 0, 4, 99, 104, 105, 108, 100,
+114, 101, 110, 0, 242, 255, 255, 255, 0, 245, 255, 255,
+255, 0, 5, 104, 101, 97, 108, 116, 104, 0, 22, 0, 0, 0, 0,
+6, 112, 111, 115, 105, 116, 105, 111, 110, 0, 16, 0, 0, 0,
+0, 7, 118, 101, 108, 111, 99, 105, 116, 121, 0, 16, 0, 0,
+0, 0, 8, 109, 97, 110, 97, 0, 22, 0, 0, 0, 0, 9, 115, 116,
+97, 109, 105, 110, 97, 0, 22, 0, 0, 0, 0, 10, 108, 101,
+118, 101, 108, 0, 251, 255, 255, 255, 0, 11, 120, 112, 0,
+251, 255, 255, 255, 0, 12, 102, 97, 99, 116, 105, 111,
+110, 0, 251, 255, 255, 255, 0, 13, 98, 114, 97, 105, 110,
+0, 28, 0, 0, 0, 0, 14, 98, 101, 104, 97, 118, 105, 111,
+114, 84, 114, 101, 101, 0, 26, 0, 0, 0, 0, 15, 83, 116,
+97, 116, 101, 0, 2, 0, 5, 0, 0, 0, 1, 110, 115, 0, 245,
+255, 255, 255, 0, 1, 84, 97, 103, 115, 0, 4, 0, 251, 255,
+255, 255, 0, 4, 0, 0, 0, 8, 72, 117, 109, 97, 110, 0, 0,
+1, 0, 0, 0, 80, 108, 97, 121, 101, 114, 67, 111, 110, 116,
+114, 111, 108, 108, 101, 100, 0, 0, 2, 0, 0, 0, 72, 111,
+115, 116, 105, 108, 101, 0, 0, 3, 0, 0, 0, 85, 110, 100,
+101, 97, 100, 0, 0, 4, 0, 0, 0, 70, 108, 121, 105, 110,
+103, 0, 0, 5, 0, 0, 0, 66, 111, 115, 115, 0, 0, 6, 0, 0,
+0, 73, 110, 118, 117, 108, 110, 101, 114, 97, 98, 108,
+101, 0, 0, 7, 0, 0, 0, 83, 116, 117, 110, 110, 101, 100,
+0, 0, 8, 0, 0, 0, 80, 111, 111, 108, 0, 2, 0, 5, 0, 0, 0,
+5, 112, 111, 105, 110, 116, 115, 0, 251, 255, 255, 255, 0,
+1, 109, 105, 110, 0, 251, 255, 255, 255, 0, 2, 109, 97,
+120, 0, 251, 255, 255, 255, 0, 3, 114, 97, 116, 101, 0,
+250, 255, 255, 255, 0, 4, 105, 110, 116, 101, 114, 118,
+97, 108, 0, 251, 255, 255, 255, 0, 5, 80, 111, 111, 108,
+68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 5, 112, 111,
+105, 110, 116, 115, 0, 250, 255, 255, 255, 0, 1, 109, 105,
+110, 0, 250, 255, 255, 255, 0, 2, 109, 97, 120, 0, 250,
+255, 255, 255, 0, 3, 114, 97, 116, 101, 0, 250, 255, 255,
+255, 0, 4, 105, 110, 116, 101, 114, 118, 97, 108, 0, 250,
+255, 255, 255, 0, 5, 66, 101, 104, 97, 118, 105, 111, 114,
+78, 111, 100, 101, 75, 105, 110, 100, 0, 4, 0, 251, 255,
+255, 255, 0, 4, 0, 0, 0, 8, 83, 101, 108, 101, 99, 116,
+111, 114, 0, 0, 1, 0, 0, 0, 83, 101, 113, 117, 101, 110,
+99, 101, 0, 0, 2, 0, 0, 0, 87, 101, 105, 103, 104, 116,
+101, 100, 0, 0, 3, 0, 0, 0, 67, 111, 110, 100, 105, 116,
+105, 111, 110, 0, 0, 4, 0, 0, 0, 84, 97, 115, 107, 0, 0,
+5, 0, 0, 0, 73, 110, 118, 101, 114, 116, 0, 0, 6, 0, 0, 0,
+67, 104, 97, 110, 99, 101, 0, 0, 7, 0, 0, 0, 67, 111, 111,
+108, 100, 111, 119, 110, 0, 0, 8, 0, 0, 0, 66, 101, 104,
+97, 118, 105, 111, 114, 78, 111, 100, 101, 0, 2, 0, 5, 0,
+0, 0, 5, 107, 105, 110, 100, 0, 24, 0, 0, 0, 0, 1, 99,
+104, 105, 108, 100, 114, 101, 110, 0, 242, 255, 255, 255,
+0, 253, 255, 255, 255, 0, 2, 119, 101, 105, 103, 104, 116,
+0, 251, 255, 255, 255, 0, 3, 108, 101, 97, 102, 0, 251,
+255, 255, 255, 0, 4, 97, 114, 103, 115, 0, 242, 255, 255,
+255, 0, 247, 255, 255, 255, 0, 5, 66, 101, 104, 97, 118,
+105, 111, 114, 84, 114, 101, 101, 0, 2, 0, 5, 0, 0, 0, 1,
+110, 111, 100, 101, 115, 0, 242, 255, 255, 255, 0, 25, 0,
+0, 0, 0, 1, 66, 101, 104, 97, 118, 105, 111, 114, 84, 114,
+101, 101, 68, 101, 108, 116, 97, 0, 2, 0, 5, 0, 0, 0, 1,
+110, 111, 100, 101, 115, 0, 242, 255, 255, 255, 0, 25, 0,
+0, 0, 0, 1, 66, 114, 97, 105, 110, 0, 2, 0, 5, 0, 0, 0, 3,
+116, 114, 101, 101, 0, 245, 255, 255, 255, 0, 1, 114, 101,
+97, 100, 121, 65, 116, 0, 242, 255, 255, 255, 0, 251, 255,
+255, 255, 0, 2, 108, 97, 115, 116, 0, 253, 255, 255, 255,
+0, 3, 66, 114, 97, 105, 110, 68, 101, 108, 116, 97, 0, 2,
+0, 5, 0, 0, 0, 3, 116, 114, 101, 101, 0, 245, 255, 255,
+255, 0, 1, 114, 101, 97, 100, 121, 65, 116, 0, 242, 255,
+255, 255, 0, 251, 255, 255, 255, 0, 2, 108, 97, 115, 116,
+0, 253, 255, 255, 255, 0, 3, 1, 0, 0, 0, 82, 112, 99, 0,
+0, 4, 0, 0, 0, 115, 112, 97, 119, 110, 0, 0, 0, 19, 0, 0,
+0, 19, 0, 0, 0, 62, 226, 118, 138, 97, 99, 116, 0, 0, 0,
+13, 0, 0, 0, 13, 0, 0, 0, 48, 15, 87, 211, 116, 105, 99,
+107, 0, 0, 0, 14, 0, 0, 0, 15, 0, 0, 0, 202, 1, 167, 146,
+111, 98, 115, 101, 114, 118, 101, 0, 0, 1, 8, 0, 0, 0, 8,
+0, 0, 0, 214, 29, 17, 28
 ]);
 
 export interface StringArrayDelta {
@@ -360,6 +399,10 @@ export interface EntityDelta {
   xp?: number;
 
   faction?: number;
+
+  brain?: BrainDelta;
+
+  behaviorTree?: BehaviorTreeDelta;
 }
 
 export const EntityDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
@@ -442,6 +485,14 @@ export const EntityDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assi
         view.writeByte(13);
         view.writeUint32(record.faction);
       }
+      if (record.brain !== undefined) {
+        view.writeByte(14);
+        BrainDelta.encodeInto(record.brain, view);
+      }
+      if (record.behaviorTree !== undefined) {
+        view.writeByte(15);
+        BehaviorTreeDelta.encodeInto(record.behaviorTree, view);
+      }
       view.writeByte(0);
       const end = view.length;
       view.fillMessageLength(pos, end - start);
@@ -521,6 +572,14 @@ export const EntityDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assi
 
           case 13:
             message.faction = view.readUint32();
+            break;
+
+          case 14:
+            message.brain = BrainDelta.readFrom(view);
+            break;
+
+          case 15:
+            message.behaviorTree = BehaviorTreeDelta.readFrom(view);
             break;
 
           default:
@@ -1521,6 +1580,18 @@ export const Vec2 = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
 ));
 
 
+export enum Condition {
+
+  PlayerNear = 1,
+}
+
+
+export enum Task {
+
+  Attack = 1,
+}
+
+
 export interface Entity {
 
   id?: string;
@@ -1548,6 +1619,10 @@ export interface Entity {
   xp?: number;
 
   faction?: number;
+
+  brain?: Brain;
+
+  behaviorTree?: BehaviorTree;
 }
 
 export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
@@ -1636,6 +1711,14 @@ export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
         view.writeByte(13);
         view.writeUint32(record.faction);
       }
+      if (record.brain !== undefined) {
+        view.writeByte(14);
+        Brain.encodeInto(record.brain, view);
+      }
+      if (record.behaviorTree !== undefined) {
+        view.writeByte(15);
+        BehaviorTree.encodeInto(record.behaviorTree, view);
+      }
       view.writeByte(0);
       const end = view.length;
       view.fillMessageLength(pos, end - start);
@@ -1723,6 +1806,14 @@ export const Entity = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
 
           case 13:
             message.faction = view.readUint32();
+            break;
+
+          case 14:
+            message.brain = Brain.readFrom(view);
+            break;
+
+          case 15:
+            message.behaviorTree = BehaviorTree.readFrom(view);
             break;
 
           default:
@@ -2021,6 +2112,520 @@ export const PoolDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign
 
           case 5:
             message.interval = view.readInt32();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
+export enum BehaviorNodeKind {
+
+  Selector = 1,
+
+  Sequence = 2,
+
+  Weighted = 3,
+
+  Condition = 4,
+
+  Task = 5,
+
+  Invert = 6,
+
+  Chance = 7,
+
+  Cooldown = 8,
+}
+
+
+export interface BehaviorNode {
+
+  kind?: BehaviorNodeKind;
+
+  children?: number[];
+
+  weight?: number;
+
+  leaf?: number;
+
+  args?: number[];
+}
+
+export const BehaviorNode = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: BehaviorNode): BehaviorNode & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return BehaviorNode.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: BehaviorNode): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      BehaviorNode.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: BehaviorNode, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.kind !== undefined) {
+        view.writeByte(1);
+        view.writeUint32(record.kind);
+      }
+      if (record.children !== undefined) {
+        view.writeByte(2);
+        {
+        const length0 = record.children.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeUint16(record.children[i0]);
+        }
+      }
+      }
+      if (record.weight !== undefined) {
+        view.writeByte(3);
+        view.writeUint32(record.weight);
+      }
+      if (record.leaf !== undefined) {
+        view.writeByte(4);
+        view.writeUint32(record.leaf);
+      }
+      if (record.args !== undefined) {
+        view.writeByte(5);
+        {
+        const length0 = record.args.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeFloat32(record.args[i0]);
+        }
+      }
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): BehaviorNode & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = BehaviorNode.readFrom(view);
+      return BehaviorNode(decoded);
+    },
+
+    readFrom(view: BebopView): BehaviorNode {
+      const message: BehaviorNode = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.kind = view.readUint32();
+            break;
+
+          case 2:
+            {
+          const length0 = view.readUint32();
+          message.children = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: number;
+            x0 = view.readUint16();
+            message.children[i0] = x0;
+          }
+        }
+            break;
+
+          case 3:
+            message.weight = view.readUint32();
+            break;
+
+          case 4:
+            message.leaf = view.readUint32();
+            break;
+
+          case 5:
+            {
+          const length0 = view.readUint32();
+          message.args = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: number;
+            x0 = view.readFloat32();
+            message.args[i0] = x0;
+          }
+        }
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
+export interface BehaviorTree {
+
+  nodes?: BehaviorNode[];
+}
+
+export const BehaviorTree = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: BehaviorTree): BehaviorTree & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return BehaviorTree.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: BehaviorTree): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      BehaviorTree.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: BehaviorTree, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.nodes !== undefined) {
+        view.writeByte(1);
+        {
+        const length0 = record.nodes.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          BehaviorNode.encodeInto(record.nodes[i0], view);
+        }
+      }
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): BehaviorTree & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = BehaviorTree.readFrom(view);
+      return BehaviorTree(decoded);
+    },
+
+    readFrom(view: BebopView): BehaviorTree {
+      const message: BehaviorTree = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            {
+          const length0 = view.readUint32();
+          message.nodes = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: BehaviorNode;
+            x0 = BehaviorNode.readFrom(view);
+            message.nodes[i0] = x0;
+          }
+        }
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
+export interface BehaviorTreeDelta {
+
+  nodes?: BehaviorNode[];
+}
+
+export const BehaviorTreeDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: BehaviorTreeDelta): BehaviorTreeDelta & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return BehaviorTreeDelta.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: BehaviorTreeDelta): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      BehaviorTreeDelta.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: BehaviorTreeDelta, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.nodes !== undefined) {
+        view.writeByte(1);
+        {
+        const length0 = record.nodes.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          BehaviorNode.encodeInto(record.nodes[i0], view);
+        }
+      }
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): BehaviorTreeDelta & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = BehaviorTreeDelta.readFrom(view);
+      return BehaviorTreeDelta(decoded);
+    },
+
+    readFrom(view: BebopView): BehaviorTreeDelta {
+      const message: BehaviorTreeDelta = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            {
+          const length0 = view.readUint32();
+          message.nodes = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: BehaviorNode;
+            x0 = BehaviorNode.readFrom(view);
+            message.nodes[i0] = x0;
+          }
+        }
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
+export interface Brain {
+
+  tree?: string;
+
+  readyAt?: number[];
+
+  last?: number;
+}
+
+export const Brain = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: Brain): Brain & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return Brain.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: Brain): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      Brain.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: Brain, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.tree !== undefined) {
+        view.writeByte(1);
+        view.writeString(record.tree);
+      }
+      if (record.readyAt !== undefined) {
+        view.writeByte(2);
+        {
+        const length0 = record.readyAt.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeUint32(record.readyAt[i0]);
+        }
+      }
+      }
+      if (record.last !== undefined) {
+        view.writeByte(3);
+        view.writeUint16(record.last);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): Brain & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = Brain.readFrom(view);
+      return Brain(decoded);
+    },
+
+    readFrom(view: BebopView): Brain {
+      const message: Brain = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.tree = view.readString();
+            break;
+
+          case 2:
+            {
+          const length0 = view.readUint32();
+          message.readyAt = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: number;
+            x0 = view.readUint32();
+            message.readyAt[i0] = x0;
+          }
+        }
+            break;
+
+          case 3:
+            message.last = view.readUint16();
+            break;
+
+          default:
+            view.index = end;
+            return message;
+        }
+      }
+    },
+  }
+));
+
+
+export interface BrainDelta {
+
+  tree?: string;
+
+  readyAt?: number[];
+
+  last?: number;
+}
+
+export const BrainDelta = /*#__PURE__*/ Object.freeze(/*#__PURE__*/ Object.assign(
+  // Factory function
+  (data: BrainDelta): BrainDelta & BebopRecord => {
+    return {
+      ...data,
+      encode(): Uint8Array {
+        return BrainDelta.encode(this);
+      }
+    };
+  },
+  // Static methods
+  {
+    encode(record: BrainDelta): Uint8Array {
+      const view = BebopView.getInstance();
+      view.startWriting();
+      BrainDelta.encodeInto(record, view);
+      return view.toArray();
+    },
+
+    encodeInto(record: BrainDelta, view: BebopView): void {
+      const pos = view.reserveMessageLength();
+      const start = view.length;
+      if (record.tree !== undefined) {
+        view.writeByte(1);
+        view.writeString(record.tree);
+      }
+      if (record.readyAt !== undefined) {
+        view.writeByte(2);
+        {
+        const length0 = record.readyAt.length;
+        view.writeUint32(length0);
+        for (let i0 = 0; i0 < length0; i0++) {
+          view.writeUint32(record.readyAt[i0]);
+        }
+      }
+      }
+      if (record.last !== undefined) {
+        view.writeByte(3);
+        view.writeUint16(record.last);
+      }
+      view.writeByte(0);
+      const end = view.length;
+      view.fillMessageLength(pos, end - start);
+    },
+
+    decode(buffer: Uint8Array): BrainDelta & BebopRecord {
+      const view = BebopView.getInstance();
+      view.startReading(buffer);
+      const decoded = BrainDelta.readFrom(view);
+      return BrainDelta(decoded);
+    },
+
+    readFrom(view: BebopView): BrainDelta {
+      const message: BrainDelta = {};
+      const length = view.readMessageLength();
+      const end = view.index + length;
+      while (true) {
+        switch (view.readByte()) {
+          case 0:
+            return message;
+
+          case 1:
+            message.tree = view.readString();
+            break;
+
+          case 2:
+            {
+          const length0 = view.readUint32();
+          message.readyAt = [];
+          for (let i0 = 0; i0 < length0; i0++) {
+            let x0: number;
+            x0 = view.readUint32();
+            message.readyAt[i0] = x0;
+          }
+        }
+            break;
+
+          case 3:
+            message.last = view.readUint16();
             break;
 
           default:

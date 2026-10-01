@@ -7,21 +7,21 @@ export type { BinarySchema };
 // WireBaseType values from bebop binary.ts. This is the canonical wire-level
 // scalar vocabulary; `emit-delta.ts` derives its SCALAR_TYPES set from these
 // names so the two modules can never silently drift (see the drift-guard test).
-export const WireBaseType: Record<number, string> = {
-  [-1]: "bool",
-  [-2]: "byte",
-  [-3]: "uint16",
-  [-4]: "int16",
-  [-5]: "uint32",
-  [-6]: "int32",
-  [-7]: "uint64",
-  [-8]: "int64",
-  [-9]: "float32",
-  [-10]: "float64",
-  [-11]: "string",
-  [-12]: "guid",
-  [-13]: "date",
-};
+export const WireBaseType: ReadonlyMap<number, string> = new Map([
+  [-1, "bool"],
+  [-2, "byte"],
+  [-3, "uint16"],
+  [-4, "int16"],
+  [-5, "uint32"],
+  [-6, "int32"],
+  [-7, "uint64"],
+  [-8, "int64"],
+  [-9, "float32"],
+  [-10, "float64"],
+  [-11, "string"],
+  [-12, "guid"],
+  [-13, "date"],
+]);
 
 /**
  * Scalar type names that only appear in *source* form (never as a distinct
@@ -69,12 +69,33 @@ export interface ParsedSchema {
 
 function resolveTypeName(typeId: number, schema: BinarySchema): string {
   if (typeId < 0) {
-    return WireBaseType[typeId] ?? `unknown(${typeId})`;
+    return WireBaseType.get(typeId) ?? `unknown(${typeId})`;
   }
   return schema.getDefinition(typeId).name;
 }
 
-function parseField(name: string, field: any, schema: BinarySchema): SchemaField {
+type WireDefinition = BinarySchema["ast"]["definitions"][string];
+
+type WireFieldProperties =
+  | { type: "scalar" }
+  | { type: "array"; memberTypeId: number; depth: number }
+  | { type: "map"; keyTypeId: number; valueTypeId: number };
+
+interface WireField {
+  typeId: number;
+  fieldProperties: WireFieldProperties;
+  constantValue: number | null;
+}
+
+interface WireUnionDefinition extends WireDefinition {
+  branches: { discriminator: number; typeId: number }[];
+}
+
+interface WireFieldedDefinition extends WireDefinition {
+  fields: Record<string, WireField>;
+}
+
+function parseField(name: string, field: WireField, schema: BinarySchema): SchemaField {
   const props = field.fieldProperties;
   const isArray = props.type === "array";
   const isMap = props.type === "map";
@@ -84,10 +105,10 @@ function parseField(name: string, field: any, schema: BinarySchema): SchemaField
   let keyTypeName: string | undefined;
   let valueTypeName: string | undefined;
 
-  if (isArray) {
+  if (props.type === "array") {
     typeName = "array";
     memberTypeName = resolveTypeName(props.memberTypeId, schema);
-  } else if (isMap) {
+  } else if (props.type === "map") {
     typeName = "map";
     keyTypeName = resolveTypeName(props.keyTypeId, schema);
     valueTypeName = resolveTypeName(props.valueTypeId, schema);
@@ -121,8 +142,10 @@ export function parseSchema(bebopSchemaBytes: Uint8Array): ParsedSchema {
     }
 
     if (def.kind === WireTypeKind.Union) {
-      const union = def as any;
-      const branches = (union.branches as any[]).map((b) => ({
+      // SAFETY: bebop's getUnionDefinition builds every Union-kind definition with a
+      // `branches` array of { discriminator, typeId }; its d.ts omits that field.
+      const union = def as WireUnionDefinition;
+      const branches = union.branches.map((b) => ({
         discriminator: b.discriminator,
         typeName: schema.getDefinition(b.typeId).name,
       }));
@@ -132,7 +155,9 @@ export function parseSchema(bebopSchemaBytes: Uint8Array): ParsedSchema {
 
     const kind = def.kind === WireTypeKind.Struct ? "struct" : "message";
     const fields: SchemaField[] = [];
-    const defWithFields = def as any;
+    // SAFETY: Enum and Union kinds were handled above, and bebop's getStructDefinition
+    // and getMessageDefinition attach a `fields` map of getField records to the rest.
+    const defWithFields = def as WireFieldedDefinition;
     if (defWithFields.fields) {
       for (const [fieldName, field] of Object.entries(defWithFields.fields)) {
         fields.push(parseField(fieldName, field, schema));

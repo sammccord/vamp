@@ -3,6 +3,7 @@ import { ConsoleLogger, TempoLogLevel } from "@tempojs/common";
 import { TempoWSChannel } from "@vampgg/utils/ws-channel";
 import { bench, boxplot, run, summary } from "mitata";
 import { afterAll, beforeAll, test } from "vitest";
+import { HOSTILE_TREE_ID } from "../src/systems";
 import {
   Actions,
   AreaAttack,
@@ -12,6 +13,7 @@ import {
   RpcClient,
   Tags,
   TickRequest,
+  type TickResult,
 } from "../src/bebop";
 
 /**
@@ -113,6 +115,7 @@ function makeStressEntity(i: number): Entity {
     level: 1 + (i % 10),
     xp: i % 100,
     faction: i % 4,
+    brain: i % 3 === 0 ? { tree: HOSTILE_TREE_ID } : undefined,
   });
 }
 
@@ -133,7 +136,7 @@ function observeAs(client: RpcClient, viewerId: string): Promise<ObserveStream> 
     MutationScope({
       mutations: new Map([[viewerId, { tag: 1, value: { entity: Entity({ id: viewerId }) } }]]),
     }),
-  ) as Promise<ObserveStream>;
+  );
 }
 
 /** A minimal combat-capable entity (health + stamina) used as a cascade leaf. */
@@ -163,6 +166,7 @@ async function buildCascade(client: RpcClient, k: number): Promise<string> {
   const batch: Promise<unknown>[] = [];
   for (let j = 0; j < k; j++) {
     const child = makeLeaf();
+    // SAFETY: makeLeaf always sets id: crypto.randomUUID(), so child.id is a string.
     childIds.push(child.id as string);
     batch.push(client.spawn(child));
   }
@@ -175,6 +179,7 @@ async function buildCascade(client: RpcClient, k: number): Promise<string> {
     stamina: { points: 1_000_000, min: 0, max: 1_000_000, rate: 0, interval: 0 },
   });
   await client.spawn(parent);
+  // SAFETY: parent is built above with id: crypto.randomUUID(), so parent.id is a string.
   return parent.id as string;
 }
 
@@ -262,7 +267,7 @@ async function waitStable(obs: ObserverState[], quietMs: number, timeoutMs: numb
  */
 async function measureDelivery(
   obs: ObserverState[],
-  op: () => Promise<unknown>,
+  op: () => Promise<Actions | TickResult>,
   k: number,
 ): Promise<{ opsPerSec: number; msgsPerSec: number; delivered: number }> {
   const baseline = obs.map((o) => o.n);
@@ -305,6 +310,7 @@ beforeAll(async () => {
   // A world for single-target behavior dispatch (act -> Attack).
   leafClient = createClient(`bench-act-leaf-${crypto.randomUUID().slice(0, 8)}`);
   const leaf = makeLeaf();
+  // SAFETY: makeLeaf always sets id: crypto.randomUUID(), so leaf.id is a string.
   leafTargetId = leaf.id as string;
   await leafClient.spawn(leaf);
   await leafClient.tick(TickRequest({ steps: 1, dtMs: 16 }));
@@ -447,6 +453,7 @@ test("full-stack FPS stress benchmark", async () => {
     const actor = createClient(ns);
     await populate(actor, FANOUT_WORLD);
     const target = makeLeaf();
+    // SAFETY: makeLeaf always sets id: crypto.randomUUID(), so target.id is a string.
     const targetId = target.id as string;
     await actor.spawn(target);
     await actor.tick(TickRequest({ steps: 1, dtMs: 16 }));
@@ -506,10 +513,12 @@ test("full-stack FPS stress benchmark", async () => {
     const zoneTargets: string[] = [];
     for (const [cx, cy] of ZONES) {
       const viewer = makeEntityAt(cx, cy);
+      // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so viewer.id is a string.
       viewerIds.push(viewer.id as string);
       await actor.spawn(viewer);
       for (let k = 0; k < 16; k++) await actor.spawn(makeEntityAt(cx + (k % 9), cy + (k % 7)));
       const target = makeEntityAt(cx, cy);
+      // SAFETY: makeEntityAt always sets id: crypto.randomUUID(), so target.id is a string.
       zoneTargets.push(target.id as string);
       await actor.spawn(target);
     }

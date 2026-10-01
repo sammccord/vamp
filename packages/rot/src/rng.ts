@@ -112,6 +112,8 @@ export class RNG {
     let result = [];
     let clone = array.slice();
     while (clone.length) {
+      // SAFETY: `clone` is non-empty (the `while (clone.length)` guard), so
+      // `getItem` returns an element rather than its `null` empty-array case.
       let index = clone.indexOf(this.getItem(clone) as T);
       result.push(clone.splice(index, 1)[0]);
     }

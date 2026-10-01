@@ -161,6 +161,8 @@ export default class StringGenerator {
       available = data;
     }
 
+    // SAFETY: `available` is an `Events` object whose `for...in` keys are
+    // strings; `getWeightedValue` returns one of those keys, never a non-string.
     return RNG.getWeightedValue(available) as string;
   }
 

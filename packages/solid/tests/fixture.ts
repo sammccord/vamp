@@ -44,9 +44,10 @@ export function accumulateDelta(from: TestDelta, to: TestDelta): TestDelta {
 
 export function options(): ECSOptions<TestEntity, TestDelta> {
   let n = 0;
+  const componentIds: Record<Exclude<keyof TestEntity, "tags">, number> = components;
   return {
     createId: () => `gen${n++}`,
-    components: components as unknown as Record<Exclude<keyof TestEntity, "tags">, number>,
+    components: componentIds,
     materializeDelta,
     mergeDelta,
     accumulateDelta,

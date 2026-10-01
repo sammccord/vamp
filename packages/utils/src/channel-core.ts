@@ -45,7 +45,7 @@ export abstract class CoreChannel extends BaseChannel {
    * Reject callbacks for in-flight unary / client-stream calls, keyed by
    * messageId. Lets close()/error() settle parked requests instead of hanging.
    */
-  public readonly pending = new Map<string, (e: unknown) => void>();
+  public readonly pending = new Map<string, (cause: unknown) => void>();
   protected closed = false;
   /** The reason a closed channel settles calls that arrive after teardown. */
   protected closeReason?: TempoError;
@@ -67,7 +67,7 @@ export abstract class CoreChannel extends BaseChannel {
    * synchronous (worker / WebSocket) or asynchronous (extension runtime); the
    * call sites await or attach rejection handlers as each RPC shape requires.
    */
-  protected abstract sendFrame(message: Message): void | Promise<unknown>;
+  protected abstract sendFrame(message: Message): void | Promise<void>;
 
   /** Generates the unique id for an outgoing request envelope. */
   protected generateMessageId(): string {
@@ -501,20 +501,20 @@ export abstract class CoreChannel extends BaseChannel {
    * Runs the shared error-hook + error-mapping tail of every `start*` method.
    * Always throws.
    */
-  private async raiseCallError(context: ClientContext, e: unknown): Promise<never> {
-    if (this.hooks !== undefined && e instanceof Error) {
-      await this.hooks.executeErrorHooks(context, e);
+  private async raiseCallError(context: ClientContext, cause: unknown): Promise<never> {
+    if (this.hooks !== undefined && cause instanceof Error) {
+      await this.hooks.executeErrorHooks(context, cause);
     }
-    if (e instanceof TempoError) {
-      throw e;
+    if (cause instanceof TempoError) {
+      throw cause;
     }
-    if (e instanceof Error) {
-      if (e.name === "AbortError") {
-        throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", e);
+    if (cause instanceof Error) {
+      if (cause.name === "AbortError") {
+        throw new TempoError(TempoStatusCode.ABORTED, "RPC fetch aborted", cause);
       }
-      throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", e);
+      throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", cause);
     }
-    throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", { data: e });
+    throw new TempoError(TempoStatusCode.UNKNOWN, "an unknown error occurred", { data: cause });
   }
 
   /**
@@ -658,6 +658,9 @@ export abstract class CoreChannel extends BaseChannel {
         // Otherwise, just execute the request indefinitely
         response = this.fetchServerStream(requestInit, context, method, options);
       }
+      // SAFETY: fetchServerStream's generator emits only method.deserialize(...)
+      // results, and method is this call's MethodInfo<TRequest,TResponse>, whose
+      // deserialize returns TResponse, so each yielded value is a TResponse.
       return response as AsyncGenerator<TResponse, void, undefined>;
     } catch (e) {
       return await this.raiseCallError(context, e);
@@ -691,6 +694,10 @@ export abstract class CoreChannel extends BaseChannel {
         // Otherwise, just execute the request indefinitely
         response = this.fetchDuplexStream(requestInit, context, method, generator, options);
       }
+      // SAFETY: fetchDuplexStream's incoming generator emits only
+      // method.deserialize(...) results, and method is this call's
+      // MethodInfo<TRequest,TResponse>, whose deserialize returns TResponse, so
+      // each yielded value is a TResponse.
       return response as AsyncGenerator<TResponse, void, undefined>;
     } catch (e) {
       return await this.raiseCallError(context, e);

@@ -19,7 +19,7 @@ export class TempoWorkerChannel extends CoreChannel {
   private _open = false;
   private _ready: Promise<void>;
   private _resolveReady?: () => void;
-  private _rejectReady?: (e: unknown) => void;
+  private _rejectReady?: (cause: unknown) => void;
 
   public get worker() {
     return this._worker;
@@ -52,6 +52,10 @@ export class TempoWorkerChannel extends CoreChannel {
     // Avoid an unhandled rejection if `ready` is never awaited but the worker dies.
     this._ready.catch(() => {});
 
+    // SAFETY: this channel runs on Bun, whose runtime replaces the global
+    // `Worker` constructor with its own Bun.Worker implementation. lib.dom's
+    // `Worker` type is only the type-level shadow of that global, so
+    // `new Worker(url)` yields a Bun.Worker at runtime.
     const worker = (this._worker = new Worker(url) as Bun.Worker);
     //@ts-expect-error
     worker.addEventListener("message", (ev: MessageEvent<Uint8Array>) => {

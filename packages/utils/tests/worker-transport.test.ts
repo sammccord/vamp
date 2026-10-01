@@ -27,10 +27,14 @@ const decode = (b: Uint8Array): Message => Message.decode(b);
 
 class EchoRegistry extends ServiceRegistry {
   init(): void {
-    (this as unknown as { methods: Map<number, unknown> }).methods.set(ECHO_METHOD_ID, {
+    // SAFETY: `methods` is the base ServiceRegistry's own `protected readonly
+    // methods: Map<number, BebopMethodAny>`; widening only the value type lets
+    // the test register a literal that omits `stringify`/`fromJSON`, which the
+    // router never calls (RouterCore uses only deserialize/invoke/serialize/type).
+    (this.methods as Map<number, unknown>).set(ECHO_METHOD_ID, {
       name: "echo",
       service: "Test",
-      invoke: async (record: unknown) => record, // unary echo
+      invoke: async (record: Message) => record, // unary echo
       serialize: encode,
       deserialize: decode,
       type: MethodType.Unary,
@@ -38,7 +42,7 @@ class EchoRegistry extends ServiceRegistry {
   }
   // biome-ignore lint/suspicious/noExplicitAny: base getMethod returns BebopMethodAny
   getMethod(id: number): any {
-    return (this as unknown as { methods: Map<number, unknown> }).methods.get(id);
+    return this.methods.get(id);
   }
 }
 
@@ -48,6 +52,10 @@ const logger = new ConsoleLogger("worker-transport-test");
 
 // Typed as `any` records: `Message` (the transport envelope) doubles as the test
 // request/response record, but its declared type isn't a `BebopRecord`.
+// SAFETY: BaseChannel.startUnary reads only method.id/serialize/deserialize/type
+// (channel-core.ts); this literal supplies all four. The omitted
+// stringify/fromJSON serve the JSON wire path, which this binary transport test
+// never exercises.
 // biome-ignore lint/suspicious/noExplicitAny: test record stands in for a BebopRecord
 const echoMethodInfo: MethodInfo<any, any> = {
   name: "echo",
@@ -60,7 +68,14 @@ const echoMethodInfo: MethodInfo<any, any> = {
 
 // --- Fake Worker: the channel constructs `new Worker(url)`; we capture it and
 //     bridge its `postMessage` (client -> server) into `router.process`.
-type Listener = (ev: unknown) => void;
+// The only event field any consumer reads is `data` on "message" events
+// (worker-channel.ts decodes ev.data as a Uint8Array frame); "open"/"close"
+// event objects are logged opaquely, so absent `data` is their whole contract.
+interface FakeWorkerEvent {
+  data?: Uint8Array;
+}
+
+type Listener = (ev: FakeWorkerEvent) => void;
 
 let activeWorker: FakeWorker | undefined;
 // Set per-test: where a frame the channel sends should be delivered.
@@ -84,7 +99,7 @@ class FakeWorker {
     onClientSend(new Uint8Array(frame));
   }
   terminate() {}
-  dispatch(type: string, ev: unknown) {
+  dispatch(type: string, ev: FakeWorkerEvent) {
     for (const cb of this.listeners[type] ?? []) cb(ev);
   }
 }

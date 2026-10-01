@@ -1,17 +1,48 @@
 import type { ParsedSchema, SchemaDefinition, SchemaField } from "./parse-bop";
 import { isScalar } from "./emit-delta";
 
-function hasDeltaDef(field: SchemaField, schema: ParsedSchema): boolean {
-  return schema.definitions.has(`${field.typeName}Delta`);
+/**
+ * How a custom component's `<Type>Delta` merges, named by the `@vampgg/ecs`
+ * helpers that implement it. `numeric` helpers take `Record<string, number>`.
+ */
+interface DeltaStrategy {
+  apply: string;
+  accumulate: string;
+  numeric: boolean;
+}
+
+const COUNTER: DeltaStrategy = {
+  apply: "applyPoolDelta",
+  accumulate: "accumulatePoolDelta",
+  numeric: true,
+};
+const REPLACE: DeltaStrategy = {
+  apply: "applyReplaceDelta",
+  accumulate: "accumulateReplaceDelta",
+  numeric: false,
+};
+
+/**
+ * Delta strategy per component type. Counters add fields together, so types
+ * whose values must not be summed (behavior trees, brains) replace instead.
+ * Unlisted types with a `<Type>Delta` default to {@link COUNTER}.
+ */
+const DELTA_STRATEGIES: ReadonlyMap<string, DeltaStrategy> = new Map([
+  ["Pool", COUNTER],
+  ["BehaviorTree", REPLACE],
+  ["Brain", REPLACE],
+]);
+
+/** The delta strategy for a non-array custom field with a `<Type>Delta`, else undefined. */
+function deltaStrategy(field: SchemaField, schema: ParsedSchema): DeltaStrategy | undefined {
+  if (field.isArray || isScalar(field.typeName)) return undefined;
+  if (!schema.definitions.has(`${field.typeName}Delta`)) return undefined;
+  return DELTA_STRATEGIES.get(field.typeName) ?? COUNTER;
 }
 
 /** True when the entity has at least one array field (so the shared array applier is needed). */
 function needsArrayHelper(entity: SchemaDefinition): boolean {
   return entity.fields.some((f) => f.isArray);
-}
-
-function needsPoolHelper(entity: SchemaDefinition, schema: ParsedSchema): boolean {
-  return entity.fields.some((f) => !f.isArray && !isScalar(f.typeName) && hasDeltaDef(f, schema));
 }
 
 /** Type-correct default literal for a component sub-field (used by materializeDelta). */
@@ -28,16 +59,18 @@ function defaultForField(bf: SchemaField): string {
 
 /**
  * Import of the canonical delta-algebra appliers from `@vampgg/ecs`, narrowed to
- * exactly the helpers this entity's fields use. The set/add/remove (array) and
- * additive (pool) semantics live in `@vampgg/ecs` so `materializeDelta`,
+ * exactly the helpers this entity's fields use. The set/add/remove (array),
+ * additive (pool) and replace semantics live in `@vampgg/ecs` so `materializeDelta`,
  * `mergeDelta`, and `accumulateDelta` cannot drift; the generated code only
- * dispatches per field. Returns "" when the entity has neither array nor pool
+ * dispatches per field. Returns "" when the entity has no array or delta-typed
  * fields (so no unused import is emitted).
  */
 export function emitHelperImports(entity: SchemaDefinition, schema: ParsedSchema): string {
   const names: string[] = [];
   if (needsArrayHelper(entity)) names.push("applyArrayDelta", "accumulateArrayDelta");
-  if (needsPoolHelper(entity, schema)) names.push("applyPoolDelta", "accumulatePoolDelta");
+  for (const strategy of new Set(entity.fields.map((f) => deltaStrategy(f, schema)))) {
+    if (strategy) names.push(strategy.apply, strategy.accumulate);
+  }
   if (names.length === 0) return "";
   return `import { ${names.join(", ")} } from "@vampgg/ecs";`;
 }
@@ -61,12 +94,16 @@ function emitMaterializeDelta(entity: SchemaDefinition, schema: ParsedSchema): s
       // Honor set/add/remove (matches mergeDelta) via the shared applier.
       return `    ${f.name}: applyArrayDelta(base?.${f.name} ?? [], delta.${f.name})`;
     }
-    if (!isScalar(f.typeName) && hasDeltaDef(f, schema)) {
+    const strategy = deltaStrategy(f, schema);
+    if (strategy) {
       const baseMsg = schema.definitions.get(f.typeName);
       const defaultFields = baseMsg
         ? baseMsg.fields.map((bf) => `${bf.name}: ${defaultForField(bf)}`).join(", ")
         : "";
-      return `    ${f.name}: delta.${f.name} ? applyPoolDelta(base?.${f.name} ?? { ${defaultFields} }, delta.${f.name} as Record<string, number>) : base?.${f.name} ?? { ${defaultFields} }`;
+      const deltaExpr = strategy.numeric
+        ? `delta.${f.name} as Record<string, number>`
+        : `delta.${f.name}`;
+      return `    ${f.name}: delta.${f.name} ? ${strategy.apply}(base?.${f.name} ?? { ${defaultFields} }, ${deltaExpr}) : base?.${f.name} ?? { ${defaultFields} }`;
     }
     if (isScalar(f.typeName)) {
       const defaultVal = f.typeName === "string" || f.typeName === "guid" ? "''" : "0";
@@ -94,8 +131,12 @@ function emitMergeDelta(entity: SchemaDefinition, schema: ParsedSchema): string 
     if (f.isArray) {
       return `  if (delta.${f.name}) entity.${f.name} = applyArrayDelta(entity.${f.name} ?? [], delta.${f.name});`;
     }
-    if (!isScalar(f.typeName) && hasDeltaDef(f, schema)) {
-      return `  if (delta.${f.name}) entity.${f.name} = applyPoolDelta((entity.${f.name} ?? {}) as Record<string, number>, delta.${f.name} as Record<string, number>) as Entity[${JSON.stringify(f.name)}];`;
+    const strategy = deltaStrategy(f, schema);
+    if (strategy?.numeric) {
+      return `  if (delta.${f.name}) entity.${f.name} = ${strategy.apply}((entity.${f.name} ?? {}) as Record<string, number>, delta.${f.name} as Record<string, number>) as Entity[${JSON.stringify(f.name)}];`;
+    }
+    if (strategy) {
+      return `  if (delta.${f.name}) entity.${f.name} = ${strategy.apply}(entity.${f.name} ?? {}, delta.${f.name});`;
     }
     if (isScalar(f.typeName)) {
       return `  if (delta.${f.name} !== undefined) entity.${f.name} = delta.${f.name};`;
@@ -120,8 +161,12 @@ function emitAccumulateDelta(entity: SchemaDefinition, schema: ParsedSchema): st
     if (f.isArray) {
       return `  if (from.${f.name}) to.${f.name} = accumulateArrayDelta(to.${f.name}, from.${f.name});`;
     }
-    if (!isScalar(f.typeName) && hasDeltaDef(f, schema)) {
-      return `  if (from.${f.name}) to.${f.name} = accumulatePoolDelta(to.${f.name} as Record<string, number> | undefined, from.${f.name} as Record<string, number>) as EntityDelta[${JSON.stringify(f.name)}];`;
+    const strategy = deltaStrategy(f, schema);
+    if (strategy?.numeric) {
+      return `  if (from.${f.name}) to.${f.name} = ${strategy.accumulate}(to.${f.name} as Record<string, number> | undefined, from.${f.name} as Record<string, number>) as EntityDelta[${JSON.stringify(f.name)}];`;
+    }
+    if (strategy) {
+      return `  if (from.${f.name}) to.${f.name} = ${strategy.accumulate}(to.${f.name}, from.${f.name});`;
     }
     if (isScalar(f.typeName)) {
       return `  if (from.${f.name} !== undefined) to.${f.name} = from.${f.name};`;

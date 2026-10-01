@@ -42,6 +42,8 @@ export default class Lighting {
 
   constructor(reflectivityCallback: ReflectivityCallback, options: Partial<Options> = {}) {
     this._reflectivityCallback = reflectivityCallback;
+    // SAFETY: the empty object is a transient placeholder; `setOptions(options)`
+    // below `Object.assign`s the fully defaulted options into it before any read.
     this._options = {} as Options;
     options = Object.assign(
       {
@@ -86,10 +88,7 @@ export default class Lighting {
     let key = y * STRIDE + x;
 
     if (color) {
-      this._lights.set(
-        key,
-        typeof color == "string" ? (Color.fromString(color) as LightColor) : color,
-      );
+      this._lights.set(key, Array.isArray(color) ? color : Color.fromString(color));
     } else {
       this._lights.delete(key);
     }

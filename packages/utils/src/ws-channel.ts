@@ -145,7 +145,7 @@ export class TempoWSChannel extends CoreChannel {
     if (!address) {
       throw new Error("no address");
     }
-    if (typeof address === "string") {
+    if (!(address instanceof URL)) {
       address = new URL(address);
     }
     options ??= {};
@@ -183,8 +183,8 @@ export class TempoWSChannel extends CoreChannel {
       // Bound the inbound frame BEFORE decoding so an oversized/hostile frame is
       // never allocated into a Message. The corresponding call surfaces the
       // failure via its deadline or the channel close() reject-all path.
-      const byteLength =
-        typeof ev.data === "string" ? ev.data.length : (ev.data as ArrayBuffer).byteLength;
+      const data: string | ArrayBuffer = ev.data;
+      const byteLength = data instanceof ArrayBuffer ? data.byteLength : data.length;
       if (byteLength > this.maxReceiveMessageSize) {
         this.logger.error(
           `inbound frame ${byteLength}B exceeds maxReceiveMessageSize ${this.maxReceiveMessageSize}B; dropping`,
@@ -192,11 +192,10 @@ export class TempoWSChannel extends CoreChannel {
         return;
       }
       let message: Message;
-      if (typeof ev.data === "string") message = Message(JSON.parse(ev.data));
-      else {
+      if (data instanceof ArrayBuffer) {
         // this is a hack to fix decoding
-        message = Message(Message.decode(new Uint8Array(ev.data)));
-      }
+        message = Message(Message.decode(new Uint8Array(data)));
+      } else message = Message(JSON.parse(data));
       const messageId = message.messageId;
       this.events.emit(messageId!, message);
       this.logger.trace(`received new message ${messageId}`);
@@ -273,12 +272,12 @@ export class TempoWSChannel extends CoreChannel {
               };
               const onError = (ws: Websocket, event: Event) => {
                 teardown();
-                // `ErrorEvent` is a DOM global and is NOT defined in Node (the
-                // test/server runtime), so `event instanceof ErrorEvent` throws
-                // a ReferenceError that escapes as an uncaught exception. Duck-type
-                // the `message` field instead, falling back to the event `type`.
-                const message = (event as Event & { message?: unknown }).message;
-                const detail = typeof message === "string" ? message : event.type;
+                // SAFETY: `ErrorEvent` is a DOM global and is NOT defined in Node (the
+                // test/server runtime), so `event instanceof ErrorEvent` throws a
+                // ReferenceError. Read the optional `message` field instead: error
+                // events (DOM and undici `ErrorEvent`) carry it as a string and plain
+                // Events lack it, so the fallback to the event `type` covers the rest.
+                const detail = (event as Event & { message?: string }).message ?? event.type;
                 reject(
                   new TempoError(
                     TempoStatusCode.UNAVAILABLE,
@@ -297,6 +296,9 @@ export class TempoWSChannel extends CoreChannel {
         );
         return;
       } catch (err) {
+        // SAFETY: the raced promises (onError/onClose reject with new TempoError, the
+        // Deadline rejects with new TempoError(DEADLINE_EXCEEDED)) settle with
+        // TempoError — an Error subclass — so the caught value is an Error.
         lastError = err as Error;
         if (
           attempt < maxAttempts - 1 &&
