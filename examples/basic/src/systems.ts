@@ -10,6 +10,7 @@ import {
 } from "@vampgg/ecs";
 import { Actions, Attack, Condition, type Entity, Tags, Task } from "./bebop";
 import {
+  ActionTag,
   components,
   createGameArchetypeSystem,
   createGameBehavior,
@@ -212,17 +213,12 @@ function hostileLeaves<Context extends AIContext>(): HostileLeaves<Context> {
  * archetype, here: anything with a health pool).
  */
 function registerBehaviors<Context extends AIContext>(ecs: World<Context>): void {
-  // tag 1 — Attack: subtract damage from the struck entity's health.
+  // Attack: subtract damage from the struck entity's health.
   ecs.registerBehavior(
-    createGameBehavior<Context, []>(
-      1,
+    createGameBehavior(
+      ActionTag.Attack,
       (world, entity, event) => {
-        // SAFETY: ECS.act dispatches through the behavior cache keyed by the
-        // action's tag, so this tag-1 handler only receives `Actions` members
-        // `{ tag: 1, value: Attack }`; the generated Attack record declares
-        // `damage?: number`, and wire-decoded actions preserve the tag/value
-        // pairing (Actions.readFrom).
-        const damage = (event.detail.value as { damage?: number }).damage ?? 0;
+        const damage = event.detail.value.damage ?? 0;
         if (!entity.id || damage === 0) return;
         world.put(entity.id, { health: { points: -damage } });
       },
@@ -230,18 +226,13 @@ function registerBehaviors<Context extends AIContext>(ecs: World<Context>): void
     ),
   );
 
-  // tag 2 — TakeDamage: same effect, modelled as a separate event so it can be
+  // TakeDamage: same effect, modelled as a separate event so it can be
   // dispatched independently of an attacker.
   ecs.registerBehavior(
-    createGameBehavior<Context, []>(
-      2,
+    createGameBehavior(
+      ActionTag.TakeDamage,
       (world, entity, event) => {
-        // SAFETY: ECS.act dispatches through the behavior cache keyed by the
-        // action's tag, so this tag-2 handler only receives `Actions` members
-        // `{ tag: 2, value: TakeDamage }`; the generated TakeDamage record
-        // declares `damage?: number`, and wire-decoded actions preserve the
-        // tag/value pairing (Actions.readFrom).
-        const damage = (event.detail.value as { damage?: number }).damage ?? 0;
+        const damage = event.detail.value.damage ?? 0;
         if (!entity.id || damage === 0) return;
         world.put(entity.id, { health: { points: -damage } });
       },
@@ -249,17 +240,12 @@ function registerBehaviors<Context extends AIContext>(ecs: World<Context>): void
     ),
   );
 
-  // tag 3 — Heal: add to the entity's health pool.
+  // Heal: add to the entity's health pool.
   ecs.registerBehavior(
-    createGameBehavior<Context, []>(
-      3,
+    createGameBehavior(
+      ActionTag.Heal,
       (world, entity, event) => {
-        // SAFETY: ECS.act dispatches through the behavior cache keyed by the
-        // action's tag, so this tag-3 handler only receives `Actions` members
-        // `{ tag: 3, value: Heal }`; the generated Heal record declares
-        // `amount?: number`, and wire-decoded actions preserve the tag/value
-        // pairing (Actions.readFrom).
-        const amount = (event.detail.value as { amount?: number }).amount ?? 0;
+        const amount = event.detail.value.amount ?? 0;
         if (!entity.id || amount === 0) return;
         world.put(entity.id, { health: { points: amount } });
       },
@@ -267,18 +253,13 @@ function registerBehaviors<Context extends AIContext>(ecs: World<Context>): void
     ),
   );
 
-  // tag 4 — AreaAttack: damage the entity and (via act's child propagation) every
+  // AreaAttack: damage the entity and (via act's child propagation) every
   // descendant. Drains stamina too, so a single cascade touches two pools.
   ecs.registerBehavior(
-    createGameBehavior<Context, []>(
-      4,
+    createGameBehavior(
+      ActionTag.AreaAttack,
       (world, entity, event) => {
-        // SAFETY: ECS.act dispatches through the behavior cache keyed by the
-        // action's tag, so this tag-4 handler only receives `Actions` members
-        // `{ tag: 4, value: AreaAttack }`; the generated AreaAttack record
-        // declares `damage?: number`, and wire-decoded actions preserve the
-        // tag/value pairing (Actions.readFrom).
-        const damage = (event.detail.value as { damage?: number }).damage ?? 0;
+        const damage = event.detail.value.damage ?? 0;
         if (!entity.id || damage === 0) return;
         const delta: EntityDelta = { health: { points: -damage } };
         if (entity.stamina) delta.stamina = { points: -1 };

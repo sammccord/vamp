@@ -69,14 +69,16 @@ export type ArchetypeSystem<State, UpdateArguments extends unknown[], Actions, T
   query: Query;
   execute(archetypes: Set<unknown>, world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, ...args: UpdateArguments): void;
 };
-export type Behavior<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown> = {
+export type Behavior<State, UpdateArguments extends unknown[], Actions extends { tag: number }, Tags extends number = number, E = unknown, D = unknown> = {
   type: 4;
   query: Query;
   tag: number;
-  handler: (world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, entity: E, event: unknown) => void | Promise<void>;
+  handler: (world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, entity: E, event: { detail: Actions }) => void | Promise<void>;
   priority: number | undefined;
 };
-export type System<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown> =
+export type BehaviorHandler<State, UpdateArguments extends unknown[], Actions extends { tag: number }, Tags extends number = number, E = unknown, D = unknown, Tag extends Actions["tag"] = Actions["tag"]> =
+  (world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, entity: E, event: { detail: Extract<Actions, { tag: Tag }> }) => void | Promise<void>;
+export type System<State, UpdateArguments extends unknown[], Actions extends { tag: number }, Tags extends number = number, E = unknown, D = unknown> =
   | EntitySystem<State, UpdateArguments, Actions, Tags, E, D>
   | ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>
   | Behavior<State, UpdateArguments, Actions, Tags, E, D>;
@@ -88,9 +90,9 @@ export function createArchetypeSystem<State, UpdateArguments extends unknown[], 
   execute: (archetypes: Set<unknown>, world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, ...args: UpdateArguments) => ReturnArguments,
   query: Query | ((b: QueryBuilder) => QueryBuilder),
 ): ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>;
-export function createBehavior<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown>(
-  tag: number,
-  handler: Behavior<State, UpdateArguments, Actions, Tags, E, D>["handler"],
+export function createBehavior<State, UpdateArguments extends unknown[], Actions extends { tag: number }, Tags extends number = number, E = unknown, D = unknown, Tag extends Actions["tag"] = Actions["tag"]>(
+  tag: Tag,
+  handler: BehaviorHandler<State, UpdateArguments, Actions, Tags, E, D, Tag>,
   query: Query | ((b: QueryBuilder) => QueryBuilder),
   priority?: number,
 ): Behavior<State, UpdateArguments, Actions, Tags, E, D>;
@@ -229,6 +231,7 @@ message PoolDelta {
     join(schemaDir, "actions.bop"),
     `union Actions {
   1 -> message Noop { 1 -> guid who; }
+  2 -> message Mend { 1 -> uint32 amount; }
 }`,
     "utf-8",
   );
@@ -417,6 +420,43 @@ createGameBehaviorTreeSystem({
     );
     expect(core).toContain('brain: "brain",');
     expect(core).toContain("query: (q) => q.every(components.brain),");
+  });
+
+  it("narrows createGameBehavior handlers to the Actions branch for an ActionTag", () => {
+    const entity = `import "./pool.bop"
+import "./tags.bop"
+
+message Entity {
+  1 -> guid id;
+  2 -> guid sk;
+  3 -> Tags[] tags;
+  4 -> Pool health;
+}
+`;
+    const usage = `import { ActionTag, createGameBehavior, type GameBehavior } from "./game.core.generated.js";
+
+export const mend: GameBehavior = createGameBehavior(
+  ActionTag.Mend,
+  (_world, _entity, event) => {
+    const amount: number | undefined = event.detail.value.amount;
+    void amount;
+  },
+  (q) => q,
+);
+export const wrongBranch: GameBehavior = createGameBehavior(
+  ActionTag.Mend,
+  (_world, _entity, event) => {
+    // @ts-expect-error Mend has no \`who\`
+    void event.detail.value.who;
+  },
+  (q) => q,
+);
+// @ts-expect-error 9 is not an Actions tag
+export const unknownTag: GameBehavior = createGameBehavior(9, () => {}, (q) => q);
+`;
+    const { paths } = roundtrip({ entity, src: { "usage.ts": usage } });
+    const core = readFileSync(paths.core, "utf-8");
+    expect(core).toContain("export const ActionTag = {\n  Noop: 1,\n  Mend: 2,\n} as const;");
   });
 
   it("throws before emitting when a custom component delta cannot be resolved (Case D)", () => {
