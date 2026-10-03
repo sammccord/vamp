@@ -1,5 +1,12 @@
 # @vampgg/ecs
 
+## 1.0.0-beta.5
+
+### Minor Changes
+
+- 1d169c2: Add behavior trees. `@vampgg/utils/schema/behavior.bop` defines `BehaviorTree` and `Brain` entity components. `@vampgg/ecs` adds a pure `evaluate`, a tree builder, and `createBehaviorTreeSystem`, which runs each agent's tree per update and dispatches the chosen actions through `act`. `ECS.waitUntil` keeps a `withScope` open until those dispatches settle, so their mutations commit in the tick's batch. Codegen now chooses a component's delta merge from a per-type table: `BehaviorTree` and `Brain` replace fields instead of summing them, via the new `applyReplaceDelta`/`accumulateReplaceDelta`. When `Entity` has both fields, codegen emits `createGameBehaviorTreeSystem`, which requires a leaf for every `Condition` and `Task` enum member. `vamp init` imports `behavior.bop` in the entity template.
+- 307db8a: Behavior handlers are now typed for the action tag they handle. `createBehavior` takes `tag` as a literal `Tag` type parameter (constrained to `Actions["tag"]` instead of `number`) and types the handler's `event.detail` as `Extract<Actions, { tag: Tag }>`, so handlers no longer cast the payload. The new `BehaviorHandler` type is exported from `@vampgg/ecs`. Codegen emits an `ActionTag` const map from each `Actions` branch name to its discriminator, and `createGameBehavior(ActionTag.Heal, handler, ...)` infers `Tag` and narrows the handler the same way.
+
 ## 1.0.0-beta.4
 
 ### Patch Changes

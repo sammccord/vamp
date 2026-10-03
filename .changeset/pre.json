@@ -12,6 +12,7 @@
   },
   "changesets": [
     "audit-perf-billing-pass",
+    "behavior-trees",
     "beta-1-release",
     "beta-2-provenance",
     "cli-configurable-env",
@@ -23,6 +24,8 @@
     "ecs-act-self-heal-behavior-cache",
     "extension-router-tabless-reply-and-listener",
     "solid-2-migration",
+    "typed-behavior-handlers",
+    "vec-builtins",
     "worker-shard-load-and-bulk-read",
     "worker-storage-write-methods"
   ]

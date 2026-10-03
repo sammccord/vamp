@@ -1,5 +1,13 @@
 # @vampgg/solid
 
+## 1.0.0-beta.6
+
+### Patch Changes
+
+- Updated dependencies [1d169c2]
+- Updated dependencies [307db8a]
+  - @vampgg/ecs@1.0.0-beta.5
+
 ## 1.0.0-beta.5
 
 ### Major Changes
