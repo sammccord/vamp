@@ -20,13 +20,19 @@ name: release
 # Publish happens BEFORE the git push so a failed npm publish leaves main
 # untouched and the changesets intact — a re-run republishes cleanly.
 #
-# Requires an `NPM_TOKEN` repo secret (npm automation token with publish rights
-# to the @vampgg scope). npm provenance is attached via OIDC (`id-token: write` +
-# NPM_CONFIG_PROVENANCE) — this needs a PUBLIC source repo, which this repo is;
-# if it is ever made private again, npm rejects provenance with E422
-# ("Unsupported ... visibility: private"), so drop both to publish. Pushing the
-# bump commit uses the default GITHUB_TOKEN, so main must allow the actions bot
-# to push.
+# Publishing uses npm trusted publishing (OIDC): `id-token: write` lets npm
+# exchange the job's GitHub identity for a short-lived publish credential and
+# attach a provenance attestation, so no long-lived token can expire mid-release.
+# Each @vampgg package needs a trusted publisher on npmjs.com (package settings,
+# "Trusted Publisher", GitHub Actions, sammccord/vamp, workflow `release.yml`).
+# OIDC requires npm >= 11.5.1 and a PUBLIC source repo; if the repo is ever made
+# private, npm rejects provenance with E422.
+#
+# OIDC only covers `npm publish`. The dist-tag sync still authenticates with the
+# `NPM_TOKEN` repo secret (granular token with read-write on @vampgg). Granular
+# tokens expire after at most 90 days; when one lapses only that step fails, after
+# the release is already published and pushed. Pushing the bump commit uses the
+# default GITHUB_TOKEN, so main must allow the actions bot to push.
 
 on:
   push:
@@ -37,7 +43,7 @@ concurrency: release-${{ github.ref }}
 
 permissions:
   contents: write # push the version-bump commit + tags, create GitHub Releases
-  id-token: write # npm provenance (public repo)
+  id-token: write # npm trusted publishing (OIDC) + provenance
 
 jobs:
   release:
@@ -55,6 +61,11 @@ jobs:
           node-version: 22 # engines.node >= 22.12.0
           cache: pnpm
           registry-url: https://registry.npmjs.org
+
+      # `changeset publish` runs `pnpm publish`, which hands off to the npm on
+      # PATH. Node 22 bundles npm 10, which predates trusted publishing.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -117,15 +128,12 @@ jobs:
       #    tee's (always 0), so a failed `changeset publish` (e.g. npm rejects
       #    the write with E404/E403 because the token can't publish the @vampgg
       #    scope) is masked and the job goes green having published nothing.
-      #    Provenance is enabled (public repo — see header note).
+      #    Auth and provenance both come from OIDC (see header note).
       - name: Publish to npm
         if: steps.cs.outputs.count != '0'
         run: |
           set -o pipefail
           pnpm changeset publish | tee publish.log
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
 
       # d. Persist the bump commit + tags to main now that npm succeeded.
       - name: Push commit + tags
