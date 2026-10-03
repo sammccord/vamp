@@ -68,6 +68,19 @@ as counters.
 node keeps its per-child weights in `args`. `leaf` is the app's `Condition` or
 `Task` enum value.
 
+### Vectors (`schema/vec.bop`)
+
+Spatial entity components. Import the file from your `entity.bop` (as `vamp init`
+does), then add `Vec2` or `Vec3` fields to `Entity`. `vamp generate` merges their
+deltas as counters, so a delta of `{ x: 0.5 }` adds `0.5` to `x`.
+
+| Type        | Fields        | Role                                 |
+| ----------- | ------------- | ------------------------------------ |
+| `Vec2`      | `x`, `y`      | A 2D vector, such as a position      |
+| `Vec2Delta` | `x`, `y`      | Signed `float32` offsets onto a Vec2 |
+| `Vec3`      | `x`, `y`, `z` | A 3D vector                          |
+| `Vec3Delta` | `x`, `y`, `z` | Signed `float32` offsets onto a Vec3 |
+
 ---
 
 ## Subpath Exports

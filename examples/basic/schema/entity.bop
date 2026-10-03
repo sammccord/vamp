@@ -1,14 +1,7 @@
 import "../node_modules/@vampgg/utils/schema/pool.bop"
 import "../node_modules/@vampgg/utils/schema/behavior.bop"
+import "../node_modules/@vampgg/utils/schema/vec.bop"
 import "./tags.bop"
-
-// A 2D vector component. Numeric-only, so `vamp generate` synthesizes a
-// `Vec2Delta` (signed CRDT counters) automatically. Used for position/velocity
-// so the movement system can integrate position += velocity each frame.
-message Vec2 {
-	1 -> float32 x;
-	2 -> float32 y;
-}
 
 // Leaf ids a BehaviorTree can reference. Codegen keys `GameConditions` and
 // `GameTasks` by these, so every member must have an implementation.

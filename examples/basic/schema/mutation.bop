@@ -9,11 +9,6 @@ message StringArrayDelta {
   3 -> string[] remove;
 }
 
-message Vec2Delta {
-  1 -> int32 x;
-  2 -> int32 y;
-}
-
 message EntityDelta {
   1 -> string id;
   2 -> string sk;

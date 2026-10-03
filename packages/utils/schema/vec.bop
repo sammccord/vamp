@@ -1,0 +1,24 @@
+// Vector built-ins for positions, velocities, and other spatial components.
+message Vec2 {
+  1 -> float32 x;
+  2 -> float32 y;
+}
+
+// Vec2 delta - every field is a float CRDT counter (+/-)
+message Vec2Delta {
+  1 -> float32 x;
+  2 -> float32 y;
+}
+
+message Vec3 {
+  1 -> float32 x;
+  2 -> float32 y;
+  3 -> float32 z;
+}
+
+// Vec3 delta - every field is a float CRDT counter (+/-)
+message Vec3Delta {
+  1 -> float32 x;
+  2 -> float32 y;
+  3 -> float32 z;
+}

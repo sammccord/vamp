@@ -1,5 +1,5 @@
 /** `@vampgg/utils/schema` files the entity template imports. */
-export const UTILS_SCHEMA_FILES = ["pool.bop", "behavior.bop"] as const;
+export const UTILS_SCHEMA_FILES = ["pool.bop", "behavior.bop", "vec.bop"] as const;
 export type UtilsSchemaFile = (typeof UTILS_SCHEMA_FILES)[number];
 
 /**
@@ -15,6 +15,7 @@ export const utilsSchemaFallback = (file: UtilsSchemaFile): string =>
 
 export const entityTemplate = `import "${utilsSchemaPlaceholder("pool.bop")}"
 import "${utilsSchemaPlaceholder("behavior.bop")}"
+import "${utilsSchemaPlaceholder("vec.bop")}"
 import "./tags.bop"
 
 message Entity {

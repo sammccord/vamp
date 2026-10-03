@@ -29,6 +29,8 @@ const REPLACE: DeltaStrategy = {
  */
 const DELTA_STRATEGIES: ReadonlyMap<string, DeltaStrategy> = new Map([
   ["Pool", COUNTER],
+  ["Vec2", COUNTER],
+  ["Vec3", COUNTER],
   ["BehaviorTree", REPLACE],
   ["Brain", REPLACE],
 ]);

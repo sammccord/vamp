@@ -17,7 +17,7 @@ pnpm add -D @vampgg/cli bebop-tools
 ### `vamp init [--cwd <dir>]`
 
 Scaffolds a new game's schema: creates `schema/` with template `.bop` files
-(`entity.bop`, which imports `@vampgg/utils`' `pool.bop` and `behavior.bop`,
+(`entity.bop`, which imports `@vampgg/utils`' `pool.bop`, `behavior.bop`, and `vec.bop`,
 `actions.bop`, `state.bop`, `tags.bop`) plus `bebop.json` (the
 `bebopc` config) and `vamp.json` (the codegen config). Existing files are left
 untouched, so it's safe to re-run.

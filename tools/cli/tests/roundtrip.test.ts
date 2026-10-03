@@ -169,6 +169,8 @@ export function createInterestBroadcast<W, Req, Yield = never, E = unknown, D = 
 
 const BEHAVIOR_BOP = resolve(TOOLS_CLI, "../../packages/utils/schema/behavior.bop");
 
+const VEC_BOP = resolve(TOOLS_CLI, "../../packages/utils/schema/vec.bop");
+
 const BEHAVIOR_ENTITY = `import "./pool.bop"
 import "./behavior.bop"
 import "./tags.bop"
@@ -226,6 +228,7 @@ message PoolDelta {
     "utf-8",
   );
   cpSync(BEHAVIOR_BOP, join(schemaDir, "behavior.bop"));
+  cpSync(VEC_BOP, join(schemaDir, "vec.bop"));
   writeFileSync(join(schemaDir, "tags.bop"), `enum Tags { Human = 1; Hostile = 2; }`, "utf-8");
   writeFileSync(
     join(schemaDir, "actions.bop"),
@@ -388,6 +391,30 @@ message Entity {
       "to.behaviorTree = accumulateReplaceDelta(to.behaviorTree, from.behaviorTree);",
     );
     expect(core).toContain("entity.health = applyPoolDelta(");
+  });
+
+  it("reuses the float32 Vec2/Vec3 deltas from vec.bop and merges them as counters", () => {
+    const entity = `import "./pool.bop"
+import "./vec.bop"
+import "./tags.bop"
+
+message Entity {
+  1 -> guid id;
+  2 -> guid sk;
+  3 -> Tags[] tags;
+  4 -> Vec2 position;
+  5 -> Vec3 heading;
+}
+`;
+    const { dir, paths } = roundtrip({ entity });
+    const mutation = readFileSync(join(dir, "schema", "mutation.bop"), "utf-8");
+    expect(mutation).not.toContain("message Vec2Delta");
+    expect(mutation).not.toContain("message Vec3Delta");
+    expect(mutation).toContain("4 -> Vec2Delta position;");
+    expect(mutation).toContain("5 -> Vec3Delta heading;");
+    const core = readFileSync(paths.core, "utf-8");
+    expect(core).toContain("entity.position = applyPoolDelta(");
+    expect(core).toContain("entity.heading = applyPoolDelta(");
   });
 
   it("types createGameBehaviorTreeSystem leaves against the Condition/Task enums", () => {
