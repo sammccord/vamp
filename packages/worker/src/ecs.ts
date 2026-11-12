@@ -1614,15 +1614,14 @@ export class ECSDurableObject<
 
   /**
    * Single per-connection teardown path, called from both `webSocketClose` and
-   * `webSocketError`. Drives the router's in-flight client/duplex streams to
-   * completion (so each iterator's cleanup runs and the router reaps its
-   * per-connection bookkeeping), invokes the app-level connection-close hook
+   * `webSocketError`. Cancels this socket's in-flight router streams (without
+   * waiting on them, and without touching other sockets' streams), invokes the app-level connection-close hook
    * (e.g. to unsubscribe observer sinks), and drops the session. Idempotent:
    * a socket may receive both `error` and `close`.
    */
   private async _teardownConnection(ws: WebSocket): Promise<void> {
     try {
-      await this.router?.closeConnection();
+      this.router?.closeConnection(ws);
     } catch (err) {
       this.log.error("Error tearing down connection streams", {}, toError(err));
     }
