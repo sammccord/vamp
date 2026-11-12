@@ -133,6 +133,27 @@ describe("behaviors", () => {
 });
 
 describe("registration", () => {
+  it("registerBehavior returns an unsubscribe that stops the behavior", async () => {
+    const { world } = createWorld();
+    world.insert({ id: "a", hp: 1 });
+    let runs = 0;
+    const off = world.registerBehavior(
+      createBehavior<{}, [], Action, number, Entity, Delta>(1, () => void runs++, withHp),
+    );
+    await world.act("a", { tag: 1, value: undefined });
+    off();
+    off();
+    await world.act("a", { tag: 1, value: undefined });
+    expect(runs).toBe(1);
+    expect(world.behaviors.has(1)).toBe(false);
+  });
+
+  it("exports its error classes", async () => {
+    const { EntityNotExistError } = await import("../src/index.ts");
+    const { world } = createWorld();
+    expect(() => world.deleteEntity("nope")).toThrow(EntityNotExistError);
+  });
+
   it("a second unsubscribe is a no-op", () => {
     const { world } = createWorld();
     const a = createEntitySystem<{}, [], Action, number, Entity, Delta>(() => {}, withHp);

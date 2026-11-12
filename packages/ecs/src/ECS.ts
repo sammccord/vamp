@@ -983,9 +983,9 @@ export class ECS<
    * Register an event-driven {@link Behavior}, keyed by its action tag and run by
    * {@link act}. Use the `createBehavior` helper to build one. Registering after
    * {@link initialize} invalidates the behavior caches so the new behavior is
-   * picked up by already-seen archetypes.
+   * picked up by already-seen archetypes. Returns an unsubscribe function.
    */
-  registerBehavior(behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>): void {
+  registerBehavior(behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>): () => void {
     this._claimQuery(behavior.query);
     if (!this.behaviors.has(behavior.tag)) {
       this.behaviors.set(behavior.tag, []);
@@ -1007,6 +1007,20 @@ export class ECS<
       // is picked up by act()/actWithBubbling without a manual rebuild call.
       // registerBehavior is a setup/feature-load operation, not a per-frame one,
       // so the O(entities) rebuild here is acceptable.
+      this.archetypeBehaviorCache.clear();
+      this.rebuildAllBehaviorCaches();
+    }
+    return () => this._unregisterBehavior(behavior);
+  }
+
+  private _unregisterBehavior(
+    behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>,
+  ): void {
+    const list = this.behaviors.get(behavior.tag);
+    if (!list || list.indexOf(behavior) === -1) return;
+    removeItem(list, behavior);
+    if (list.length === 0) this.behaviors.delete(behavior.tag);
+    if (this.initialized) {
       this.archetypeBehaviorCache.clear();
       this.rebuildAllBehaviorCaches();
     }

@@ -122,9 +122,13 @@ export interface ECSRuntimeConfiguration<
   Entity extends BaseEntity<Tags> = BaseEntity<Tags>,
   EntityDelta = unknown,
 > {
-  // Custom logger to use with tempo rpc.
+  // Logger for the durable object and its tempo rpc router. Defaults to a pino
+  // logger named "ecs".
   logger?: ContextLogger;
-  // The yjs document to connect to, defaults to 'global'.
+  /**
+   * @deprecated Has no effect. Entities are sharded by their `sk` root (see
+   * `loadShard`), not by a named document.
+   */
   document?: string;
   // This lobby DO's OWN namespace binding name (e.g. "GAME_ECS"). Required for
   // live cross-lobby sync: a shard provider RPCs `onShardUpdate` back on this
@@ -610,6 +614,7 @@ export class ECSDurableObject<
     if (this.ecs) return;
 
     this._namespace = namespace;
+    if (configuration.logger) this._log = configuration.logger;
     // The lobby's own shard. Locally-spawned entities default their `root` here;
     // the lobby owns + writes it, and also subscribes to participants' shards.
     this._defaultRoot = `game/${this._namespace}`;

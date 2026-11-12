@@ -1,6 +1,12 @@
 export type { Archetype } from "./Archetype";
 export { clonePlainValue } from "./clone";
 export {
+  EntityDeletedError,
+  EntityNotExistError,
+  EntityUndefinedError,
+  WorldNotInitializedError,
+} from "./Errors";
+export {
   accumulateArrayDelta,
   accumulatePoolDelta,
   accumulateReplaceDelta,
