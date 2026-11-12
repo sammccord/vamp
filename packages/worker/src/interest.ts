@@ -173,8 +173,20 @@ export function createInterestBroadcast<
    * `ArrayBuffer` because the (Cloudflare) WebSocket accepts `ArrayBuffer | string`,
    * not an `ArrayBufferView`.
    */
+  // A batch delivered to many observers is the same object (see
+  // ECS.routeMutations), so its payload is encoded once and reused.
+  const encodedBatches = new WeakMap<MutationBatch<E, D>, Uint8Array>();
+  function encode(batch: MutationBatch<E, D>): Uint8Array {
+    let data = encodedBatches.get(batch);
+    if (data === undefined) {
+      data = config.encodeBatch(batch);
+      encodedBatches.set(batch, data);
+    }
+    return data;
+  }
+
   function frame(methodId: number, messageId: string, batch: MutationBatch<E, D>): ArrayBuffer {
-    const bytes = encodeServerStreamFrame({ methodId, messageId, data: config.encodeBatch(batch) });
+    const bytes = encodeServerStreamFrame({ methodId, messageId, data: encode(batch) });
     // SAFETY: `encodeServerStreamFrame` returns `new Uint8Array(Message.encode(...))`,
     // a freshly-allocated, exact-size `Uint8Array`, so `bytes.buffer` is a plain
     // (non-shared) `ArrayBuffer`.

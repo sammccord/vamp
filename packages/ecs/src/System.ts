@@ -181,8 +181,10 @@ export function createArchetypeSystem<
 
 /**
  * An event system runs reactively (via {@link ECS.subscribe}) whenever an entity
- * matching `query` changes, rather than every update cycle. The executor receives
- * the matching entity ids.
+ * matching `query` changes, rather than every update cycle. The executor
+ * receives the ids that changed, including an entity that was just deleted
+ * (reading it then returns `undefined`). `subscribe(system, true)` also runs it
+ * once over every current match.
  * @param execute
  * @param query
  * @returns

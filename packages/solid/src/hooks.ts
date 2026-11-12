@@ -24,6 +24,10 @@ export function useConnection(): Accessor<ConnectionStatus> {
  * `input`. The returned array changes identity only when membership changes; each
  * entity is a reactive store node, so `<For each={items()}>{(e) => <span>{e.x}</span>}</For>`
  * re-renders rows on membership change and updates fields in place on value change.
+ *
+ * Hoist `input` to module scope (a `Query` or a builder function) when several
+ * components use the same query: they then share one tracked membership set,
+ * and each batch re-tests it once instead of once per component.
  */
 export function createQuery<E extends BaseEntity = BaseEntity>(input: QueryInput): Accessor<E[]> {
   const game = useGame<E, unknown>();

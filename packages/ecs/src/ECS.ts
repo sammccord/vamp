@@ -243,13 +243,20 @@ export class ECS<
     const observers = this._observers;
     if (observers.size === 0 || mutations.size === 0) return;
     for (const observer of observers) {
-      let batch: MutationBatch<E, D> | undefined;
+      const interested: string[] = [];
       for (const [id, mutation] of mutations) {
-        if (observer.interested(id, mutation, this)) {
-          (batch ??= new Map()).set(id, mutation);
-        }
+        if (observer.interested(id, mutation, this)) interested.push(id);
       }
-      if (batch !== undefined) observer.deliver(batch);
+      if (interested.length === 0) continue;
+      // An observer that wants everything gets the batch itself, so observers
+      // can share work keyed on it (e.g. encode once per commit, not per socket).
+      if (interested.length === mutations.size) {
+        observer.deliver(mutations);
+        continue;
+      }
+      const batch: MutationBatch<E, D> = new Map();
+      for (const id of interested) batch.set(id, mutations.get(id)!);
+      observer.deliver(batch);
     }
   }
 
@@ -730,39 +737,25 @@ export class ECS<
     queryOwners.set(query, this);
   }
 
-  private _executeEventSystems(archetype: Archetype) {
+  /**
+   * Notify every event system whose query matches `archetype` that `entity`
+   * changed. Each system receives only the changed id, so a change costs
+   * O(subscribers), not O(matching entities).
+   */
+  private _executeEventSystems(archetype: Archetype, entity: string) {
     const systems = this.subscriptions;
     for (let s = 0, sl = systems.length; s < sl; s++) {
       const system = systems[s];
-      if (system.query.archetypes.has(archetype)) this._executeEventSystem(system);
+      // A fresh array per call: execute() may re-enter this path synchronously.
+      if (system.query.archetypes.has(archetype)) system.execute([entity]);
     }
   }
 
+  /** Run `sys` once over every entity it currently matches. */
   private _executeEventSystem(sys: EventSystem) {
-    const archetypes = sys.query.archetypes;
-
-    // Pre-calculate total entity count
-    let totalEntities = 0;
-    for (const arch of archetypes) {
-      totalEntities += arch.entities.size;
-    }
-
-    // Fresh, non-escaping array. The result is consumed synchronously inside
-    // sys.execute() and never handed to a query() caller. We deliberately do NOT
-    // reuse a scratch buffer here (unlike the per-entity systems in update()):
-    // an event system's execute() can synchronously re-fire the SAME event
-    // system (e.g. by mutating an entity), and a reused buffer would be clobbered
-    // mid-iteration. A fresh array keeps this path re-entrancy-safe while still
-    // honoring the no-escape invariant from proposal 07.
-    const entities = new Array<string>(totalEntities);
-    let entityIndex = 0;
-
-    // Direct iteration over Set is faster than spreading
-    for (const arch of archetypes) {
-      for (const entity of arch.entities) {
-        entities[entityIndex++] = entity;
-      }
-    }
+    const entities: string[] = [];
+    for (const arch of sys.query.archetypes)
+      for (const entity of arch.entities) entities.push(entity);
     sys.execute(entities);
   }
 
@@ -1342,7 +1335,7 @@ export class ECS<
     this.entityArchetype.set(entity, archetype);
 
     if (executeSystems) {
-      this._executeEventSystems(archetype);
+      this._executeEventSystems(archetype, entity);
       this._handleCreate(entity);
     }
     return entity;
@@ -1381,7 +1374,7 @@ export class ECS<
       // Set iterates in insertion order; drop the oldest id.
       this.deletedEntities.delete(this.deletedEntities.values().next().value!);
     }
-    this._executeEventSystems(archetype);
+    this._executeEventSystems(archetype, entity);
     this._handleDelete(entity, archetype);
   }
 
@@ -1415,7 +1408,7 @@ export class ECS<
     // of the update cycle, matching addComponent/removeComponent) so
     // act()/actWithBubbling don't run the OLD archetype's stale behavior set.
     this._deferredCacheRebuilds.add(entity);
-    this._executeEventSystems(archetype);
+    this._executeEventSystems(archetype, entity);
   }
 
   /**
@@ -1455,7 +1448,7 @@ export class ECS<
       const next = this._transformEntityForComponent(archetype, entity, component);
       // Defer cache rebuilding to batch multiple component changes
       this._deferredCacheRebuilds.add(entity);
-      if (executeSystems) this._executeEventSystems(next);
+      if (executeSystems) this._executeEventSystems(next, entity);
     }
   }
 
@@ -1481,7 +1474,7 @@ export class ECS<
       const next = this._transformEntityForComponent(archetype, entity, component);
       // Defer cache rebuilding to batch multiple component changes
       this._deferredCacheRebuilds.add(entity);
-      if (executeSystems) this._executeEventSystems(next);
+      if (executeSystems) this._executeEventSystems(next, entity);
     }
   }
 
@@ -1516,7 +1509,7 @@ export class ECS<
 
     const next = this._transformEntityForTag(archetype, entity, tag);
     this._deferredCacheRebuilds.add(entity);
-    if (executeSystems) this._executeEventSystems(next);
+    if (executeSystems) this._executeEventSystems(next, entity);
   }
 
   /**
@@ -1530,13 +1523,13 @@ export class ECS<
 
     const next = this._transformEntityForTag(archetype, entity, tag);
     this._deferredCacheRebuilds.add(entity);
-    if (executeSystems) this._executeEventSystems(next);
+    if (executeSystems) this._executeEventSystems(next, entity);
   }
 
   executeEventSystems(id: string) {
     this._assertEntity(id);
     const archetype = this.entityArchetype.get(id);
-    if (archetype) this._executeEventSystems(archetype);
+    if (archetype) this._executeEventSystems(archetype, id);
   }
 
   public parent(id: string, childId: string): Pick<E, "id" | "children"> | undefined {

@@ -3,8 +3,10 @@ import {
   createBaseMutator,
   createBehavior,
   createEntitySystem,
+  createEventSystem,
   ECS,
   type ECSOptions,
+  type MutationBatch,
   query,
   type QueryBuilder,
 } from "../src/index.ts";
@@ -220,5 +222,46 @@ describe("update()", () => {
     world.insert({ id: "a", hp: 1 });
     world.update();
     expect(visits.get("a")).toBe(1);
+  });
+});
+
+describe("cost of reactive paths", () => {
+  it("event systems receive only the ids that changed", () => {
+    const { world } = createWorld();
+    let handed = 0;
+    world.subscribe(createEventSystem((ids: string[]) => void (handed += ids.length), withHp));
+    for (let i = 0; i < 1000; i++) world.insert({ id: `e${i}`, hp: 1 });
+    expect(handed).toBe(1000);
+  });
+
+  it("subscribe(system, true) still emits every current match once", () => {
+    const { world } = createWorld();
+    world.insert({ id: "a", hp: 1 });
+    world.insert({ id: "b", hp: 1 });
+    const seen: string[][] = [];
+    world.subscribe(
+      createEventSystem((ids: string[]) => void seen.push([...ids]), withHp),
+      true,
+    );
+    expect(seen.map((ids) => ids.sort((x, y) => x.localeCompare(y)))).toEqual([["a", "b"]]);
+  });
+
+  it("an observer interested in a whole batch receives the batch itself", async () => {
+    const { world } = createWorld();
+    const delivered: MutationBatch<Entity, Delta>[] = [];
+    world.observeMutations({
+      interested: () => true,
+      deliver: (b: MutationBatch<Entity, Delta>) => void delivered.push(b),
+    });
+    world.observeMutations({
+      interested: () => true,
+      deliver: (b: MutationBatch<Entity, Delta>) => void delivered.push(b),
+    });
+    const { mutations } = await world.withScope(() => {
+      world.insert({ id: "a", hp: 1 });
+      world.insert({ id: "b", hp: 1 });
+    });
+    expect(delivered).toEqual([mutations, mutations]);
+    expect(delivered[0]).toBe(mutations);
   });
 });
