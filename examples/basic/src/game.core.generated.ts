@@ -36,26 +36,27 @@ export type EntityDelta = {
 };
 
 /**
- * Build a full {@link Entity} from a {@link EntityDelta} and optional `base`,
- * honoring array set/add/remove and additive pool semantics.
+ * Build an {@link Entity} from a {@link EntityDelta} and optional `base`,
+ * honoring array set/add/remove and additive pool semantics. Fields absent from
+ * both stay `undefined`, so the entity carries only the components it was given.
  */
 export function materializeDelta(delta: EntityDelta, base?: Partial<Entity>): Entity {
   return {
-    id: delta.id ?? base?.id ?? '',
-    sk: delta.sk ?? base?.sk ?? '',
-    tags: delta.tags ?? base?.tags ?? [],
-    parent: delta.parent ?? base?.parent ?? '',
-    children: applyArrayDelta(base?.children ?? [], delta.children),
-    health: delta.health ? applyPoolDelta(base?.health ?? { points: 0, min: 0, max: 0, rate: 0, interval: 0 }, delta.health as Record<string, number>) : base?.health ?? { points: 0, min: 0, max: 0, rate: 0, interval: 0 },
-    position: delta.position ? applyPoolDelta(base?.position ?? { x: 0, y: 0 }, delta.position as Record<string, number>) : base?.position ?? { x: 0, y: 0 },
-    velocity: delta.velocity ? applyPoolDelta(base?.velocity ?? { x: 0, y: 0 }, delta.velocity as Record<string, number>) : base?.velocity ?? { x: 0, y: 0 },
-    mana: delta.mana ? applyPoolDelta(base?.mana ?? { points: 0, min: 0, max: 0, rate: 0, interval: 0 }, delta.mana as Record<string, number>) : base?.mana ?? { points: 0, min: 0, max: 0, rate: 0, interval: 0 },
-    stamina: delta.stamina ? applyPoolDelta(base?.stamina ?? { points: 0, min: 0, max: 0, rate: 0, interval: 0 }, delta.stamina as Record<string, number>) : base?.stamina ?? { points: 0, min: 0, max: 0, rate: 0, interval: 0 },
-    level: delta.level ?? base?.level ?? 0,
-    xp: delta.xp ?? base?.xp ?? 0,
-    faction: delta.faction ?? base?.faction ?? 0,
-    brain: delta.brain ? applyReplaceDelta(base?.brain ?? { tree: '', readyAt: [], last: 0, fingerprint: 0 }, delta.brain) : base?.brain ?? { tree: '', readyAt: [], last: 0, fingerprint: 0 },
-    behaviorTree: delta.behaviorTree ? applyReplaceDelta(base?.behaviorTree ?? { nodes: [] }, delta.behaviorTree) : base?.behaviorTree ?? { nodes: [] },
+    id: delta.id ?? base?.id,
+    sk: delta.sk ?? base?.sk,
+    tags: delta.tags ?? base?.tags,
+    parent: delta.parent ?? base?.parent,
+    children: delta.children || base?.children ? applyArrayDelta(base?.children ?? [], delta.children) : undefined,
+    health: delta.health ? applyPoolDelta(base?.health ?? { points: 0, min: 0, max: 0, rate: 0, interval: 0 }, delta.health as Record<string, number>) : base?.health,
+    position: delta.position ? applyPoolDelta(base?.position ?? { x: 0, y: 0 }, delta.position as Record<string, number>) : base?.position,
+    velocity: delta.velocity ? applyPoolDelta(base?.velocity ?? { x: 0, y: 0 }, delta.velocity as Record<string, number>) : base?.velocity,
+    mana: delta.mana ? applyPoolDelta(base?.mana ?? { points: 0, min: 0, max: 0, rate: 0, interval: 0 }, delta.mana as Record<string, number>) : base?.mana,
+    stamina: delta.stamina ? applyPoolDelta(base?.stamina ?? { points: 0, min: 0, max: 0, rate: 0, interval: 0 }, delta.stamina as Record<string, number>) : base?.stamina,
+    level: delta.level ?? base?.level,
+    xp: delta.xp ?? base?.xp,
+    faction: delta.faction ?? base?.faction,
+    brain: delta.brain ? applyReplaceDelta(base?.brain ?? { tree: '', readyAt: [], last: 0, fingerprint: 0 }, delta.brain) : base?.brain,
+    behaviorTree: delta.behaviorTree ? applyReplaceDelta(base?.behaviorTree ?? { nodes: [] }, delta.behaviorTree) : base?.behaviorTree,
   } as Entity;
 }
 

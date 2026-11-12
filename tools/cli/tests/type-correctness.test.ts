@@ -59,7 +59,7 @@ describe("emitDelta with a float64 field (Case A)", () => {
     expect(out).not.toContain("mass?: bigint;");
   });
 
-  it("materializeDelta defaults the float64 field to 0", () => {
+  it("materializeDelta leaves an absent float64 field undefined", () => {
     const { entity, schema } = schemaFixture([
       {
         name: "mass",
@@ -71,7 +71,7 @@ describe("emitDelta with a float64 field (Case A)", () => {
       },
     ]);
     const out = emitHelpers(entity, schema);
-    expect(out).toContain("mass: delta.mass ?? base?.mass ?? 0");
+    expect(out).toContain("mass: delta.mass ?? base?.mass,");
   });
 });
 

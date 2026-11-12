@@ -465,7 +465,8 @@ export class ECS<
    * so observers never see a torn read.
    */
   public insert(entity: E): E {
-    const id = this.createEntity(undefined, entity.id, false);
+    // An empty id (e.g. a materialized delta's default) means "generate one".
+    const id = this.createEntity(undefined, entity.id || undefined, false);
     // Work on a copy when we had to generate an id, so we never mutate the
     // caller's object. The caller gets the id via the returned `committed`.
     const committed: E = entity.id ? entity : { ...entity, id };
@@ -498,8 +499,11 @@ export class ECS<
   public put(id: string | undefined, delta: D, mutating = false): E {
     if (!id) return this.insert(this.options.materializeDelta(delta));
     const entity = this.entity(id);
-    // entity does not exist, insert
-    if (!entity || entity.id !== id) return this.insert(this.options.materializeDelta(delta));
+    // Unknown id: insert under that id rather than a generated one.
+    if (!entity || entity.id !== id) {
+      // SAFETY: BaseEntity carries `id?: string`, so `{ id }` is a valid Partial<E>.
+      return this.insert(this.options.materializeDelta(delta, { id } as Partial<E>));
+    }
     // patch the existing entity
     let executing = false;
     const base: Partial<E> = {};
