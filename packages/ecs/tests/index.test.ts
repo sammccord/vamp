@@ -128,9 +128,9 @@ function accumulateArray<T>(
 }
 
 // accumulateDelta: accumulate two deltas together
-function accumulateDelta(from: EntityDelta, to: EntityDelta): EntityDelta {
-  const { children, tags, health, level, xp, mana, ...fields } = to;
-  const result: EntityDelta = { ...from };
+function accumulateDelta(next: EntityDelta, prev: EntityDelta): EntityDelta {
+  const { children, tags, health, level, xp, mana, ...fields } = next;
+  const result: EntityDelta = { ...prev };
   assignDefined(result, fields);
   addNumeric(result, { health, level, xp, mana });
   if (children !== undefined) result.children = accumulateArray(result.children, children);
