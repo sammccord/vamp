@@ -6,6 +6,7 @@ import {
   type ECSOptions,
   type GenericAction,
   MutationRecord,
+  MutationType,
 } from "@vampgg/ecs";
 import { Message } from "@vampgg/utils/bebop";
 import { STREAM_MESSAGE_ID_KEY, STREAM_METHOD_ID_KEY } from "@vampgg/utils/ws-router";
@@ -327,5 +328,49 @@ describe("createInterestBroadcast", () => {
     await parked;
     await gen.return(undefined);
     expect(world.observerCount).toBe(0);
+  });
+
+  test("an entity entering view arrives whole and one leaving view is deleted", async () => {
+    const records: Array<[string, number]> = [];
+    const broadcast = createInterestBroadcast<World, TestReq, never, TestEntity, TestDelta>({
+      encodeBatch: (batch) => {
+        for (const [id, m] of batch) records.push([id, m.tag]);
+        return new Uint8Array();
+      },
+      canSee,
+      resolveViewer: (r) => r.viewerId,
+    });
+    const world = makeWorld();
+    await world.withScope(() => {
+      world.insert({ id: "viewer", position: { x: 0, y: 0 } });
+      world.insert({ id: "mover", position: { x: 1000, y: 0 } });
+      world.insert({ id: "rock", position: { x: 0, y: 1000 } });
+    });
+    const { ws } = makeFakeWs();
+    const parked = broadcast
+      .observe({ viewerId: "viewer" }, makeCtx(world, ws, crypto.randomUUID(), 7))
+      .next();
+    await tick();
+    expect(records.map(([id]) => id).sort((a, b) => a.localeCompare(b))).toEqual(["viewer"]);
+
+    const step = async (id: string, position: { x: number; y: number }) => {
+      records.length = 0;
+      await world.withScope(() => world.put(id, { position }));
+      return [...records];
+    };
+
+    expect(await step("mover", { x: 10, y: 0 })).toEqual([["mover", MutationType.Insert]]);
+    expect(await step("mover", { x: 20, y: 0 })).toEqual([["mover", MutationType.Update]]);
+    expect(await step("mover", { x: 2000, y: 0 })).toEqual([["mover", MutationType.Delete]]);
+    expect(await step("mover", { x: 3000, y: 0 })).toEqual([]);
+
+    // The viewer walks up to the rock: the rock enters view without changing.
+    expect(await step("viewer", { x: 0, y: 990 })).toEqual([
+      ["viewer", MutationType.Update],
+      ["rock", MutationType.Insert],
+    ]);
+
+    broadcast.onConnectionClose(ws);
+    await parked;
   });
 });
