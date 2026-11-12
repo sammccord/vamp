@@ -6,6 +6,8 @@ import {
   type ECS,
   type ECSOptions,
   type GenericAction,
+  MutationRecord,
+  MutationType,
 } from "@vampgg/ecs";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as Y from "yjs";
@@ -288,6 +290,7 @@ function seedDoc(namespace: string, entities: Array<Entity & { id: string }>): U
 }
 
 interface RuntimeOverrides {
+  ecs?: ECSOptions<Entity, Delta>;
   registerSystems?: (ecs: TestWorld) => void;
   tickIntervalMs?: number;
   tickArgs?: () => [];
@@ -809,5 +812,101 @@ describe("ECSDurableObject — game-shard state persists across eviction", () =>
     // game-owned world state survives eviction and is restored for the next player.
     expect(instance2.ecs.hasEntity("enemy")).toBe(true);
     expect(instance2.ecs.entity("enemy").n).toBe(70);
+  });
+});
+
+describe("ECSDurableObject — reconcile and write-through", () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  async function lobbyWithSocket(seed: Array<Entity & { id: string }>) {
+    configureRuntime();
+    const ctx = makeCtx(makeStorage());
+    const stub = makeStub(seedDoc("room1", seed));
+    const instance = newDO(ctx, makeEnv(stub));
+    await instance.setup("room1");
+    ctx._sockets.push(makeWs());
+    const delivered: Array<[string, MutationRecord<Entity, Delta>]> = [];
+    instance.ecs.observeMutations({
+      interested: () => true,
+      deliver: (batch: Map<string, MutationRecord<Entity, Delta>>) => delivered.push(...batch),
+    });
+    return { instance, stub, delivered };
+  }
+
+  /** A co-subscriber's edit to the lobby's shard, encoded as the update it would push. */
+  function remoteEdit(
+    instance: { shards: { docFor(root: string): Y.Doc } },
+    edit: (doc: Y.Doc) => void,
+  ) {
+    const remote = new Y.Doc();
+    Y.applyUpdate(remote, Y.encodeStateAsUpdate(instance.shards.docFor("game/room1")));
+    const before = Y.encodeStateVector(remote);
+    remote.transact(() => edit(remote));
+    return Y.encodeStateAsUpdate(remote, before);
+  }
+
+  test("a remote update is broadcast as a snapshot and not echoed upstream", async () => {
+    const { instance, stub, delivered } = await lobbyWithSocket([{ id: "e1", x: 5, y: 7 }]);
+    const update = remoteEdit(instance, (doc) => entitiesMap(doc).get("e1")!.set("x", 9));
+
+    await instance.onShardUpdate("game/room1", update);
+    await sleep(30);
+
+    expect(instance.ecs.entity("e1")).toMatchObject({ x: 9, y: 7 });
+    expect(delivered).toContainEqual([
+      "e1",
+      MutationRecord.fromInsert({ entity: expect.objectContaining({ x: 9, y: 7 }) }),
+    ]);
+    expect(stub.__pushed).toBeUndefined();
+  });
+
+  test("a remote delete leaves the world and store, broadcasts, and is not echoed", async () => {
+    const { instance, stub, delivered } = await lobbyWithSocket([{ id: "e1", x: 5 }]);
+    const update = remoteEdit(instance, (doc) => entitiesMap(doc).delete("e1"));
+
+    await instance.onShardUpdate("game/room1", update);
+    await sleep(30);
+
+    expect(instance.ecs.hasEntity("e1")).toBe(false);
+    expect(instance.ecs.entities.has("e1")).toBe(false);
+    expect(delivered.map(([id, m]) => [id, m.tag])).toContainEqual(["e1", MutationType.Delete]);
+    expect(stub.__pushed).toBeUndefined();
+  });
+
+  test("a relative local delta is written to the doc as its merged value", async () => {
+    configureRuntime({
+      ecs: {
+        ...ecsOptions,
+        mergeDelta: (entity, delta) => {
+          if (delta.x !== undefined) entity.x = (entity.x ?? 0) + delta.x;
+        },
+      },
+    });
+    const instance = newDO(makeCtx(makeStorage()), makeEnv(makeStub()));
+    await instance.setup("room1");
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "p1", x: 5 }));
+    await instance.ecs.withScope(() => instance.ecs.put("p1", { x: 2 }));
+
+    expect(instance.ecs.entity("p1")?.x).toBe(7);
+    expect(entitiesMap(instance.shards.docFor("game/room1")).get("p1")?.get("x")).toBe(7);
+  });
+
+  test("evicting a shard drops its entities locally without deleting them upstream", async () => {
+    configureRuntime();
+    const charStub = makeStub(seedDoc("character/bob", [{ id: "c1", x: 9 }]));
+    const instance = newDO(
+      makeCtx(makeStorage()),
+      makeEnvByRoot({ "game/room1": makeStub(), "character/bob": charStub }),
+    );
+    await instance.setup("room1");
+    await instance.loadShard("character/bob");
+    await settle();
+    await instance.unloadShard("character/bob");
+    instance.shards.release("character/bob", 0);
+    instance.shards.reap(Date.now() + 60_000);
+
+    expect(instance.ecs.hasEntity("c1")).toBe(false);
+    expect(instance.ecs.entities.has("c1")).toBe(false);
+    expect(charStub.__pushed).toBeUndefined();
   });
 });

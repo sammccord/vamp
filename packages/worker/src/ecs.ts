@@ -21,7 +21,7 @@ import { DurableObject } from "cloudflare:workers";
 import { YStreamClient, type YStreamClientOptions } from "y-durablestream";
 import { applyUpdate, mergeUpdates } from "yjs";
 import type { Doc, Transaction, Map as YMap, YMapEvent } from "yjs";
-import { entitiesMap, removeEntity, writeEntityInsert, writeUpdate } from "./entity-doc";
+import { entitiesMap, removeEntity, writeEntityInsert, writeMergedUpdate } from "./entity-doc";
 import { toError } from "./errors";
 import { ShardManager } from "./shard-manager";
 import {
@@ -646,27 +646,21 @@ export class ECSDurableObject<
     // routed to its entity's home shard (`root`) and grouped so every shard doc
     // gets ONE transaction. Cross-shard writes are therefore NOT atomic — a flush
     // touching entities in multiple roots is eventually consistent across shards.
-    this.ecs.setFlushHandler((mutations) => {
+    this.ecs.setFlushHandler((mutations, scope) => {
       // Group by shard root. The working-store application below is doc-agnostic,
       // so it runs in this first pass; the per-shard transactions run in the second.
       const byRoot = new Map<string, Array<[string, MutationRecord<Entity, EntityDelta>]>>();
       for (const [id, mutation] of mutations) {
-        if (this._reconcilingIds.has(id)) {
-          // Reconciled from remote: copy the shadow into the working store, but DO
-          // NOT write it back to the shard doc — it CAME FROM the doc, and
-          // re-writing it would forward an echo to every co-subscriber, an
-          // unbounded ping-pong. (Ownership model: a non-owner that also mutates a
-          // reconciled entity in the SAME scope will not propagate that local
+        if (this._reconcilingIds.delete(id)) {
+          // Reconciled from a shard doc: update the working store, but DO NOT
+          // write it back — it CAME FROM the doc, and re-writing it would forward
+          // an echo to every co-subscriber. (A non-owner that also mutates a
+          // reconciled entity in the SAME scope does not propagate that local
           // delta — an accepted edge; co-subscribers read, the owner writes.)
-          const scope = this.ecs!.context.scope;
-          if (scope) {
-            const shadow = scope.shadowEntities.get(id);
-            if (shadow) {
-              entities.set(id, shadow);
-            } else if (scope.deletedIds.has(id)) {
-              entities.delete(id);
-            }
-          }
+          const shadow = scope?.shadowEntities.get(id);
+          if (mutation.tag === MutationType.Delete) entities.delete(id);
+          else if (shadow) entities.set(id, shadow);
+          else applyMutation(entities, id, mutation, configuration.ecs);
           continue;
         }
         // Locally-authored mutation: apply it to the working entity store so reads
@@ -696,7 +690,9 @@ export class ECSDurableObject<
           }
         }, ECSDurableObject.LOCAL_ORIGIN);
       }
-      this._reconcilingIds.clear();
+      // A scope commit owns every id its drain marked; drop any an aborted
+      // child scope left behind.
+      if (scope) this._reconcilingIds.clear();
       // Persist the shard set only when a new root opened — the common
       // all-known-roots flush touches no storage.
       if (acquiredNew) this._persistActiveShards();
@@ -730,14 +726,12 @@ export class ECSDurableObject<
               // would let a later remote observer event mutate the value that a
               // pending broadcast still holds.
               const cloned = clonePlainValue(entity);
+              // A remote change arrives as absolute component values, which an
+              // additive delta cannot express, so it travels as a snapshot
+              // Insert; replicas replace the entity in place (`ECS.replace`).
               scope.mutations.set(
                 id,
-                MutationRecord.fromUpdate<Entity, EntityDelta>({
-                  // SAFETY: a remote update carries the entity's full component
-                  // snapshot; a delta sets components by key, so a complete
-                  // entity is the maximal delta for it.
-                  delta: cloned as Entity & EntityDelta,
-                }),
+                MutationRecord.fromInsert<Entity, EntityDelta>({ entity: cloned }),
               );
               scope.shadowEntities.set(id, cloned);
               scope.deletedIds.delete(id);
@@ -1353,8 +1347,10 @@ export class ECSDurableObject<
         this._unobserveEntity(id);
         const entity = this._entityStore.get(id);
         if (entity) {
+          // Local eviction: drop it from this world without deleting it from
+          // the shard doc, where it still lives for other lobbies.
+          this._reconcilingIds.add(id);
           this.ecs.delete(entity);
-          this._pendingReconcile.set(id, { type: "delete", entity });
         }
         // Plain delete (not _untrackEntityRoot): the shard is already tearing
         // down, so there is no pin left to release for it.
@@ -1377,16 +1373,9 @@ export class ECSDurableObject<
     if (!raw.id) raw.id = id;
     // If entity doesn't exist locally, register it in the ECS archetype graph.
     if (!this.ecs.hasEntity(id)) {
+      // Came from the doc: the flush handler must store it, not write it back.
+      this._reconcilingIds.add(id);
       this.ecs.insert(raw);
-    }
-    // Backfill the working store. Post-init, `ecs.insert()` called outside a
-    // scope defers its data write into an auto-created scope that this (non-scope)
-    // call never commits — so the entity registers in the archetype graph but not
-    // the working store, and the reconcile drain (onScopeOpen) reads the store
-    // directly. Pre-init seeding writes the store via the immediate base mutator,
-    // making this a no-op there; idempotent on a re-add.
-    if (!this._entityStore.has(id)) {
-      this._entityStore.set(id, raw);
     }
     this._observeEntity(id, doc);
   }
@@ -1395,8 +1384,9 @@ export class ECSDurableObject<
     if (!this.ecs) return;
     const entity = this._entityStore.get(id);
     if (entity) {
+      // Already deleted in the doc; the flush handler only updates the store.
+      this._reconcilingIds.add(id);
       this.ecs.delete(entity);
-      this._pendingReconcile.set(id, { type: "delete", entity });
     }
     this._unobserveEntity(id);
     this._untrackEntityRoot(id);
@@ -1534,7 +1524,10 @@ export class ECSDurableObject<
         break;
       }
       case MutationType.Update: {
-        writeUpdate(doc, id, mutation.value.delta);
+        // The delta is relative (additive pools, array add/remove); the doc
+        // stores absolute values, so write the merged result for each key.
+        const entity = this._entityStore.get(id);
+        if (entity) writeMergedUpdate(doc, id, mutation.value.delta, entity);
         break;
       }
       case MutationType.Delete: {

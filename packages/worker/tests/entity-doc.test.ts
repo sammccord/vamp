@@ -7,6 +7,7 @@ import {
   readAllEntities,
   removeEntity,
   writeEntityInsert,
+  writeMergedUpdate,
   writeUpdate,
 } from "../src/entity-doc.ts";
 
@@ -53,6 +54,21 @@ describe("entity-doc: sharded entity set", () => {
     const map = entitiesMap(doc).get("e1");
     expect(map?.get("hp")).toBe(12);
     expect(map?.has("mp")).toBe(false);
+  });
+
+  it("writeMergedUpdate writes merged values for relative deltas, never the raw delta", () => {
+    const doc = new Doc();
+    doc.transact(() =>
+      writeEntityInsert(doc, "e1", { health: { points: 10, max: 10 }, children: ["c1"], mp: 5 }),
+    );
+    const merged = { health: { points: 7, max: 10 }, children: ["c1", "c2"], mp: 5 };
+    const delta = { health: { points: -3 }, children: { add: ["c2"] }, mp: undefined };
+    doc.transact(() => writeMergedUpdate(doc, "e1", delta, merged));
+
+    expect(entitiesMap(doc).get("e1")?.toJSON()).toEqual({
+      health: { points: 7, max: 10 },
+      children: ["c1", "c2"],
+    });
   });
 
   it("writeUpdate on an unknown id is a no-op", () => {
