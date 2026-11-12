@@ -17,6 +17,14 @@ export interface GameProviderProps<E extends BaseEntity, D, C> {
   open: (client: C) => Promise<AsyncGenerator<WireBatch<E, D>, void, unknown>>;
   /** Delay (ms) before reconnecting after the stream ends/errors. Default 1000. */
   reconnectDelay?: number;
+  /**
+   * Treat the first frame of each stream as an authoritative snapshot: entities
+   * absent from it are removed from the replica. This is what clears entities
+   * deleted while the client was disconnected. The `observe` stream from
+   * `@vampgg/worker/interest` always starts with a snapshot. Set `false` for a
+   * stream that does not. Default `true`.
+   */
+  snapshotOnConnect?: boolean;
   children?: Element;
 }
 
@@ -44,10 +52,15 @@ export function GameProvider<E extends BaseEntity, D, C>(
   let stream: AsyncGenerator<WireBatch<E, D>, void, unknown> | undefined;
   let stopped = false;
 
-  async function commit(frame: WireBatch<E, D>): Promise<void> {
+  async function commit(frame: WireBatch<E, D>, snapshot: boolean): Promise<void> {
     // Apply through a scope so writes coalesce into one authoritative commit; the
     // returned map is the coalesced batch reflecting the merged final state.
     const { mutations } = await world.withScope(() => {
+      if (snapshot) {
+        for (const [id, entity] of world.entities) {
+          if (!frame.mutations?.has(id)) world.delete(entity);
+        }
+      }
       if (frame.mutations) world.applyMutations(frame.mutations);
     });
     // Writes are safe here: commit runs after an await, so the owner context is null
@@ -70,9 +83,11 @@ export function GameProvider<E extends BaseEntity, D, C>(
         setConnection("connecting");
         stream = await props.open(props.client);
         setConnection("open");
+        let first = props.snapshotOnConnect ?? true;
         for await (const frame of stream) {
           if (stopped) break;
-          await commit(frame);
+          await commit(frame, first);
+          first = false;
         }
       } catch {
         // Transport/decode failure: fall through to reconnect unless stopped.

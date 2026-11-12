@@ -263,10 +263,10 @@ export function createInterestBroadcast<
     // Interest-filtered initial snapshot, sent through the same framed path the
     // live observer uses (NOT via a generator yield), so the resume path and the
     // snapshot path are identical bytes on the wire.
+    // Always sent, even when empty: a replica treats the first frame of a
+    // stream as the authoritative world and drops anything absent from it.
     const snapshot = interestSnapshot(world, viewerId);
-    if (snapshot.size > 0 && ws.readyState === 1) {
-      ws.send(frame(methodId, messageId, snapshot));
-    }
+    if (ws.readyState === 1) ws.send(frame(methodId, messageId, snapshot));
 
     // Park: hold the server stream open WITHOUT yielding (live frames are pushed
     // generator-free above). The router ends this generator — running the

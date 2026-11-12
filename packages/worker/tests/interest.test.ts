@@ -279,10 +279,12 @@ describe("createInterestBroadcast", () => {
       world.insert({ id: b, position: { x: 9999, y: 9999 } });
     });
 
-    // No empty snapshot (world was empty at observe time), then one live frame
-    // carrying BOTH entities — the default canSee is always-visible.
-    expect(sent.length).toBe(1);
-    expect(frameInfo(sent[0]).keys).toEqual(expect.arrayContaining([a, b]));
+    // An empty snapshot (the world was empty at observe time; a replica uses
+    // it to drop stale entities), then one live frame carrying BOTH entities;
+    // the default canSee is always-visible.
+    expect(sent.length).toBe(2);
+    expect(frameInfo(sent[0]).keys).toEqual([]);
+    expect(frameInfo(sent[1]).keys).toEqual(expect.arrayContaining([a, b]));
 
     broadcast.onConnectionClose(ws);
     await parked;

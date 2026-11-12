@@ -102,7 +102,8 @@ describe("interest observe teardown through TempoWsRouter", () => {
     expect(world.observerCount).toBe(1);
 
     await world.withScope(() => world.insert({ id: "e", hp: 1 }));
-    expect(bob.frames.filter((m) => m.status === TempoStatusCode.OK)).toHaveLength(1);
+    // The (empty) snapshot, then the live frame for the insert.
+    expect(bob.frames.filter((m) => m.status === TempoStatusCode.OK)).toHaveLength(2);
     expect(bob.frames.some((m) => m.status === TempoStatusCode.CANCELLED)).toBe(false);
   });
 });
