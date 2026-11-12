@@ -16,7 +16,13 @@ export {
   transformArchetypeTag,
   traverseArchetypeGraph,
 } from "./Archetype";
-export { ECS, type ECSOptions, type MutationBatch, type MutationObserver } from "./ECS";
+export {
+  ECS,
+  type ECSOptions,
+  type FlushHandler,
+  type MutationBatch,
+  type MutationObserver,
+} from "./ECS";
 export {
   applyMutation,
   type BaseMutatorConfig,

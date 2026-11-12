@@ -14,6 +14,11 @@ export class MutationScope<E, D> {
   readonly deletedIds = new Set<string>();
   /** Async work the scope waits for before it commits (see `ECS.waitUntil`). */
   readonly pending: Promise<unknown>[] = [];
+  /**
+   * Scopes opened while this one was active. They settle (merging up on
+   * success) before this scope restores the active slot and commits.
+   */
+  readonly children: Promise<void>[] = [];
 
   constructor(
     private readonly _mergeDelta: MergeDeltaFn<E, D>,
