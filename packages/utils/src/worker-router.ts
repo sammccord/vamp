@@ -80,7 +80,6 @@ export class TempoWorkerRouter<TEnv> extends BaseRouter<Buffer, TEnv, Message> {
 
     await this.core.processRequest(request, response, env, {
       send,
-      stampErrorResponse: true,
       writeStreamFrames: async (generator, resp, method) => {
         const messageId = request.messageId!;
         // Track the generator so an inbound CANCELLED frame (handled above)

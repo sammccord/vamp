@@ -164,20 +164,21 @@ export class TempoWSChannel extends CoreChannel {
     this.ws.addEventListener(WebsocketEvent.open, () => {
       this.logger.trace(`opened TempoWSChannel for ${this._url.href} / ${this.userAgent}`);
     });
+    // A dropped connection fails in-flight calls and streams but keeps the
+    // channel usable: the next call reconnects (see waitForOpen). Only close()
+    // disposes the channel. Events from a socket we already replaced are ignored.
     this.ws.addEventListener(WebsocketEvent.close, (ws) => {
-      if (this.closed) return;
+      if (this.closed || ws !== this.ws) return;
       // If the socket was never opened (connection failure before first open),
-      // waitForOpen's own listeners handle it — do not tear down the channel.
+      // waitForOpen's own listeners handle it.
       if (ws.lastConnection === undefined) return;
       this.logger.trace(`closed TempoWSChannel for ${this._url.href} / ${this.userAgent}`);
-      this.close(new TempoError(TempoStatusCode.UNAVAILABLE, "channel closed"));
+      this.failInFlight(new TempoError(TempoStatusCode.UNAVAILABLE, "connection closed"));
     });
     this.ws.addEventListener(WebsocketEvent.error, (ws) => {
-      if (this.closed) return;
-      // Only tear down if we were previously connected — waitForOpen handles
-      // pre-open errors with its own retry logic.
+      if (this.closed || ws !== this.ws) return;
       if (ws.lastConnection === undefined) return;
-      this.close(new TempoError(TempoStatusCode.UNAVAILABLE, "channel transport error"));
+      this.failInFlight(new TempoError(TempoStatusCode.UNAVAILABLE, "connection error"));
     });
     this.ws.addEventListener(WebsocketEvent.message, (_ws, ev) => {
       // Bound the inbound frame BEFORE decoding so an oversized/hostile frame is
@@ -186,8 +187,13 @@ export class TempoWSChannel extends CoreChannel {
       const data: string | ArrayBuffer = ev.data;
       const byteLength = data instanceof ArrayBuffer ? data.byteLength : data.length;
       if (byteLength > this.maxReceiveMessageSize) {
-        this.logger.error(
-          `inbound frame ${byteLength}B exceeds maxReceiveMessageSize ${this.maxReceiveMessageSize}B; dropping`,
+        // The frame's call cannot be identified without decoding it, so fail
+        // everything in flight rather than leave that call waiting forever.
+        this.failInFlight(
+          new TempoError(
+            TempoStatusCode.RESOURCE_EXHAUSTED,
+            `inbound frame ${byteLength}B exceeds maxReceiveMessageSize ${this.maxReceiveMessageSize}B`,
+          ),
         );
         return;
       }
@@ -251,11 +257,13 @@ export class TempoWSChannel extends CoreChannel {
         this._reconnect();
       }
 
+      if (this.closed) {
+        throw this.closeReason ?? new TempoError(TempoStatusCode.CANCELLED, "channel disposed");
+      }
       const state = this.ws.readyState;
       if (state === 1 /* OPEN */) return;
-      if (state === 2 /* CLOSING */ || state === 3 /* CLOSED */) {
-        throw new TempoError(TempoStatusCode.UNAVAILABLE, "socket is closing or closed");
-      }
+      // The previous connection dropped: open a fresh one.
+      if (state === 2 /* CLOSING */ || state === 3 /* CLOSED */) this._reconnect();
 
       try {
         await Deadline.after(5, "seconds").executeWithinDeadline(

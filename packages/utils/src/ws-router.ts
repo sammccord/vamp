@@ -176,13 +176,15 @@ export class TempoWsRouter<
 
   public override async process(req: ArrayBuffer, response: Message, env: Env) {
     // Bound the untrusted inbound frame BEFORE decoding it into a Message, so a
-    // hostile/oversized client frame cannot force a large allocation. The client
-    // call surfaces the failure via its deadline.
+    // hostile/oversized client frame cannot force a large allocation. Its
+    // messageId is unknown, so no error frame can answer it; the host should
+    // close the socket (code 1009) so the client fails the call instead of
+    // waiting on it.
     if (req.byteLength > this.maxReceiveMessageSize) {
-      this.logger.error(
-        `inbound frame ${req.byteLength}B exceeds maxReceiveMessageSize ${this.maxReceiveMessageSize}B; dropping`,
+      throw new TempoError(
+        TempoStatusCode.RESOURCE_EXHAUSTED,
+        `inbound frame ${req.byteLength}B exceeds maxReceiveMessageSize ${this.maxReceiveMessageSize}B`,
       );
-      return;
     }
     const request = Message.decode(new Uint8Array(req));
     const [, ws] = env;
