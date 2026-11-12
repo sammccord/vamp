@@ -30,8 +30,7 @@ export {
   createBaseMutator,
 } from "./mutator";
 export { type AccumulateDeltaFn, type MergeDeltaFn, type MutationScope } from "./MutationScope";
-export type { Query, QueryBuilder } from "./Query";
-export * from "./Query";
+export { createBuilder, query, type Query, type QueryBuilder } from "./Query";
 export {
   createQueryMembershipTracker,
   type QueryMembershipTracker,

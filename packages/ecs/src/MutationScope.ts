@@ -1,3 +1,4 @@
+import type { Archetype } from "./Archetype";
 import { clonePlainValue } from "./clone";
 import { MutationRecord, MutationType } from "./types";
 
@@ -19,6 +20,14 @@ export class MutationScope<E, D> {
    * success) before this scope restores the active slot and commits.
    */
   readonly children: Promise<void>[] = [];
+  /**
+   * Each entity's archetype before this scope first moved it (`null` = it did
+   * not exist). An aborted scope restores these so archetype membership never
+   * outlives the data it describes.
+   */
+  readonly archetypeUndo = new Map<string, Archetype | null>();
+  /** The scope this one was opened inside, if any. */
+  parent: MutationScope<E, D> | undefined;
 
   constructor(
     private readonly _mergeDelta: MergeDeltaFn<E, D>,

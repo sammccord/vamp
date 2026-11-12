@@ -12,9 +12,9 @@ function makeAndMatcher(matcher: QueryMatcher, ...matchers: QueryMatcher[]): Que
     matcher(target, targetArchetype) && matchers.every((m) => m(target, targetArchetype));
 }
 
-function makeOrMatcher(matcher: QueryMatcher, ...matchers: QueryMatcher[]): QueryMatcher {
+function makeOrMatcher(left: QueryMatcher, right: QueryMatcher): QueryMatcher {
   return (target, targetArchetype) =>
-    matcher(target, targetArchetype) || matchers.some((m) => m(target, targetArchetype));
+    left(target, targetArchetype) || right(target, targetArchetype);
 }
 
 export type Query = {
@@ -86,8 +86,13 @@ export function createBuilder(): QueryBuilder {
       return _matchers;
     },
     or(cb) {
+      // (everything so far) OR (the whole sub-query): each side is the AND of
+      // its own matchers.
       const [first = alwaysTrue, ...rest] = _matchers;
-      _matchers = [makeOrMatcher(makeAndMatcher(first, ...rest), ...cb(createBuilder()).matchers)];
+      const [subFirst = alwaysTrue, ...subRest] = cb(createBuilder()).matchers;
+      _matchers = [
+        makeOrMatcher(makeAndMatcher(first, ...rest), makeAndMatcher(subFirst, ...subRest)),
+      ];
       return this;
     },
     every(...components) {
@@ -121,7 +126,9 @@ export function createBuilder(): QueryBuilder {
         return this;
       }
       const mask = makeMask(components);
-      _matchers.push((target, _targetArchetype) => target.intersection_size(mask) === 0);
+      _matchers.push(
+        (target, _targetArchetype) => target.intersection_size(mask) !== components.length,
+      );
       return this;
     },
     everyTag(...tags) {
@@ -147,7 +154,9 @@ export function createBuilder(): QueryBuilder {
     noneTag(...tags) {
       if (tags.length === 0) return this;
       const mask = makeMask(tags);
-      _matchers.push((_target, archetype) => archetype.tagMask.intersection_size(mask) === 0);
+      _matchers.push(
+        (_target, archetype) => archetype.tagMask.intersection_size(mask) !== tags.length,
+      );
       return this;
     },
     prefabricated(archetype) {
