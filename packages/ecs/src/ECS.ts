@@ -274,12 +274,10 @@ export class ECS<
   applyMutations(mutations: MutationBatch<E, D>): void {
     for (const [id, record] of mutations) {
       switch (record.tag) {
-        case MutationType.Insert: {
-          const existing = this.entity(id);
-          if (existing) this.delete(existing);
-          this.insert(record.value.entity);
+        case MutationType.Insert:
+          if (this.hasEntity(id)) this.replace(id, record.value.entity);
+          else this.insert({ ...record.value.entity, id });
           break;
-        }
         case MutationType.Update:
           this.put(id, record.value.delta);
           break;
@@ -501,6 +499,26 @@ export class ECS<
     }
     this.executeEventSystems(id);
     this._handleCreate(id);
+    return committed;
+  }
+
+  /**
+   * Overwrite an existing entity with a full snapshot, keeping its id. Components
+   * absent from `entity` are removed and present ones added, so archetype
+   * membership follows the snapshot. Unlike delete + insert, no delete/create
+   * lifecycle systems fire. Falls back to {@link insert} for an unknown id.
+   */
+  public replace(id: string, entity: E): E {
+    if (!this.hasEntity(id)) return this.insert({ ...entity, id });
+    const committed: E = entity.id === id ? entity : { ...entity, id };
+    this._mutate(id, MutationRecord.fromInsert<E, D>({ entity: committed }));
+    for (const name in this.options.components) {
+      // SAFETY: `options.components` is keyed by entity field names.
+      if (committed[name as keyof E] === undefined) this._removeComponent(id, name, false);
+      else this._addComponent(id, name, false);
+    }
+    this._reconcileTags(id, committed.tags ?? []);
+    this.executeEventSystems(id);
     return committed;
   }
 
