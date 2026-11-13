@@ -1,6 +1,11 @@
+import { clonePlainValue } from "./clone";
 import { MutationRecord, MutationType } from "./types";
 
 export type MergeDeltaFn<E, D> = (entity: E, delta: D) => void;
+/**
+ * Fold the newer delta `from` into the older accumulated delta `to` and return
+ * the combined delta. May mutate and return `to`; must not mutate `from`.
+ */
 export type AccumulateDeltaFn<D> = (from: D, to: D) => D;
 
 export class MutationScope<E, D> {
@@ -9,6 +14,11 @@ export class MutationScope<E, D> {
   readonly deletedIds = new Set<string>();
   /** Async work the scope waits for before it commits (see `ECS.waitUntil`). */
   readonly pending: Promise<unknown>[] = [];
+  /**
+   * Scopes opened while this one was active. They settle (merging up on
+   * success) before this scope restores the active slot and commits.
+   */
+  readonly children: Promise<void>[] = [];
 
   constructor(
     private readonly _mergeDelta: MergeDeltaFn<E, D>,
@@ -63,7 +73,12 @@ export class MutationScope<E, D> {
     const shadow = this.shadowEntities.get(entityId);
 
     if (!existing) {
-      this.mutations.set(entityId, MutationRecord.fromUpdate<E, D>({ delta }));
+      // The scope owns its accumulated delta: a later update folds into it, and
+      // that must never write through to the caller's object.
+      this.mutations.set(
+        entityId,
+        MutationRecord.fromUpdate<E, D>({ delta: clonePlainValue(delta) }),
+      );
       // Update shadow entity if it exists (for entities that existed before scope)
       if (shadow) {
         this._mergeDelta(shadow, delta);
@@ -79,7 +94,7 @@ export class MutationScope<E, D> {
           this._mergeDelta(existing.value.entity, delta);
           break;
         case MutationType.Update:
-          this._accumulateDelta(existing.value.delta, delta);
+          existing.value.delta = this._accumulateDelta(delta, existing.value.delta);
           // Update shadow entity if it exists
           if (shadow) {
             this._mergeDelta(shadow, delta);

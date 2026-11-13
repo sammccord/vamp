@@ -88,13 +88,17 @@ export function emitHelpers(entity: SchemaDefinition, schema: ParsedSchema): str
 }
 
 function emitMaterializeDelta(entity: SchemaDefinition, schema: ParsedSchema): string {
+  // A field absent from both `delta` and `base` stays `undefined`: on an ECS
+  // entity every present field is a component, so defaulting it would put the
+  // entity in every archetype. Sub-field defaults still seed a composite that a
+  // delta creates from nothing.
   const assignments = entity.fields.map((f) => {
     if (f.name === "tags") {
-      return `    tags: delta.tags ?? base?.tags ?? []`;
+      return `    tags: delta.tags ?? base?.tags`;
     }
     if (f.isArray) {
       // Honor set/add/remove (matches mergeDelta) via the shared applier.
-      return `    ${f.name}: applyArrayDelta(base?.${f.name} ?? [], delta.${f.name})`;
+      return `    ${f.name}: delta.${f.name} || base?.${f.name} ? applyArrayDelta(base?.${f.name} ?? [], delta.${f.name}) : undefined`;
     }
     const strategy = deltaStrategy(f, schema);
     if (strategy) {
@@ -105,18 +109,18 @@ function emitMaterializeDelta(entity: SchemaDefinition, schema: ParsedSchema): s
       const deltaExpr = strategy.numeric
         ? `delta.${f.name} as Record<string, number>`
         : `delta.${f.name}`;
-      return `    ${f.name}: delta.${f.name} ? ${strategy.apply}(base?.${f.name} ?? { ${defaultFields} }, ${deltaExpr}) : base?.${f.name} ?? { ${defaultFields} }`;
+      return `    ${f.name}: delta.${f.name} ? ${strategy.apply}(base?.${f.name} ?? { ${defaultFields} }, ${deltaExpr}) : base?.${f.name}`;
     }
     if (isScalar(f.typeName)) {
-      const defaultVal = f.typeName === "string" || f.typeName === "guid" ? "''" : "0";
-      return `    ${f.name}: delta.${f.name} ?? base?.${f.name} ?? ${defaultVal}`;
+      return `    ${f.name}: delta.${f.name} ?? base?.${f.name}`;
     }
     return `    ${f.name}: delta.${f.name} ? { ...base?.${f.name}, ...delta.${f.name} } as any : base?.${f.name} as any`;
   });
 
   return `/**
- * Build a full {@link Entity} from a {@link EntityDelta} and optional \`base\`,
- * honoring array set/add/remove and additive pool semantics.
+ * Build an {@link Entity} from a {@link EntityDelta} and optional \`base\`,
+ * honoring array set/add/remove and additive pool semantics. Fields absent from
+ * both stay \`undefined\`, so the entity carries only the components it was given.
  */
 export function materializeDelta(delta: EntityDelta, base?: Partial<Entity>): Entity {
   return {

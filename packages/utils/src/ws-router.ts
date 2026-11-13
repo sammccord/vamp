@@ -50,19 +50,43 @@ export function encodeServerStreamFrame(opts: {
   );
 }
 
+/** Cancellation signals for live server streams, keyed by their ServerContext. */
+const streamSignals = new WeakMap<ServerContext, AbortSignal>();
+
+/**
+ * The abort signal of the server stream `context` belongs to, if it was opened
+ * by a {@link TempoWsRouter}. It fires when the client cancels the stream or its
+ * connection closes. A handler parked on an external event source (one that
+ * never yields on its own) must end its generator when this fires: the router
+ * cannot interrupt a generator suspended in `await`.
+ */
+export function streamAbortSignal(context: ServerContext): AbortSignal | undefined {
+  return streamSignals.get(context);
+}
+
+interface ServerStream {
+  generator: AsyncGenerator<BebopRecord, void, unknown>;
+  abort: AbortController;
+}
+
+/** Per-socket routing state. Keyed by socket so connections never share streams. */
+interface Connection {
+  core: RouterCore;
+  serverStreams: Map<string, ServerStream>;
+}
+
+/** End a server stream without awaiting it: `return()` queues behind a parked `next()`. */
+function endServerStream(stream: ServerStream): void {
+  stream.abort.abort();
+  stream.generator.return(undefined).catch(() => {});
+}
+
 export class TempoWsRouter<
   Context,
   Ws extends GenericWs = WebSocket,
   Env extends [Context, Ws] = [Context, Ws],
 > extends BaseRouter<ArrayBuffer, Env, Message> {
-  private readonly core: RouterCore;
-  // Active server-stream generators keyed by messageId. Tracked so an inbound
-  // CANCELLED frame ENDS the existing stream (running its cleanup — e.g.
-  // unsubscribing interest observers) instead of re-invoking the handler and
-  // starting a duplicate stream. Post-hibernation this map is empty (the parked
-  // generator was destroyed with the isolate), so a CANCELLED simply no-ops and
-  // the rehydrated observer is reaped on socket close.
-  private readonly serverStreams = new Map<string, AsyncGenerator<BebopRecord, void, unknown>>();
+  private readonly connections = new WeakMap<Ws, Connection>();
   // Encode-once broadcast cache. When one record object is fanned out to many
   // server-stream consumers (e.g. an ECS mutation scope broadcast to every
   // observer of a room), its payload is serialized a single time and the bytes
@@ -78,67 +102,76 @@ export class TempoWsRouter<
     authInterceptor?: AuthInterceptor,
   ) {
     super(logger, registry, configuration, authInterceptor);
-    this.core = new RouterCore({
-      logger,
-      maxRetryAttempts: this.maxRetryAttempts,
-      transmitInternalErrors: this.transmitInternalErrors,
-      authInterceptor,
-      getMethod: (methodId) => this.registry.getMethod(methodId),
-      getHooks: () => this.hooks,
-      deserializeRequest: (data, method, contentType) =>
-        this.deserializeRequest(data, method, contentType),
-      serializeResponse: (record, method, contentType) =>
-        this.serializeResponse(record, method, contentType),
-    });
+  }
+
+  private connection(ws: Ws): Connection {
+    let connection = this.connections.get(ws);
+    if (!connection) {
+      connection = {
+        core: new RouterCore({
+          logger: this.logger,
+          maxRetryAttempts: this.maxRetryAttempts,
+          transmitInternalErrors: this.transmitInternalErrors,
+          authInterceptor: this.authInterceptor,
+          getMethod: (methodId) => this.registry.getMethod(methodId),
+          getHooks: () => this.hooks,
+          deserializeRequest: (data, method, contentType) =>
+            this.deserializeRequest(data, method, contentType),
+          serializeResponse: (record, method, contentType) =>
+            this.serializeResponse(record, method, contentType),
+        }),
+        serverStreams: new Map(),
+      };
+      this.connections.set(ws, connection);
+    }
+    return connection;
   }
 
   private async invokeServerStreamMethod(
+    connection: Connection,
     request: Message,
     context: ServerContext,
     method: BebopMethodAny,
   ): Promise<AsyncGenerator<BebopRecord, void, unknown>> {
     const messageId = request.messageId!;
     // A CANCELLED frame must NEVER start a fresh server stream. End the tracked
-    // generator (its cleanup runs — e.g. unsubscribing interest observers) and
-    // return an already-finished generator so process() emits the terminal frame
-    // without re-invoking the handler. Without this, a client `.return()` on an
-    // observe stream would re-invoke the handler and spawn a duplicate stream.
+    // stream and return an already-finished generator so process() emits the
+    // terminal frame without re-invoking the handler.
     if (request.status === TempoStatusCode.CANCELLED) {
-      const existing = this.serverStreams.get(messageId);
+      const existing = connection.serverStreams.get(messageId);
       if (existing) {
-        this.serverStreams.delete(messageId);
-        try {
-          await existing.return(undefined);
-        } catch {
-          /* best effort: generator cleanup may itself throw */
-        }
+        connection.serverStreams.delete(messageId);
+        endServerStream(existing);
       }
       return (async function* (): AsyncGenerator<BebopRecord, void, unknown> {})();
     }
-    const invocation = await this.core.invokeServerStreamMethod(request, context, method, "bebop");
-    // Track so a later CANCELLED for this messageId ends it instead of re-invoking.
-    this.serverStreams.set(messageId, invocation);
-    return invocation;
+    const abort = new AbortController();
+    streamSignals.set(context, abort.signal);
+    const generator = await connection.core.invokeServerStreamMethod(
+      request,
+      context,
+      method,
+      "bebop",
+    );
+    connection.serverStreams.set(messageId, { generator, abort });
+    return generator;
   }
 
   /**
-   * Tear down all open streams for this connection (driven by the DO socket
-   * close/error lifecycle). Emits a synthetic CANCELLED to each in-flight
-   * client/duplex stream so its generator ends, then clears all listeners.
+   * Tear down every open stream on `ws` (driven by the socket close/error
+   * lifecycle). Client/duplex streams get a synthetic CANCELLED; server streams
+   * are aborted (see {@link streamAbortSignal}). Never waits on a generator, so
+   * a handler parked on an external source cannot stall teardown. Other
+   * connections are untouched.
    */
-  public async closeConnection(): Promise<void> {
-    this.core.cancelClientStreams();
-    // End every parked server-stream generator so its cleanup runs (e.g.
-    // unsubscribing interest observers registered by an `observe` handler).
-    for (const [id, gen] of [...this.serverStreams]) {
-      this.serverStreams.delete(id);
-      try {
-        await gen.return(undefined);
-      } catch {
-        /* best effort */
-      }
-    }
-    this.core.removeAllListeners();
+  public closeConnection(ws: Ws): void {
+    const connection = this.connections.get(ws);
+    if (!connection) return;
+    this.connections.delete(ws);
+    connection.core.cancelClientStreams();
+    for (const stream of connection.serverStreams.values()) endServerStream(stream);
+    connection.serverStreams.clear();
+    connection.core.removeAllListeners();
   }
 
   public override async process(req: ArrayBuffer, response: Message, env: Env) {
@@ -153,6 +186,7 @@ export class TempoWsRouter<
     }
     const request = Message.decode(new Uint8Array(req));
     const [, ws] = env;
+    const connection = this.connection(ws);
 
     // `Message.encode` returns a view into bebop's shared write buffer; copy it
     // so concurrent encodes (e.g. an overlapping unary response) cannot clobber
@@ -161,7 +195,7 @@ export class TempoWsRouter<
       ws.send(new Uint8Array(Message.encode(message)));
     };
 
-    await this.core.processRequest(request, response, env, {
+    await connection.core.processRequest(request, response, env, {
       send,
       // Expose the per-call message/method ids to handlers (read via
       // `context.clientMetadata`). The hibernation-safe broadcast path persists
@@ -179,9 +213,9 @@ export class TempoWsRouter<
         return incomingMetadata;
       },
       invokeServerStream: (message, context, method) =>
-        this.invokeServerStreamMethod(message, context, method),
+        this.invokeServerStreamMethod(connection, message, context, method),
       writeStreamFrames: (generator, resp, method) =>
-        this.core.writeStreamFrames({
+        connection.core.writeStreamFrames({
           generator,
           response: resp,
           method,
@@ -202,7 +236,11 @@ export class TempoWsRouter<
           },
           // Stream ended: drop its tracking entry (harmless no-op for the
           // duplex path, which is keyed in clientStreams).
-          onEnd: () => this.serverStreams.delete(request.messageId!),
+          onEnd: () => {
+            const stream = connection.serverStreams.get(request.messageId!);
+            if (stream?.generator === generator)
+              connection.serverStreams.delete(request.messageId!);
+          },
         }),
     });
   }

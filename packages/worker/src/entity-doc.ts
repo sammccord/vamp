@@ -100,3 +100,33 @@ export function writeUpdate<D>(doc: Doc, id: string, delta: D): void {
     }
   }
 }
+
+/**
+ * Mirror a merged local update into the doc. `delta` is relative (additive
+ * pools, array add/remove) while the doc stores absolute values, so each key the
+ * delta touches is written from the already-merged `entity`; a key the delta
+ * sets to `undefined` is deleted. Assumes a surrounding transaction.
+ */
+export function writeMergedUpdate<E extends object, D>(
+  doc: Doc,
+  id: string,
+  delta: D,
+  entity: E,
+): void {
+  const map = entitiesMap(doc).get(id);
+  if (!map) return;
+  const write = new Set<string>();
+  for (const key in delta) {
+    if (key === "id" || !Object.prototype.hasOwnProperty.call(delta, key)) continue;
+    if (delta[key] === undefined) map.delete(key);
+    else write.add(key);
+  }
+  for (const key in entity) {
+    if (!write.delete(key)) continue;
+    const val = entity[key];
+    if (val === undefined) map.delete(key);
+    else map.set(key, cloneComponentValue(val));
+  }
+  // Touched by the delta but absent from the merged entity.
+  for (const key of write) map.delete(key);
+}

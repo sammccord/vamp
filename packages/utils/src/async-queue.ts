@@ -95,10 +95,12 @@ export class AsyncQueue<T> implements AsyncIterableIterator<T> {
     if (this.closed || this.hasError) return;
     this.closed = true;
     if (this.pendingResolve) {
+      // The parked consumer never calls next() again, so dispose here; it
+      // would otherwise never run.
       const resolve = this.pendingResolve;
       this.pendingResolve = null;
       this.pendingReject = null;
-      resolve({ value: undefined, done: true });
+      void this.dispose().finally(() => resolve({ value: undefined, done: true }));
     }
   }
 
@@ -111,7 +113,7 @@ export class AsyncQueue<T> implements AsyncIterableIterator<T> {
       const reject = this.pendingReject;
       this.pendingResolve = null;
       this.pendingReject = null;
-      reject(cause);
+      void this.dispose().finally(() => reject(cause));
     }
   }
 

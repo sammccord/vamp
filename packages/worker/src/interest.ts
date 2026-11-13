@@ -11,6 +11,7 @@ import {
   encodeServerStreamFrame,
   STREAM_MESSAGE_ID_KEY,
   STREAM_METHOD_ID_KEY,
+  streamAbortSignal,
 } from "@vampgg/utils/ws-router";
 
 /**
@@ -272,13 +273,19 @@ export function createInterestBroadcast<
     // cleanup below — on a CANCELLED frame or socket close. Because it never
     // yields, no terminal frame is sent until then, so a hibernation that
     // destroys this generator leaves the client stream open to resume.
+    const signal = streamAbortSignal(context);
     yield* createEventIterator<Yield>(({ cancel }) => {
       const unregister = registerConnectionTeardown(ws, () => {
         unobserve();
         clearSub(ws);
         cancel();
       });
+      // The router aborts on a client CANCELLED or socket close; a parked
+      // generator cannot be ended any other way.
+      if (signal?.aborted) cancel();
+      signal?.addEventListener("abort", cancel, { once: true });
       return () => {
+        signal?.removeEventListener("abort", cancel);
         unobserve();
         clearSub(ws);
         unregister();

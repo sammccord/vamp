@@ -149,7 +149,7 @@ describe("materializeDelta array parity (4.5)", () => {
     expect(out).not.toContain("function applyArrayDelta");
     expect(imports).toContain("applyArrayDelta");
     expect(imports).toContain('from "@vampgg/ecs"');
-    expect(out).toContain("children: applyArrayDelta(base?.children ?? [], delta.children)");
+    expect(out).toContain("applyArrayDelta(base?.children ?? [], delta.children)");
   });
 });
 

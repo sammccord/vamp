@@ -61,6 +61,16 @@ export type StateWithScope<C extends Record<string, unknown>, E extends BaseEnti
 export type MutationBatch<E extends BaseEntity, D> = Map<string, MutationRecord<E, D>>;
 
 /**
+ * Commits a coalesced batch to the authoritative store. `scope` is the scope
+ * being committed, or `undefined` for a mutation made outside any scope (which
+ * commits on its own as a one-entry batch).
+ */
+export type FlushHandler<E, D> = (
+  mutations: Map<string, MutationRecord<E, D>>,
+  scope: MutationScope<E, D> | undefined,
+) => void;
+
+/**
  * A remote observer of committed mutations (interest-managed broadcast). The game
  * supplies `interested` (its subjective area-of-interest policy) and `deliver`
  * (push the filtered batch to a transport, e.g. a framed `ws.send`). Both are
@@ -183,7 +193,7 @@ export class ECS<
   }
 
   private _scopeOpenCallbacks = new Set<(scope: MutationScope<E, D>) => void>();
-  private _flushHandler: ((mutations: Map<string, MutationRecord<E, D>>) => void) | null = null;
+  private _flushHandler: FlushHandler<E, D> | null = null;
   // Interest-managed broadcast registry. Per-world (per DO): not a module global,
   // so colocated worlds never cross-feed. Holds the remote observers that
   // `routeMutations` fans committed batches out to.
@@ -264,12 +274,10 @@ export class ECS<
   applyMutations(mutations: MutationBatch<E, D>): void {
     for (const [id, record] of mutations) {
       switch (record.tag) {
-        case MutationType.Insert: {
-          const existing = this.entity(id);
-          if (existing) this.delete(existing);
-          this.insert(record.value.entity);
+        case MutationType.Insert:
+          if (this.hasEntity(id)) this.replace(id, record.value.entity);
+          else this.insert({ ...record.value.entity, id });
           break;
-        }
         case MutationType.Update:
           this.put(id, record.value.delta);
           break;
@@ -296,7 +304,7 @@ export class ECS<
    * The handler receives all coalesced mutations from the scope and is responsible for
    * applying them (to entities, Yjs, etc.). Pass `null` to restore default behavior.
    */
-  setFlushHandler(handler: ((mutations: Map<string, MutationRecord<E, D>>) => void) | null): void {
+  setFlushHandler(handler: FlushHandler<E, D> | null): void {
     this._flushHandler = handler;
   }
 
@@ -328,10 +336,15 @@ export class ECS<
   private _wrapMutator(baseMutate: EntityMutator<E, D>): EntityMutator<E, D> {
     return (id: string, mutation: MutationRecord<E, D>) => {
       if (this.initialized) {
-        // Use the active scope (e.g. from `withScope`) so its mutations are
-        // captured there. Only fall back to a fresh scope when a flush handler
-        // is installed but no scope is currently open.
-        const scope = this.context.scope ?? (this._flushHandler ? this.createScope() : undefined);
+        const scope = this.context.scope;
+        if (scope === undefined && this._flushHandler) {
+          // No scope open: commit this mutation on its own, through the same
+          // flush + broadcast path a scope commit takes.
+          const batch: MutationBatch<E, D> = new Map([[id, mutation]]);
+          this._flushHandler(batch, undefined);
+          this.routeMutations(batch);
+          return;
+        }
 
         if (scope) {
           switch (mutation.tag) {
@@ -465,7 +478,8 @@ export class ECS<
    * so observers never see a torn read.
    */
   public insert(entity: E): E {
-    const id = this.createEntity(undefined, entity.id, false);
+    // An empty id (e.g. a materialized delta's default) means "generate one".
+    const id = this.createEntity(undefined, entity.id || undefined, false);
     // Work on a copy when we had to generate an id, so we never mutate the
     // caller's object. The caller gets the id via the returned `committed`.
     const committed: E = entity.id ? entity : { ...entity, id };
@@ -489,6 +503,26 @@ export class ECS<
   }
 
   /**
+   * Overwrite an existing entity with a full snapshot, keeping its id. Components
+   * absent from `entity` are removed and present ones added, so archetype
+   * membership follows the snapshot. Unlike delete + insert, no delete/create
+   * lifecycle systems fire. Falls back to {@link insert} for an unknown id.
+   */
+  public replace(id: string, entity: E): E {
+    if (!this.hasEntity(id)) return this.insert({ ...entity, id });
+    const committed: E = entity.id === id ? entity : { ...entity, id };
+    this._mutate(id, MutationRecord.fromInsert<E, D>({ entity: committed }));
+    for (const name in this.options.components) {
+      // SAFETY: `options.components` is keyed by entity field names.
+      if (committed[name as keyof E] === undefined) this._removeComponent(id, name, false);
+      else this._addComponent(id, name, false);
+    }
+    this._reconcileTags(id, committed.tags ?? []);
+    this.executeEventSystems(id);
+    return committed;
+  }
+
+  /**
    * Patch an existing entity by `id` with `delta`, or {@link insert} a new one
    * (materialized from `delta`) when `id` is missing/unknown. With `mutating:true`,
    * `undefined` delta keys remove their component (changing the archetype);
@@ -498,8 +532,11 @@ export class ECS<
   public put(id: string | undefined, delta: D, mutating = false): E {
     if (!id) return this.insert(this.options.materializeDelta(delta));
     const entity = this.entity(id);
-    // entity does not exist, insert
-    if (!entity || entity.id !== id) return this.insert(this.options.materializeDelta(delta));
+    // Unknown id: insert under that id rather than a generated one.
+    if (!entity || entity.id !== id) {
+      // SAFETY: BaseEntity carries `id?: string`, so `{ id }` is a valid Partial<E>.
+      return this.insert(this.options.materializeDelta(delta, { id } as Partial<E>));
+    }
     // patch the existing entity
     let executing = false;
     const base: Partial<E> = {};
@@ -1135,24 +1172,30 @@ export class ECS<
    * and deferred until scope completion. Entity reads within the scope see
    * pending mutations via shadow entities.
    * Returns the result and coalesced mutations after execution.
-   * Supports nested scopes - inner scopes inherit parent's shadow state.
+   *
+   * A scope opened while another is active becomes its child: on success it
+   * merges into the parent, which commits. This covers both deliberate nesting
+   * and two async scopes that overlap in time (concurrent RPCs). The world has
+   * a single active-scope slot, so overlapping scopes cannot be isolated: they
+   * join into one commit, and the parent waits for every child to settle before
+   * committing. A child that throws discards its own writes, including any the
+   * parent made while the child held the slot.
    */
   async withScope<T>(fn: () => T | Promise<T>): Promise<{
     result: T;
     mutations: Map<string, MutationRecord<E, D>>;
   }> {
     const scope = this.createScope();
-    const previousScope = this.context.scope;
-
-    // Inherit shadow state from parent scope for nested scope support
-    if (previousScope) {
-      scope.initializeFromParent(previousScope);
+    const parent = this.context.scope;
+    let settle: (() => void) | undefined;
+    if (parent) {
+      scope.initializeFromParent(parent);
+      parent.children.push(new Promise<void>((resolve) => (settle = resolve)));
     }
 
     let succeeded = false;
     try {
       this.context.scope = scope;
-      // Invoke scope-open callbacks (e.g., drain remote changes into scope)
       for (const cb of this._scopeOpenCallbacks) {
         cb(scope);
       }
@@ -1161,39 +1204,34 @@ export class ECS<
       succeeded = true;
       return { result, mutations: scope.mutations };
     } finally {
-      this.context.scope = previousScope!;
+      // Children hold the slot until they settle; restoring it before then
+      // would leave it pointing at a finished scope.
+      while (scope.children.length > 0) await Promise.all(scope.children.splice(0));
+      this.context.scope = parent;
 
-      // Transactional commit: only on success. If `fn` threw, the scope is
-      // discarded and nothing is committed/merged — an aborted scope (inner or
-      // outer) leaves no trace, which is what makes nested scopes atomic
-      // (proposal 19 §4e/§7.1).
-      if (succeeded) {
-        if (previousScope) {
-          // Nested scope: merge this scope's coalesced mutations UP into the
-          // parent instead of flushing to base. The outermost scope owns the
-          // commit, so an inner scope's writes are not committed if the outer
-          // scope later aborts. Routing is deferred to the outermost commit so a
-          // batch is never broadcast twice.
-          for (const [id, mutation] of scope.mutations) {
-            previousScope.applyMutation(id, mutation);
-          }
-        } else {
-          if (this._flushHandler) {
-            // Outermost scope, custom flush handler (e.g., batch all mutations in
-            // a single transaction).
-            this._flushHandler(scope.mutations);
-          } else {
-            // Outermost scope, default: flush coalesced mutations using base
-            // mutator (bypasses wrapper).
+      try {
+        // Transactional commit: only on success. An aborted scope leaves no trace.
+        if (succeeded) {
+          if (parent) {
+            // Merge up; the outermost scope owns the commit and the broadcast.
             for (const [id, mutation] of scope.mutations) {
-              this._baseMutate(id, mutation);
+              parent.applyMutation(id, mutation);
             }
+          } else {
+            if (this._flushHandler) {
+              this._flushHandler(scope.mutations, scope);
+            } else {
+              for (const [id, mutation] of scope.mutations) {
+                this._baseMutate(id, mutation);
+              }
+            }
+            // Broadcast after the authoritative write so observers never see
+            // uncommitted state.
+            this.routeMutations(scope.mutations);
           }
-          // Interest-managed broadcast: fan the committed batch out to interested
-          // observers, AFTER the authoritative write so observers never see
-          // uncommitted state. No-op (and zero cost) when no observers registered.
-          this.routeMutations(scope.mutations);
         }
+      } finally {
+        settle?.();
       }
     }
   }

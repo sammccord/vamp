@@ -27,7 +27,7 @@ function mergeDelta(entity: Entity, delta: EntityDelta): void {
   Object.assign(entity, delta);
 }
 function accumulateDelta(from: EntityDelta, to: EntityDelta): EntityDelta {
-  return { ...from, ...to };
+  return { ...to, ...from };
 }
 
 type State = { scope?: MutationScope<Entity, EntityDelta> };
