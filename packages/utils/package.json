@@ -51,10 +51,7 @@
     "@tempojs/common": "catalog:",
     "@tempojs/server": "catalog:",
     "bebop": "catalog:",
-    "pino": "catalog:",
-    "tseep": "catalog:",
-    "webextension-polyfill": "catalog:",
-    "websocket-ts": "catalog:"
+    "tseep": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
@@ -62,8 +59,27 @@
     "@types/webextension-polyfill": "catalog:",
     "@typescript/native-preview": "7.0.0-dev.20260315.1",
     "bebop-tools": "catalog:",
+    "pino": "catalog:",
     "typescript": "^5.9.3",
     "vite-plus": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "webextension-polyfill": "catalog:",
+    "websocket-ts": "catalog:"
+  },
+  "peerDependencies": {
+    "pino": "catalog:",
+    "webextension-polyfill": "catalog:",
+    "websocket-ts": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "pino": {
+      "optional": true
+    },
+    "webextension-polyfill": {
+      "optional": true
+    },
+    "websocket-ts": {
+      "optional": true
+    }
   }
 }
