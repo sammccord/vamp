@@ -11,6 +11,7 @@
     "@vampgg/cli": "0.1.0"
   },
   "changesets": [
+    "audit-data-integrity-fixes",
     "audit-perf-billing-pass",
     "behavior-trees",
     "beta-1-release",

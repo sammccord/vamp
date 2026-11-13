@@ -1,6 +1,6 @@
 {
   "name": "@vampgg/ecs",
-  "version": "1.0.0-beta.5",
+  "version": "1.0.0-beta.6",
   "description": "Entity-Component-System runtime for @vampgg game state.",
   "homepage": "https://github.com/sammccord/vamp/tree/main/packages/ecs#readme",
   "bugs": {
