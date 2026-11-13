@@ -27,21 +27,30 @@ pnpm add @vampgg/ecs
 
 ## Usage
 
-The world is generic over its context, update args, action union, tag space, and
-entity/delta shapes. You normally get a fully-typed `ECSOptions` from generated
-code (`createECSOptions(...)` emitted by `@vampgg/cli`) rather than writing the
-generics by hand:
+A world is typed by one object naming its types: the entity and delta shapes,
+the world context (`state`), the extra `update()` arguments (`args`), the action
+union, and the tag id space. `DefineWorld` fills defaults for any you leave out.
+Generated code (`@vampgg/cli`) exports this as `GameWorld<Context>`, along with a
+fully-typed `ECSOptions` (`createECSOptions(...)`):
 
 ```ts
-import { createEntitySystem } from "@vampgg/ecs";
+import { createEntitySystem, type DefineWorld } from "@vampgg/ecs";
 import { components } from "./game.generated"; // emitted by @vampgg/cli
-import { type Entity, type EntityDelta } from "./bebop";
+import { type Actions, type Entity, type EntityDelta, type Tags } from "./bebop";
+
+type World = DefineWorld<{
+  entity: Entity;
+  delta: EntityDelta;
+  actions: Actions;
+  tags: Tags;
+  state: Context;
+}>;
 
 // A system runs over every entity matching its query each update(). The executor
 // is `(entities, world) => …`; the second arg builds the query. Read components
 // with `world.entity(id)` and stage changes with `world.put(id, delta)` — writes
 // are coalesced into the active mutation scope and emitted as one batch.
-const regen = createEntitySystem<Context, [], Actions, Tags, Entity, EntityDelta>(
+const regen = createEntitySystem<World>(
   (entities, world) => {
     for (const id of entities) {
       const h = world.entity(id)?.health;
@@ -60,6 +69,22 @@ const players = world.query((q) => q.someTag(Tags.PlayerControlled).every(compon
 world.act(targetId, attackAction); // runs matching behaviors, cascading to children
 ```
 
+### Writing entities
+
+Every write goes through the entity's data, so queries, the store, snapshots,
+and replicas always agree. Inside `withScope` the writes are staged and commit
+together.
+
+| Method                                      | Effect                                                                              |
+| ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `insert(entity)`                            | Add an entity (an id is generated if it has none). Replaces an existing one.        |
+| `put(id, delta)`                            | Apply a delta and return the entity after the change. `undefined` keys are ignored. |
+| `replace(id, entity)`                       | Overwrite with a full snapshot; components it lacks are removed.                    |
+| `removeComponents(id, ...names)`            | Remove fields, and with them the components.                                        |
+| `delete(id)`                                | Remove the entity and return its last state.                                        |
+| `addTag(id, tag)` / `removeTag(id, tag)`    | Change the entity's `tags`.                                                         |
+| `parent(id, child)` / `unparent(id, child)` | Link both sides: the parent's `children` and the child's `parent`.                  |
+
 Server-side, you typically don't construct `ECS` directly — `@vampgg/worker` hosts
 it inside a Durable Object. Client-side, `@vampgg/solid` wraps it as a reactive
 read-replica. See **`examples/basic/`** for the full end-to-end wiring (schema →
@@ -68,13 +93,20 @@ generated options → systems → worker → solid client).
 ### Building a world without codegen
 
 `createECSOptions` (from `@vampgg/cli`) is just a convenience — you can wire an
-`ECS` by hand. You supply the entity map, a `mutate` function (how a
+`ECS` by hand. Name the world's types when constructing it: TypeScript cannot
+infer them back from the arguments. You supply the entity map, a `mutate` function (how a
 `MutationRecord` lands in your store), a context, and `ECSOptions` (component-id
 map + the three delta functions). Note that **numeric deltas are additive**:
 `put(id, { hp: -30 })` on `hp: 100` yields `70`.
 
 ```ts
-import { ECS, type ECSOptions, type EntityMutator, MutationType } from "@vampgg/ecs";
+import {
+  type DefineWorld,
+  ECS,
+  type ECSOptions,
+  type EntityMutator,
+  MutationType,
+} from "@vampgg/ecs";
 
 type Entity = { id?: string; tags?: number[]; hp?: number; faction?: number };
 type EntityDelta = { hp?: number; faction?: number };
@@ -121,10 +153,12 @@ const options: ECSOptions<Entity, EntityDelta> = {
   accumulateDelta,
 };
 
-const world = new ECS(entities, mutate, {}, options);
+type World = DefineWorld<{ entity: Entity; delta: EntityDelta }>;
+
+const world = new ECS<World>(entities, mutate, {}, options);
 world.initialize();
 world.insert({ id: "goblin", hp: 100, tags: [] });
-world.put("goblin", { hp: -30 }); // hp is now 70
+world.put("goblin", { hp: -30 }); // returns { id: "goblin", hp: 70, tags: [] }
 ```
 
 ### Behaviors
@@ -136,16 +170,15 @@ the target **and propagates the same action down to its children**; use
 `actWithBubbling` to travel up through ancestors and `actBatch` for many targets.
 Call `event.preventDefault()` to halt propagation.
 
-Mutators (`insert`, `addComponent`, `transformEntity`, …) defer the behavior-cache
-rebuild to the next `update()`, but `act`/`actWithBubbling` rebuild a pending entity
-on read. You can therefore dispatch immediately after a mutation — even in a purely
-reactive world that never ticks `update()` — without calling `rebuildBehaviorCache`
-yourself.
+You can dispatch immediately after a mutation, even inside the same scope or in a
+purely reactive world that never ticks `update()`: `act` resolves an entity's
+behaviors from its current components. `behaviorsFor(id, tag)` returns the
+behaviors `act` would run.
 
 ```ts
 import { createBehavior } from "@vampgg/ecs";
 
-const onAttack = createBehavior<Context, [], Actions, Tags, Entity, EntityDelta>(
+const onAttack = createBehavior<World>(
   1, // action tag
   (world, entity, event) => {
     const dmg = (event.detail.value as { damage?: number }).damage ?? 0;

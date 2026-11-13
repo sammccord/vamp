@@ -57,8 +57,8 @@ export function GameProvider<E extends BaseEntity, D, C>(
     // returned map is the coalesced batch reflecting the merged final state.
     const { mutations } = await world.withScope(() => {
       if (snapshot) {
-        for (const [id, entity] of world.entities) {
-          if (!frame.mutations?.has(id)) world.delete(entity);
+        for (const id of [...world.entities.keys()]) {
+          if (!frame.mutations?.has(id)) world.delete(id);
         }
       }
       if (frame.mutations) world.applyMutations(frame.mutations);

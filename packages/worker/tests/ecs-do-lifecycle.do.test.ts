@@ -5,7 +5,6 @@ import {
   createEntitySystem,
   type ECS,
   type ECSOptions,
-  type GenericAction,
   MutationRecord,
   MutationType,
 } from "@vampgg/ecs";
@@ -14,9 +13,10 @@ import * as Y from "yjs";
 import type { YStreamClientOptions, YStreamProviderStub } from "y-durablestream";
 import {
   type ContextSeed,
+  type DefineGame,
   defineECSRuntime,
   ECSDurableObject,
-  type RuntimeContext,
+  type RuntimeWorld,
   type ShardSyncClient,
 } from "../src/ecs.ts";
 import { entitiesMap, readAllEntities, writeEntityInsert } from "../src/entity-doc.ts";
@@ -84,15 +84,7 @@ class FakeYStreamClient implements ShardSyncClient {
   disconnect(): void {}
 }
 
-class TestECSDurableObject extends ECSDurableObject<
-  {},
-  {},
-  [],
-  GenericAction,
-  number,
-  Entity,
-  Delta
-> {
+class TestECSDurableObject extends ECSDurableObject<TestGame> {
   protected override createSyncClient(doc: Y.Doc, options: YStreamClientOptions): ShardSyncClient {
     return new FakeYStreamClient(doc, options.stub);
   }
@@ -122,7 +114,8 @@ const ecsOptions = {
   accumulateDelta: (from: Delta, to: Delta): Delta => ({ ...to, ...from }),
 } satisfies ECSOptions<Entity, Delta>;
 
-type TestWorld = ECS<RuntimeContext<{}, {}>, [], GenericAction, number, Entity, Delta>;
+type TestGame = DefineGame<{ entity: Entity; delta: Delta }>;
+type TestWorld = ECS<RuntimeWorld<TestGame>>;
 
 // Registers a system that increments `n` on every entity carrying the `n`
 // component each tick — the observable proof that a tick actually ran.
@@ -299,7 +292,7 @@ interface RuntimeOverrides {
 }
 
 function configureRuntime(overrides: RuntimeOverrides = {}) {
-  defineECSRuntime<{}, {}, [], GenericAction, number, Entity, Delta>(() => ({
+  defineECSRuntime<TestGame>(() => ({
     serviceRegistry: new TestRegistry(logger),
     ecs: ecsOptions,
     ...overrides,
@@ -571,6 +564,26 @@ describe("ECSDurableObject — request-scoped catch-up tick", () => {
     // decode error is caught + framed back to the client. We assert the tick ran.
     await instance.webSocketMessage(ws, new Uint8Array([0, 0, 0]).buffer);
     expect(instance.ecs.entity("ticker").n).toBe(2);
+  });
+});
+
+describe("ECSDurableObject — alarm-driven ticking", () => {
+  test("stepTick on an evicted DO with no sockets restores the world and ticks it", async () => {
+    configureRuntime({ registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const first = newDO(makeCtx(storage), makeEnv(makeProviderStub()));
+    await first.setup("room1");
+    await first.ecs.withScope(() => first.ecs.insert({ id: "ticker", n: 0 }));
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Evicted: a fresh instance over the same storage, with no hibernated sockets,
+    // woken by an alarm that calls stepTick.
+    const stub = makeProviderStub();
+    Y.applyUpdate(stub.__providerDoc, Y.encodeStateAsUpdate(first.shards.docFor("game/room1")));
+    const woken = newDO(makeCtx(storage), makeEnv(stub));
+    await woken.stepTick();
+
+    expect(woken.ecs.entity("ticker").n).toBe(1);
   });
 });
 

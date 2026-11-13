@@ -146,30 +146,24 @@ describe("emitFactory", () => {
 });
 
 describe("emitTypedClasses", () => {
-  it("generates typed DO aliases with given tags type", () => {
-    const result = emitClasses("Tags");
+  it("generates typed DO aliases over the schema's GameWorld", () => {
+    const result = emitClasses();
     expect(result).toContain("GameECS");
     expect(result).toContain("GameStorage");
-    expect(result).toContain("ECSDurableObject");
     expect(result).toContain("ECSStorage<Entity>");
-    expect(result).toMatch(/,(\s*)Tags,/);
-  });
-
-  it("defaults to number when no tags type given", () => {
-    const result = emitClasses();
-    expect(result).toMatch(/,(\s*)number,/);
+    expect(result).toContain("> = GameWorld<Context, UpdateArguments> & { session: UserSession };");
+    expect(result).toContain(
+      "extends ECSDurableObject<GameServerTypes<UserSession, Context, UpdateArguments>, Env> {}",
+    );
   });
 
   it("exposes an overridable Env generic defaulting to Cloudflare.Env", () => {
-    const result = emitClasses("Tags");
+    const result = emitClasses();
     expect(result).toContain("Env = Cloudflare.Env,");
-    // Env is threaded through to ECSDurableObject (not the literal Cloudflare.Env).
-    expect(result).toMatch(/EntityDelta,\s*Env\s*>\s*\{\}/);
-    expect(result).not.toContain("EntityDelta,\n    Cloudflare.Env");
   });
 
   it("uses a custom env type when provided", () => {
-    const result = emitClasses("Tags", "unknown");
+    const result = emitClasses("unknown");
     expect(result).toContain("Env = unknown,");
     expect(result).not.toContain("Cloudflare.Env,");
   });
@@ -180,7 +174,7 @@ describe("emitGameContext", () => {
     const result = emitGameContext();
     expect(result).toContain("export type GameContext");
     expect(result).toContain(
-      "RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>",
+      "> = RPCContext<GameServerTypes<UserSession, Context, UpdateArguments>>;",
     );
   });
 });
@@ -202,35 +196,37 @@ describe("emitSystems", () => {
     expect(result).toContain("export const ActionTag = {\n  Attack: 1,\n  Heal: 3,\n} as const;");
   });
 
-  it("bakes concrete Actions/Tags/Entity/EntityDelta into each generic system alias", () => {
+  it("emits a GameWorld with the schema's types baked in and State/UpdateArguments open", () => {
     expect(result).toContain(
-      "export type GameEntitySystem<\n  State extends Record<string, unknown> = {},\n  UpdateArguments extends Array<unknown> = [],\n> = EntitySystem<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;",
+      "export type GameWorld<\n  State extends object = {},\n  UpdateArguments extends Array<unknown> = [],\n> = {\n  entity: Entity;\n  delta: EntityDelta;\n  actions: Actions;\n  tags: Tags;\n  state: State;\n  args: UpdateArguments;\n};",
     );
-    expect(result).toContain(
-      "> = ArchetypeSystem<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;",
-    );
-    expect(result).toContain(
-      "> = Behavior<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;",
-    );
-    expect(result).toContain(
-      "> = System<State, UpdateArguments, Actions, Tags, Entity, EntityDelta>;",
-    );
+  });
+
+  it("routes each generic system alias through GameWorld", () => {
+    expect(result).toContain("> = EntitySystem<GameWorld<State, UpdateArguments>>;");
+    expect(result).toContain("> = ArchetypeSystem<GameWorld<State, UpdateArguments>>;");
+    expect(result).toContain("> = Behavior<GameWorld<State, UpdateArguments>>;");
+    expect(result).toContain("> = System<GameWorld<State, UpdateArguments>>;");
   });
 
   it("emits create wrappers that keep State/UpdateArguments open and reuse the alias param types", () => {
     expect(result).toContain("export function createGameEntitySystem<");
     expect(result).toContain('execute: GameEntitySystem<State, UpdateArguments>["execute"],');
-    expect(result).toContain("return createEntitySystem(execute, query);");
+    expect(result).toContain(
+      "return createEntitySystem<GameWorld<State, UpdateArguments>>(execute, query);",
+    );
 
     expect(result).toContain("export function createGameArchetypeSystem<");
-    expect(result).toContain("return createArchetypeSystem(execute, query);");
+    expect(result).toContain(
+      "return createArchetypeSystem<GameWorld<State, UpdateArguments>>(execute, query);",
+    );
 
     expect(result).toContain("export function createGameBehavior<");
     expect(result).toContain("tag: Tag,");
+    expect(result).toContain("handler: BehaviorHandler<GameWorld<State, UpdateArguments>, Tag>,");
     expect(result).toContain(
-      "handler: BehaviorHandler<State, UpdateArguments, Actions, Tags, Entity, EntityDelta, Tag>,",
+      "return createBehavior<GameWorld<State, UpdateArguments>, Tag>(tag, handler, query, priority);",
     );
-    expect(result).toContain("return createBehavior(tag, handler, query, priority);");
   });
 });
 
@@ -254,14 +250,14 @@ describe("jsdoc on public exports", () => {
 
   it("documents the factory, durable-object classes, and context alias", () => {
     eachExportHasJsdoc(emitFactory());
-    eachExportHasJsdoc(emitClasses("Tags"));
+    eachExportHasJsdoc(emitClasses());
     eachExportHasJsdoc(emitGameContext());
   });
 
   it("documents every generated system alias and factory", () => {
     const result = emitSystems(ACTIONS_UNION);
     eachExportHasJsdoc(result);
-    // ActionTag + 4 aliases + 3 factories, each with its own block.
-    expect((result.match(/\/\*\*/g) ?? []).length).toBe(8);
+    // ActionTag + GameWorld + 4 aliases + 3 factories, each with its own block.
+    expect((result.match(/\/\*\*/g) ?? []).length).toBe(9);
   });
 });

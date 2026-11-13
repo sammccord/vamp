@@ -63,12 +63,6 @@ export class RpcService extends BaseRpcService {
     await ecs.withScope(async () => {
       if (!target) return;
       if (!ecs.entity(target)) return;
-      // Entities spawned since the last `update()` only have a *deferred* behavior
-      // cache rebuild pending. This DO is purely reactive (no tick loop unless the
-      // client calls `tick`), so force the rebuild here to guarantee `act`
-      // dispatches to the registered behaviors. Cached at the archetype level, so
-      // repeated dispatches to the same shape are cheap.
-      if (!ecs.entityBehaviorCache.has(target)) ecs.rebuildBehaviorCache(target);
       // Dispatch through the registered behaviors. `act` runs the behaviors whose
       // query matches the target, then propagates the same action down to every
       // child (so AreaAttack on a parent cascades through its subtree).

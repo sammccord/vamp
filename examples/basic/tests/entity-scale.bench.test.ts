@@ -1,10 +1,12 @@
-import { createBaseMutator, ECS, type ECSOptions } from "@vampgg/ecs";
+import { createBaseMutator, type DefineWorld, ECS, type ECSOptions } from "@vampgg/ecs";
 import { nanoid } from "nanoid";
 import { describe, expect, it } from "vitest";
 import { applyUpdate, Doc, encodeStateAsUpdate, Map as YMap } from "yjs";
 
 import { entitiesMap, writeEntityInsert } from "../../../packages/worker/src/entity-doc";
 import { type Entity, type EntityDelta, Tags } from "../src/bebop";
+
+type BenchWorld = DefineWorld<{ entity: Entity; delta: EntityDelta }>;
 
 /**
  * ENTITY-SCALE BENCHMARK (node-level; no workerd).
@@ -248,7 +250,7 @@ function buildOldScheme(n: number, make: (i: number) => Entity): Doc {
 function seedMs(doc: Doc): number {
   const entities = new Map<string, Entity>();
   const options = makeOptions();
-  const ecs = new ECS(entities, createBaseMutator(entities, options), {}, options);
+  const ecs = new ECS<BenchWorld>(entities, createBaseMutator(entities, options), {}, options);
   ecs.initialize();
 
   const parent = entitiesMap(doc);
@@ -531,7 +533,7 @@ describe("entity scale (per-shard cap + sharded global)", () => {
     const doc = buildDoc(N, richEntity);
     const store = new Map<string, Entity>();
     const options = makeOptions();
-    const ecs = new ECS(store, createBaseMutator(store, options), {}, options);
+    const ecs = new ECS<BenchWorld>(store, createBaseMutator(store, options), {}, options);
     ecs.initialize();
     const parent = entitiesMap(doc);
     const observers: Array<() => void> = [];

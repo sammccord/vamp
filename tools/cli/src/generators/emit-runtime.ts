@@ -14,15 +14,15 @@
 export function emitRuntime(): string {
   return `/** App-typed {@link ECSRuntimeConfiguration} — the worker runtime config with this schema's types baked in. */
 export type GameECSRuntimeConfiguration<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
-> = ECSRuntimeConfiguration<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
+> = ECSRuntimeConfiguration<GameServerTypes<UserSession, Context, UpdateArguments>>;
 
 /** Factory returning a {@link GameECSRuntimeConfiguration}; pass it to {@link defineGameECSRuntime}. */
 export type GameECSRuntimeProvider<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
 > = () => GameECSRuntimeConfiguration<UserSession, Context, UpdateArguments>;
 
@@ -32,10 +32,10 @@ export type GameECSRuntimeProvider<
  * the worker entry.
  */
 export function defineGameECSRuntime<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
 >(provider: GameECSRuntimeProvider<UserSession, Context, UpdateArguments>): void {
-  defineECSRuntime(provider);
+  defineECSRuntime<GameServerTypes<UserSession, Context, UpdateArguments>>(provider);
 }`;
 }

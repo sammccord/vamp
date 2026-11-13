@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyArrayDelta,
+  type ArrayDelta,
   createBaseMutator,
   createBehavior,
   createEntitySystem,
@@ -11,27 +13,53 @@ import {
   type QueryBuilder,
 } from "../src/index.ts";
 
+type TestWorld = {
+  state: {};
+  args: [];
+  actions: Action;
+  tags: number;
+  entity: Entity;
+  delta: Delta;
+};
+
 interface Entity {
   id?: string;
   tags?: number[];
   hp?: number;
   mp?: number;
+  parent?: string;
+  children?: string[];
 }
-type Delta = { id?: string; tags?: number[]; hp?: number; mp?: number };
+type Delta = {
+  id?: string;
+  tags?: number[];
+  hp?: number;
+  mp?: number;
+  parent?: string;
+  children?: ArrayDelta<string>;
+};
 type Action = { tag: number; value: unknown };
-type World = ECS<{}, [], Action, number, Entity, Delta>;
+type World = ECS<TestWorld>;
 
 const components = { id: 1, hp: 2, mp: 3 };
 
-function createWorld() {
+function createWorld(initialize = true) {
   let n = 0;
   const options: ECSOptions<Entity, Delta> = {
     createId: () => `gen${n++}`,
     components,
-    materializeDelta: (delta: Delta, base?: Partial<Entity>): Entity => ({ ...base, ...delta }),
+    materializeDelta: (delta: Delta, base?: Partial<Entity>): Entity => {
+      const { children, ...rest } = delta;
+      const out: Entity = { ...base, ...rest };
+      if (children) out.children = applyArrayDelta(base?.children ?? [], children);
+      return out;
+    },
     mergeDelta: (entity: Entity, delta: Delta): void => {
       if (delta.hp !== undefined) entity.hp = (entity.hp ?? 0) + delta.hp;
       if (delta.mp !== undefined) entity.mp = (entity.mp ?? 0) + delta.mp;
+      if (delta.tags !== undefined) entity.tags = delta.tags;
+      if (delta.parent !== undefined) entity.parent = delta.parent;
+      if (delta.children) entity.children = applyArrayDelta(entity.children ?? [], delta.children);
     },
     accumulateDelta: (from: Delta, to: Delta): Delta => {
       if (from.hp !== undefined) to.hp = (to.hp ?? 0) + from.hp;
@@ -41,7 +69,7 @@ function createWorld() {
   };
   const entities = new Map<string, Entity>();
   const world: World = new ECS(entities, createBaseMutator(entities, options), {}, options);
-  world.initialize();
+  if (initialize) world.initialize();
   return { world, entities };
 }
 
@@ -65,7 +93,7 @@ describe("aborted scopes", () => {
     world.insert({ id: "y", hp: 1 });
     await world
       .withScope(() => {
-        world.delete({ id: "y" });
+        world.delete("y");
         throw new Error("boom");
       })
       .catch(() => {});
@@ -120,9 +148,7 @@ describe("behaviors", () => {
   it("run for an entity inserted earlier in the same scope", async () => {
     const { world } = createWorld();
     let runs = 0;
-    world.registerBehavior(
-      createBehavior<{}, [], Action, number, Entity, Delta>(1, () => void runs++, withHp),
-    );
+    world.registerBehavior(createBehavior<TestWorld>(1, () => void runs++, withHp));
     await world.withScope(async () => {
       world.insert({ id: "a", hp: 1 });
       await world.act("a", { tag: 1, value: undefined });
@@ -137,9 +163,7 @@ describe("registration", () => {
     const { world } = createWorld();
     world.insert({ id: "a", hp: 1 });
     let runs = 0;
-    const off = world.registerBehavior(
-      createBehavior<{}, [], Action, number, Entity, Delta>(1, () => void runs++, withHp),
-    );
+    const off = world.registerBehavior(createBehavior<TestWorld>(1, () => void runs++, withHp));
     await world.act("a", { tag: 1, value: undefined });
     off();
     off();
@@ -149,15 +173,15 @@ describe("registration", () => {
   });
 
   it("exports its error classes", async () => {
-    const { EntityNotExistError } = await import("../src/index.ts");
-    const { world } = createWorld();
-    expect(() => world.deleteEntity("nope")).toThrow(EntityNotExistError);
+    const { WorldNotInitializedError } = await import("../src/index.ts");
+    const { world } = createWorld(false);
+    expect(() => world.update()).toThrow(WorldNotInitializedError);
   });
 
   it("a second unsubscribe is a no-op", () => {
     const { world } = createWorld();
-    const a = createEntitySystem<{}, [], Action, number, Entity, Delta>(() => {}, withHp);
-    const b = createEntitySystem<{}, [], Action, number, Entity, Delta>(() => {}, withHp);
+    const a = createEntitySystem<TestWorld>(() => {}, withHp);
+    const b = createEntitySystem<TestWorld>(() => {}, withHp);
     const offA = world.registerSystem(a);
     world.registerSystem(b);
     offA();
@@ -166,7 +190,7 @@ describe("registration", () => {
   });
 
   it("rejects a system already registered with another world", () => {
-    const system = createEntitySystem<{}, [], Action, number, Entity, Delta>(() => {}, withHp);
+    const system = createEntitySystem<TestWorld>(() => {}, withHp);
     createWorld().world.registerSystem(system);
     expect(() => createWorld().world.registerSystem(system)).toThrow(/another ECS world/);
   });
@@ -181,16 +205,17 @@ describe("entity writes", () => {
     expect(world.query(withHp)).toEqual([]);
   });
 
-  it("put with an undefined key adds no component unless mutating", () => {
+  it("put ignores undefined keys; removeComponents removes data and component", () => {
     const { world } = createWorld();
     world.insert({ id: "a", hp: 1, mp: 1 });
     world.put("a", { hp: undefined });
     expect(world.hasComponent("a", "hp")).toBe(true);
-    world.put("a", { mp: undefined }, true);
-    expect(world.hasComponent("a", "mp")).toBe(false);
     world.insert({ id: "b", hp: 1 });
     world.put("b", { mp: undefined });
     expect(world.hasComponent("b", "mp")).toBe(false);
+
+    expect(world.removeComponents("a", "mp")).toEqual({ id: "a", hp: 1 });
+    expect(world.hasComponent("a", "mp")).toBe(false);
   });
 });
 
@@ -233,7 +258,7 @@ describe("update()", () => {
     const { world } = createWorld();
     const visits = new Map<string, number>();
     world.registerSystem(
-      createEntitySystem<{}, [], Action, number, Entity, Delta>((ids: string[], w: World) => {
+      createEntitySystem<TestWorld>((ids: string[], w: World) => {
         for (const id of ids) {
           visits.set(id, (visits.get(id) ?? 0) + 1);
           if (!w.hasComponent(id, "mp")) w.put(id, { mp: 1 });
@@ -284,5 +309,60 @@ describe("cost of reactive paths", () => {
     });
     expect(delivered).toEqual([mutations, mutations]);
     expect(delivered[0]).toBe(mutations);
+  });
+});
+
+describe("data-level writes", () => {
+  it("put returns the entity after the change", () => {
+    const { world } = createWorld();
+    world.insert({ id: "a", hp: 10 });
+    expect(world.put("a", { hp: -3 })).toEqual({ id: "a", hp: 7 });
+  });
+
+  it("addTag and removeTag change the entity's tags, not just its archetype", () => {
+    const { world } = createWorld();
+    world.insert({ id: "a", hp: 1 });
+    world.addTag("a", 7);
+    expect(world.entity("a")?.tags).toEqual([7]);
+    expect(world.hasTag("a", 7)).toBe(true);
+    expect(world.snapshotMutations(() => true).get("a")).toMatchObject({
+      value: { entity: { tags: [7] } },
+    });
+    world.removeTag("a", 7);
+    expect(world.entity("a")?.tags).toEqual([]);
+    expect(world.hasTag("a", 7)).toBe(false);
+  });
+
+  it("parent sets both sides and reparenting detaches from the old parent", () => {
+    const { world } = createWorld();
+    for (const id of ["p1", "p2", "c"]) world.insert({ id, hp: 1 });
+    world.parent("p1", "c");
+    expect(world.entity("c")?.parent).toBe("p1");
+    expect(world.entity("p1")?.children).toEqual(["c"]);
+
+    world.parent("p2", "c");
+    expect(world.entity("c")?.parent).toBe("p2");
+    expect(world.entity("p1")?.children).toEqual([]);
+    expect(world.entity("p2")?.children).toEqual(["c"]);
+
+    world.unparent("p2", "c");
+    expect(world.entity("c")?.parent).toBeUndefined();
+    expect(world.entity("p2")?.children).toEqual([]);
+  });
+
+  it("actWithBubbling reaches the parent set by parent()", async () => {
+    const { world } = createWorld();
+    for (const id of ["p", "c"]) world.insert({ id, hp: 1 });
+    world.parent("p", "c");
+    const reached: string[] = [];
+    world.registerBehavior(
+      createBehavior<TestWorld>(
+        1,
+        (_w: World, entity: Entity) => void reached.push(entity.id!),
+        withHp,
+      ),
+    );
+    await world.actWithBubbling("c", { tag: 1, value: undefined });
+    expect(reached).toEqual(["c", "p"]);
   });
 });

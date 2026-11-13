@@ -2,9 +2,19 @@
 import type { MutationBatch } from "@vampgg/ecs";
 import { defineECSRuntime, ECSDurableObject, ECSStorage, type ECSRuntimeConfiguration, type RPCContext } from "@vampgg/worker";
 import { createInterestBroadcast, type InterestBroadcastConfig } from "@vampgg/worker/interest";
-import type { Entity, Actions, Tags } from "./bebop.js";
+import type { Entity } from "./bebop.js";
 import { MutationScope, type MutationRecord } from "./bebop.js";
-import type { EntityDelta } from "./game.core.generated.js";
+import type { EntityDelta, GameWorld } from "./game.core.generated.js";
+
+/**
+ * The {@link GameTypes} a durable object for this schema runs with: the
+ * schema's {@link GameWorld} plus the per-connection `UserSession`.
+ */
+export type GameServerTypes<
+  UserSession extends object = {},
+  Context extends object = {},
+  UpdateArguments extends Array<unknown> = [],
+> = GameWorld<Context, UpdateArguments> & { session: UserSession };
 
 /**
  * App-typed {@link ECSDurableObject}: this schema's `Actions`/`Tags`/`Entity`/
@@ -13,20 +23,11 @@ import type { EntityDelta } from "./game.core.generated.js";
  * Subclass this as your game's durable object.
  */
 export class GameECS<
-    UserSession extends {} = {},
-    Context extends {} = {},
+    UserSession extends object = {},
+    Context extends object = {},
     UpdateArguments extends Array<unknown> = [],
     Env = Cloudflare.Env,
-  > extends ECSDurableObject<
-    UserSession,
-    Context,
-    UpdateArguments,
-    Actions,
-    Tags,
-    Entity,
-    EntityDelta,
-    Env
-  > {}
+  > extends ECSDurableObject<GameServerTypes<UserSession, Context, UpdateArguments>, Env> {}
 
 /** App-typed {@link ECSStorage} over this schema's {@link Entity}. */
 export class GameStorage extends ECSStorage<Entity> {}
@@ -37,22 +38,22 @@ export class GameStorage extends ECSStorage<Entity> {}
  * the `[ECS, WebSocket]` tuple carrying the live world.
  */
 export type GameContext<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
-> = RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
+> = RPCContext<GameServerTypes<UserSession, Context, UpdateArguments>>;
 
 /** App-typed {@link ECSRuntimeConfiguration} — the worker runtime config with this schema's types baked in. */
 export type GameECSRuntimeConfiguration<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
-> = ECSRuntimeConfiguration<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>;
+> = ECSRuntimeConfiguration<GameServerTypes<UserSession, Context, UpdateArguments>>;
 
 /** Factory returning a {@link GameECSRuntimeConfiguration}; pass it to {@link defineGameECSRuntime}. */
 export type GameECSRuntimeProvider<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
 > = () => GameECSRuntimeConfiguration<UserSession, Context, UpdateArguments>;
 
@@ -62,11 +63,11 @@ export type GameECSRuntimeProvider<
  * the worker entry.
  */
 export function defineGameECSRuntime<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
 >(provider: GameECSRuntimeProvider<UserSession, Context, UpdateArguments>): void {
-  defineECSRuntime(provider);
+  defineECSRuntime<GameServerTypes<UserSession, Context, UpdateArguments>>(provider);
 }
 
 /**
@@ -75,8 +76,8 @@ export function defineGameECSRuntime<
  * scope what each observer sees, or omit `config` for a global broadcast.
  */
 export function createGameInterestBroadcast<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
 >(
   config: Partial<

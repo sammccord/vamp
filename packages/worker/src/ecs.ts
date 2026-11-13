@@ -4,12 +4,13 @@ import {
   applyMutation,
   type BaseEntity,
   clonePlainValue,
+  type DefineWorld,
   createBaseMutator,
   ECS,
   type ECSOptions,
-  type GenericAction,
   MutationRecord,
   MutationType,
+  type WorldTypes,
 } from "@vampgg/ecs";
 import { Message } from "@vampgg/utils/bebop";
 import type { ContextLogger } from "@vampgg/utils/context-logger";
@@ -24,12 +25,7 @@ import type { Doc, Transaction, Map as YMap, YMapEvent } from "yjs";
 import { entitiesMap, removeEntity, writeEntityInsert, writeMergedUpdate } from "./entity-doc";
 import { toError } from "./errors";
 import { ShardManager } from "./shard-manager";
-import {
-  applyKeyChange,
-  componentKeysToReconcile,
-  raceWithBoundedTimer,
-  shouldCompactThisTick,
-} from "./reconcile-helpers";
+import { raceWithBoundedTimer, shouldCompactThisTick } from "./reconcile-helpers";
 
 /** Socket-attachment keys the framework owns (e.g. the interest subscription). */
 const FRAMEWORK_KEY_PREFIX = "__vamp:";
@@ -57,6 +53,30 @@ function withFrameworkKeys<UserSession extends {}>(
 /** Close codes a peer may report but an endpoint must never send (RFC 6455 §7.4.1). */
 const RESERVED_CLOSE_CODES = new Set([1005, 1006, 1015]);
 
+/**
+ * The type parameters of a game hosted by {@link ECSDurableObject}: its ECS
+ * world plus the per-connection `session` object stored on each socket. Build
+ * one with {@link DefineGame}.
+ */
+export interface GameTypes extends WorldTypes {
+  session: object;
+}
+
+/** A {@link GameTypes} from the keys you care about; see `DefineWorld` for the defaults. */
+export type DefineGame<T extends { entity: BaseEntity } & Partial<GameTypes>> = DefineWorld<T> & {
+  session: T extends { session: infer S extends object } ? S : {};
+};
+
+/** The ECS world a durable object runs: the game's world with a runtime context as its state. */
+export type RuntimeWorld<G extends GameTypes> = {
+  entity: G["entity"];
+  delta: G["delta"];
+  actions: G["actions"];
+  tags: G["tags"];
+  args: G["args"];
+  state: RuntimeContext<G["session"], G["state"]>;
+};
+
 export type RuntimeContext<UserSession extends {}, Context extends {}> = Context & {
   // internal properties extended by ecs runtime, available to ecs systems for low-level usage
   _: {
@@ -65,29 +85,7 @@ export type RuntimeContext<UserSession extends {}, Context extends {}> = Context
   };
 };
 
-export type RPCContext<
-  UserSession extends {},
-  Context extends Record<string, unknown>,
-  UpdateArguments extends Array<unknown>,
-  Actions extends GenericAction,
-  Tags extends number = number,
-  Entity extends BaseEntity<Tags> = BaseEntity<Tags>,
-  EntityDelta = unknown,
-> = [
-  ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Actions, Tags, Entity, EntityDelta>,
-  WebSocket,
-];
-
-/**
- * A remote "update" reconcile entry pending drain into the next scope. Holds the
- * component keys a remote change added/removed so the reconcile path can route
- * them through `addComponent`/`removeComponent`.
- */
-interface PendingUpdateEntry {
-  type: "update";
-  addedKeys: Set<string>;
-  removedKeys: Set<string>;
-}
+export type RPCContext<G extends GameTypes = GameTypes> = [ECS<RuntimeWorld<G>>, WebSocket];
 
 /** A structured-clone-safe value a context seed may hold: it crosses DO RPC and DO storage. */
 export type ContextSeedValue =
@@ -113,15 +111,7 @@ type PersistedBootstrap = {
  * instance (the tempo service registry) that cannot cross the Durable Object
  * RPC boundary, so it must be constructed inside the DO isolate.
  */
-export interface ECSRuntimeConfiguration<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
-  UpdateArguments extends Array<unknown> = [],
-  Actions extends GenericAction = GenericAction,
-  Tags extends number = number,
-  Entity extends BaseEntity<Tags> = BaseEntity<Tags>,
-  EntityDelta = unknown,
-> {
+export interface ECSRuntimeConfiguration<G extends GameTypes = GameTypes> {
   // Logger for the durable object and its tempo rpc router. Defaults to a pino
   // logger named "ecs".
   logger?: ContextLogger;
@@ -138,38 +128,26 @@ export interface ECSRuntimeConfiguration<
   // The tempo rpc service registry the generated game services are registered with.
   serviceRegistry: ServiceRegistry;
   // Optional hooks for tempo rpc middleware.
-  hooks?: HookRegistry<
-    ServerContext,
-    RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>
-  >;
+  hooks?: HookRegistry<ServerContext, RPCContext<G>>;
   // ECS options to configure the ecs runtime.
-  ecs: ECSOptions<Entity, EntityDelta>;
+  ecs: ECSOptions<G["entity"], G["delta"]>;
   // General context to make available within ecs systems. Treated as the static
   // default; any runtime-resolved context (see `resolveContext`) is merged over it.
-  context?: Context;
+  context?: G["state"];
   // Derive the typed `Context` from the serializable seed passed to `setup()`
   // (and re-passed on hibernation wake). This is the place to run an async
   // DB/binding lookup. It is re-run on every cold bootstrap, INCLUDING after a
   // hibernation wake, so the world is re-derived with fresh data — only the seed
   // is persisted/serialized, the resolved context need not be. If omitted, the
   // seed itself is spread directly as the context (the plain query-params case).
-  resolveContext?: (seed: ContextSeed) => Context | Promise<Context>;
+  resolveContext?: (seed: ContextSeed) => G["state"] | Promise<G["state"]>;
   // Register systems/behaviors/subscriptions on the ECS world during bootstrap,
   // before it is initialized. Invoked synchronously inside the DO isolate with
   // the freshly-constructed world, so apps can wire `registerSystem`,
   // `registerBehavior`, `subscribe`, `onCreate`, etc. without crossing the RPC
   // boundary. Runs before `initialize()`, so the system queries are swept over
   // the full archetype graph during the same bootstrap.
-  registerSystems?: (
-    ecs: ECS<
-      RuntimeContext<UserSession, Context>,
-      UpdateArguments,
-      Actions,
-      Tags,
-      Entity,
-      EntityDelta
-    >,
-  ) => void;
+  registerSystems?: (ecs: ECS<RuntimeWorld<G>>) => void;
   // Max decodable frame size (bytes) for the YStreamClient. The whole global
   // doc syncs as one frame on connect, so this caps the syncable world size:
   // ceiling ≈ maxFrameSize / per-entity-bytes. Defaults to 8 MB (≈18k rich /
@@ -183,10 +161,10 @@ export interface ECSRuntimeConfiguration<
   // still hibernates when idle. Unset/zero keeps the world purely reactive.
   tickIntervalMs?: number;
   // Provider of the `update(...)` arguments for each tick (e.g. `[dt]`).
-  tickArgs?: () => UpdateArguments;
+  tickArgs?: () => G["args"];
   // Hook to broadcast the tick's coalesced mutations to observers, mirroring the
   // app's RPC broadcast. If omitted, tick mutations are flushed to the doc only.
-  broadcastTick?: (mutations: Map<string, MutationRecord<Entity, EntityDelta>>) => void;
+  broadcastTick?: (mutations: Map<string, MutationRecord<G["entity"], G["delta"]>>) => void;
   // Force a periodic `commit`/compaction every N ticks (0 disables).
   compactEveryNTicks?: number;
   // Called on the close/error path for each connection. Apps register this to
@@ -200,36 +178,10 @@ export interface ECSRuntimeConfiguration<
   // ECS observers from durable state persisted in the socket's attachment
   // (`ws.serializeAttachment`), so the generator-free interest-managed broadcast
   // resumes without the original `observe` generator. See README §hibernation.
-  rehydrateConnection?: (
-    ecs: ECS<
-      RuntimeContext<UserSession, Context>,
-      UpdateArguments,
-      Actions,
-      Tags,
-      Entity,
-      EntityDelta
-    >,
-    ws: WebSocket,
-  ) => void;
+  rehydrateConnection?: (ecs: ECS<RuntimeWorld<G>>, ws: WebSocket) => void;
 }
 
-export type ECSRuntimeProvider<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
-  UpdateArguments extends Array<unknown> = [],
-  Actions extends GenericAction = GenericAction,
-  Tags extends number = number,
-  Entity extends BaseEntity<Tags> = BaseEntity<Tags>,
-  EntityDelta = unknown,
-> = () => ECSRuntimeConfiguration<
-  UserSession,
-  Context,
-  UpdateArguments,
-  Actions,
-  Tags,
-  Entity,
-  EntityDelta
->;
+export type ECSRuntimeProvider<G extends GameTypes = GameTypes> = () => ECSRuntimeConfiguration<G>;
 
 /**
  * Module-level runtime provider. The application's worker entry registers it via
@@ -243,7 +195,7 @@ export type ECSRuntimeProvider<
 // (and mirrors the pre-generic provider, whose members were `any`). The
 // strongly-typed app provider is widened into this on register.
 // biome-ignore lint/suspicious/noExplicitAny: provider is app-defined and erased at the boundary
-type ErasedRuntimeConfiguration = ECSRuntimeConfiguration<any, any, any, any, any, any, any>;
+type ErasedRuntimeConfiguration = ECSRuntimeConfiguration<any>;
 
 let _runtimeProvider: (() => ErasedRuntimeConfiguration) | undefined;
 
@@ -255,24 +207,8 @@ let _runtimeProvider: (() => ErasedRuntimeConfiguration) | undefined;
  * `setup()` re-casts each field to the DO's concrete generic parameters before
  * use, so the strongly-typed app provider is safe to widen here.
  */
-export function defineECSRuntime<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
-  UpdateArguments extends Array<unknown> = [],
-  Actions extends GenericAction = GenericAction,
-  Tags extends number = number,
-  Entity extends BaseEntity<Tags> = BaseEntity<Tags>,
-  EntityDelta = unknown,
->(
-  provider: ECSRuntimeProvider<
-    UserSession,
-    Context,
-    UpdateArguments,
-    Actions,
-    Tags,
-    Entity,
-    EntityDelta
-  >,
+export function defineECSRuntime<G extends GameTypes = GameTypes>(
+  provider: ECSRuntimeProvider<G>,
 ): void {
   _runtimeProvider = provider;
 }
@@ -285,35 +221,17 @@ export interface ShardSyncClient {
 }
 
 export class ECSDurableObject<
-  UserSession extends {},
-  Context extends Record<string, unknown>,
-  UpdateArguments extends Array<unknown>,
-  Actions extends GenericAction,
-  Tags extends number = number,
-  Entity extends BaseEntity<Tags> = BaseEntity<Tags>,
-  EntityDelta = unknown,
+  G extends GameTypes = GameTypes,
   Env = CloudflareBindings,
 > extends DurableObject<Env> {
   static log = new PinoLogger("ecs", TempoLogLevel.Info);
   _log: ContextLogger | undefined;
 
   // User sessions
-  sessions = new Map<WebSocket, UserSession>();
+  sessions = new Map<WebSocket, G["session"]>();
 
   // Tempo RPC properties
-  private router:
-    | TempoWsRouter<
-        ECS<
-          RuntimeContext<UserSession, Context>,
-          UpdateArguments,
-          Actions,
-          Tags,
-          Entity,
-          EntityDelta
-        >,
-        WebSocket
-      >
-    | undefined;
+  private router: TempoWsRouter<ECS<RuntimeWorld<G>>, WebSocket> | undefined;
 
   // Sync properties
   // Transaction origin for THIS lobby's own writes (so observers + the write
@@ -370,17 +288,10 @@ export class ECSDurableObject<
   private _shardEntitySetCleanups = new Map<string, () => void>();
 
   // Per-instance state synced from the Yjs doc (working copy)
-  private _entityStore = new Map<string, Entity>();
-  // Remote changes pending reconciliation into the next scope. "update" entries
-  // also carry the component keys added/removed by the remote change so the
-  // reconcile path can route them through `addComponent`/`removeComponent` and
-  // keep archetype membership consistent.
-  private _pendingReconcile = new Map<
-    string,
-    | { type: "insert"; entity?: Entity }
-    | { type: "update"; addedKeys: Set<string>; removedKeys: Set<string> }
-    | { type: "delete"; entity?: Entity }
-  >();
+  private _entityStore = new Map<string, G["entity"]>();
+  // Ids whose doc state changed remotely since the last scope opened. The next
+  // scope replaces each with its current doc snapshot (see onScopeOpen).
+  private _pendingReconcile = new Set<string>();
   // Entity ids that were reconciled in the currently-flushing scope
   private _reconcilingIds = new Set<string>();
   // Cleanup functions for per-entity Y.Map observers
@@ -396,9 +307,9 @@ export class ECSDurableObject<
   // Request-scoped tick configuration, populated from the runtime configuration.
   // `tickIntervalMs` is the catch-up cadence (see `_maybeTick`); there is no alarm.
   private _tickIntervalMs = 0;
-  private _tickArgsProvider: (() => UpdateArguments) | undefined;
+  private _tickArgsProvider: (() => G["args"]) | undefined;
   private _broadcastTick:
-    | ((mutations: Map<string, MutationRecord<Entity, EntityDelta>>) => void)
+    | ((mutations: Map<string, MutationRecord<G["entity"], G["delta"]>>) => void)
     | undefined;
   private _compactEveryNTicks = 0;
   private _tickCount = 0;
@@ -418,27 +329,13 @@ export class ECSDurableObject<
   private _onConnectionClose: ((ws: WebSocket) => void) | undefined;
   // App-level per-connection rehydrate hook, invoked on hibernation wake for each
   // live socket so apps can rebuild ECS observers from the socket attachment.
-  private _rehydrateConnection:
-    | ((
-        ecs: ECS<
-          RuntimeContext<UserSession, Context>,
-          UpdateArguments,
-          Actions,
-          Tags,
-          Entity,
-          EntityDelta
-        >,
-        ws: WebSocket,
-      ) => void)
-    | undefined;
+  private _rehydrateConnection: ((ecs: ECS<RuntimeWorld<G>>, ws: WebSocket) => void) | undefined;
 
   // Readiness: resolves once the ECS has been seeded + initialized.
   private _readyResolvers: Array<() => void> = [];
 
   // ECS properties
-  ecs:
-    | ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Actions, Tags, Entity, EntityDelta>
-    | undefined;
+  ecs: ECS<RuntimeWorld<G>> | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -451,7 +348,7 @@ export class ECSDurableObject<
     for (const ws of hibernating) {
       // SAFETY: this DO only serializes a `UserSession` onto its sockets (see
       // `saveSession`); interest management adds its own namespaced key to it.
-      const attachment = ws.deserializeAttachment() as UserSession | null;
+      const attachment = ws.deserializeAttachment() as G["session"] | null;
       if (attachment) {
         // If we previously attached state to our WebSocket,
         // let's add it to `sessions` map to restore the state of the connection.
@@ -463,82 +360,98 @@ export class ECSDurableObject<
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
 
     // Hibernation recovery: if this isolate was recreated to service live sockets,
-    // the runtime ran only this constructor — `ecs`/`router`/`doc`/`client` are all
-    // at their field initializers. Re-bootstrap before any handler runs. We block
-    // concurrency so `webSocketMessage`/`alarm` cannot observe a half-initialized
-    // runtime. A cold DO with no live sockets stays lazy and is bootstrapped on its
-    // first HTTP upgrade as before.
+    // the runtime ran only this constructor and the world does not exist yet.
+    // Re-bootstrap before any handler runs; blocking concurrency keeps
+    // `webSocketMessage` from observing a half-initialized runtime. Without
+    // sockets the DO stays lazy: its first HTTP upgrade or `stepTick` (e.g. from
+    // an alarm) bootstraps it.
     if (hibernating.length > 0) {
-      // `blockConcurrencyWhile` runs to completion before any handler (including
-      // webSocketMessage/alarm) is delivered, so the runtime tracks this promise;
-      // we `void` the returned promise and log re-bootstrap failures rather than
-      // letting them float as an unhandled rejection.
       void this.ctx
-        .blockConcurrencyWhile(async () => {
-          const namespace = await this.ctx.storage.get<string>("__vamp:namespace");
-          if (namespace === undefined) {
-            // No persisted namespace: the DO was never initialized (or storage was
-            // wiped). Leave the runtime undefined; webSocketMessage surfaces a framed
-            // error rather than a thrown "uninitialized".
+        .blockConcurrencyWhile(() => this._ensureRestored())
+        .then((restored) => {
+          if (!restored)
             this.log.error("Hibernation wake with live sockets but no persisted namespace");
-            return;
-          }
-          // Restore the runtime context seed persisted at first bootstrap so
-          // `resolveContext` can re-derive the world's context with fresh data.
-          // Absent (older DOs / never seeded) yields `undefined`, which falls back
-          // to the static `config.context` — identical to the pre-seed behavior.
-          const seed = await this.ctx.storage.get<ContextSeed>("__vamp:context");
-          // Read the persisted shard sets BEFORE setup(): initialize() opens the
-          // lobby's own default shard and re-persists `__vamp:shards` for that root
-          // alone, which would clobber the additional players' roots (character/*
-          // etc.) before we can read them. Capturing first keeps the full set.
-          const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
-          const persistedSubscribed = await this.ctx.storage.get<string[]>("__vamp:subscribed");
-          await this.setup(namespace, seed);
-          // Re-subscribe the persisted shard set so a hibernation-recreated DO
-          // re-aggregates the same multi-provider world. setup()/initialize()
-          // already re-opened the lobby's own default shard; restore re-opens the
-          // additional players' shards (character/* etc.). A restored shard's pin
-          // is released once it proves entity-empty (_untrackEntityRoot →
-          // _maybeReleaseShard), after which the reap cycle tears it down — unless
-          // it is explicitly subscribed (see below), which exempts it.
-          if (persistedShards && this.shards) this.shards.restore(persistedShards);
-          // Restore the explicit-subscription SET only — do NOT re-acquire. A
-          // subscribed root always carries its OR-pin, so it is already in the
-          // persisted `__vamp:shards` set re-acquired above; re-acquiring here
-          // would leak a second pin. Repopulating the set makes the
-          // `_maybeReleaseShard` exemption effective post-wake so a subscribed
-          // shard that churns to entity-empty is not torn down.
-          if (persistedSubscribed && this.shards) {
-            for (const root of persistedSubscribed) this._subscribedRoots.add(root);
-          }
-          // Re-persist the full restored active set: initialize() clobbered
-          // `__vamp:shards` down to the default root, so without this a SECOND
-          // hibernation wake would read the truncated set and drop the additional
-          // shards again.
-          if (this.shards) this._persistActiveShards();
-          // Re-register restored shards for notify-push (the wake was triggered by
-          // a live socket, so we have players and should receive live updates).
-          this._syncRegistrations();
-          // Rebuild per-connection ECS observers from each live socket's durable
-          // attachment, so the generator-free interest-managed broadcast resumes
-          // after wake WITHOUT the original `observe` generator (destroyed with
-          // the isolate). The app reads its persisted subscription from the
-          // attachment inside the hook and re-registers via `observeMutations`.
-          if (this._rehydrateConnection && this.ecs) {
-            for (const ws of hibernating) {
-              try {
-                this._rehydrateConnection(this.ecs, ws);
-              } catch (err) {
-                this.log.error("Error rehydrating connection on wake", {}, toError(err));
-              }
-            }
-          }
         })
         .catch((err) => {
           this.log.error("Hibernation re-bootstrap failed", {}, toError(err));
         });
     }
+  }
+
+  private _restoring: Promise<boolean> | undefined;
+
+  /**
+   * Rebuild the world from persisted state if this isolate has not set it up
+   * yet (after eviction or hibernation). Resolves `true` once the world exists,
+   * `false` if this DO was never set up. Concurrent callers share one restore.
+   */
+  private _ensureRestored(): Promise<boolean> {
+    if (this.ecs) return Promise.resolve(true);
+    this._restoring ??= this._restore().finally(() => {
+      this._restoring = undefined;
+    });
+    return this._restoring;
+  }
+
+  private async _restore(): Promise<boolean> {
+    const namespace = await this.ctx.storage.get<string>("__vamp:namespace");
+    if (namespace === undefined) {
+      // Never set up (or storage was wiped): leave the runtime undefined;
+      // webSocketMessage surfaces a framed error rather than a thrown
+      // "uninitialized".
+      return false;
+    }
+    // Restore the runtime context seed persisted at first bootstrap so
+    // `resolveContext` can re-derive the world's context with fresh data.
+    // Absent (older DOs / never seeded) yields `undefined`, which falls back
+    // to the static `config.context` — identical to the pre-seed behavior.
+    const seed = await this.ctx.storage.get<ContextSeed>("__vamp:context");
+    // Read the persisted shard sets BEFORE setup(): initialize() opens the
+    // lobby's own default shard and re-persists `__vamp:shards` for that root
+    // alone, which would clobber the additional players' roots (character/*
+    // etc.) before we can read them. Capturing first keeps the full set.
+    const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
+    const persistedSubscribed = await this.ctx.storage.get<string[]>("__vamp:subscribed");
+    await this.setup(namespace, seed);
+    // Re-subscribe the persisted shard set so a hibernation-recreated DO
+    // re-aggregates the same multi-provider world. setup()/initialize()
+    // already re-opened the lobby's own default shard; restore re-opens the
+    // additional players' shards (character/* etc.). A restored shard's pin
+    // is released once it proves entity-empty (_untrackEntityRoot →
+    // _maybeReleaseShard), after which the reap cycle tears it down — unless
+    // it is explicitly subscribed (see below), which exempts it.
+    if (persistedShards && this.shards) this.shards.restore(persistedShards);
+    // Restore the explicit-subscription SET only — do NOT re-acquire. A
+    // subscribed root always carries its OR-pin, so it is already in the
+    // persisted `__vamp:shards` set re-acquired above; re-acquiring here
+    // would leak a second pin. Repopulating the set makes the
+    // `_maybeReleaseShard` exemption effective post-wake so a subscribed
+    // shard that churns to entity-empty is not torn down.
+    if (persistedSubscribed && this.shards) {
+      for (const root of persistedSubscribed) this._subscribedRoots.add(root);
+    }
+    // Re-persist the full restored active set: initialize() clobbered
+    // `__vamp:shards` down to the default root, so without this a SECOND
+    // hibernation wake would read the truncated set and drop the additional
+    // shards again.
+    if (this.shards) this._persistActiveShards();
+    // Re-register restored shards for notify-push if players are connected.
+    this._syncRegistrations();
+    // Rebuild per-connection ECS observers from each live socket's durable
+    // attachment, so the generator-free interest-managed broadcast resumes
+    // after wake WITHOUT the original `observe` generator (destroyed with
+    // the isolate). The app reads its persisted subscription from the
+    // attachment inside the hook and re-registers via `observeMutations`.
+    if (this._rehydrateConnection && this.ecs) {
+      for (const ws of this.ctx.getWebSockets()) {
+        try {
+          this._rehydrateConnection(this.ecs, ws);
+        } catch (err) {
+          this.log.error("Error rehydrating connection on wake", {}, toError(err));
+        }
+      }
+    }
+    return true;
   }
 
   get log() {
@@ -563,49 +476,27 @@ export class ECSDurableObject<
       // The tempo rpc service registry registered with the generated game services
       serviceRegistry: ServiceRegistry;
       // Optional hooks for tempo rpc middleware
-      hooks?: HookRegistry<
-        ServerContext,
-        RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>
-      >;
+      hooks?: HookRegistry<ServerContext, RPCContext<G>>;
       // ECS options to configure the ecs runtime
-      ecs: ECSOptions<Entity, EntityDelta>;
+      ecs: ECSOptions<G["entity"], G["delta"]>;
       // General context to make available within ecs systems (already resolved by
       // setup() — static default merged with any runtime-resolved context)
-      context: Context;
+      context: G["state"];
       // The serializable seed that produced `context`, persisted so a
       // hibernation-recreated constructor can re-derive context via resolveContext.
       seed?: ContextSeed;
       // Register systems/behaviors on the world during bootstrap (see
       // ECSRuntimeConfiguration.registerSystems).
-      registerSystems?: (
-        ecs: ECS<
-          RuntimeContext<UserSession, Context>,
-          UpdateArguments,
-          Actions,
-          Tags,
-          Entity,
-          EntityDelta
-        >,
-      ) => void;
+      registerSystems?: (ecs: ECS<RuntimeWorld<G>>) => void;
       // Opt-in tick loop configuration (see ECSRuntimeConfiguration).
       tickIntervalMs?: number;
-      tickArgs?: () => UpdateArguments;
-      broadcastTick?: (mutations: Map<string, MutationRecord<Entity, EntityDelta>>) => void;
+      tickArgs?: () => G["args"];
+      broadcastTick?: (mutations: Map<string, MutationRecord<G["entity"], G["delta"]>>) => void;
       compactEveryNTicks?: number;
       // App-level per-connection close hook.
       onConnectionClose?: (ws: WebSocket) => void;
       // App-level per-connection rehydrate hook (see ECSRuntimeConfiguration).
-      rehydrateConnection?: (
-        ecs: ECS<
-          RuntimeContext<UserSession, Context>,
-          UpdateArguments,
-          Actions,
-          Tags,
-          Entity,
-          EntityDelta
-        >,
-        ws: WebSocket,
-      ) => void;
+      rehydrateConnection?: (ecs: ECS<RuntimeWorld<G>>, ws: WebSocket) => void;
     },
   ) {
     // Guard against double bootstrap. `this.ecs` is assigned synchronously below,
@@ -644,14 +535,7 @@ export class ECSDurableObject<
     // Capture `sessions` lexically so the `saveSession` closure handed to ECS
     // systems does not depend on `this` (systems may invoke it unbound).
     const sessions = this.sessions;
-    this.ecs = new ECS<
-      RuntimeContext<UserSession, Context>,
-      UpdateArguments,
-      Actions,
-      Tags,
-      Entity,
-      EntityDelta
-    >(
+    this.ecs = new ECS<RuntimeWorld<G>>(
       entities,
       // Base mutator: pure read-copy update of the working entity store. The
       // server authored every Insert, so a missing Update target is a no-op
@@ -661,7 +545,7 @@ export class ECSDurableObject<
         ...configuration.context,
         _: {
           sessions,
-          saveSession(ws: WebSocket, session: UserSession) {
+          saveSession(ws: WebSocket, session: G["session"]) {
             ws.serializeAttachment(withFrameworkKeys(ws, session));
             // Lexical capture: safe when invoked unbound (was `this.sessions`,
             // which threw AFTER serializeAttachment had already mutated the
@@ -680,7 +564,7 @@ export class ECSDurableObject<
     this.ecs.setFlushHandler((mutations, scope) => {
       // Group by shard root. The working-store application below is doc-agnostic,
       // so it runs in this first pass; the per-shard transactions run in the second.
-      const byRoot = new Map<string, Array<[string, MutationRecord<Entity, EntityDelta>]>>();
+      const byRoot = new Map<string, Array<[string, MutationRecord<G["entity"], G["delta"]>]>>();
       for (const [id, mutation] of mutations) {
         if (this._reconcilingIds.delete(id)) {
           // Reconciled from a shard doc: update the working store, but DO NOT
@@ -729,64 +613,18 @@ export class ECSDurableObject<
       if (acquiredNew) this._persistActiveShards();
     });
 
-    // Scope-open handler: drain pending remote changes into the scope
-    this.ecs.onScopeOpen((scope) => {
-      for (const [id, pending] of this._pendingReconcile) {
+    // Scope-open handler: replay remote changes into the scope as snapshots.
+    // `replace` records an Insert (a remote change carries absolute values, which
+    // an additive delta cannot express) and moves the entity to the archetype its
+    // new component set implies. Marked as reconciled so the flush handler
+    // updates the store without writing the change back to its doc.
+    this.ecs.onScopeOpen(() => {
+      const ecs = this.ecs!;
+      for (const id of this._pendingReconcile) {
         const entity = entities.get(id);
-        switch (pending.type) {
-          case "insert":
-            if (entity) {
-              // Clone once and reuse the same reference for the mutation value
-              // and the shadow (the flush handler copies the shadow into the
-              // store, so a shared reference stays consistent and we avoid the
-              // previous double clone).
-              const cloned = clonePlainValue(entity);
-              scope.mutations.set(
-                id,
-                MutationRecord.fromInsert<Entity, EntityDelta>({ entity: cloned }),
-              );
-              scope.shadowEntities.set(id, cloned);
-              scope.deletedIds.delete(id);
-            }
-            break;
-          case "update":
-            if (entity) {
-              // Clone once and reuse the snapshot for both the mutation value
-              // (broadcast to observers) and the shadow (copied into the store
-              // by the flush handler). Using the live `entity` reference here
-              // would let a later remote observer event mutate the value that a
-              // pending broadcast still holds.
-              const cloned = clonePlainValue(entity);
-              // A remote change arrives as absolute component values, which an
-              // additive delta cannot express, so it travels as a snapshot
-              // Insert; replicas replace the entity in place (`ECS.replace`).
-              scope.mutations.set(
-                id,
-                MutationRecord.fromInsert<Entity, EntityDelta>({ entity: cloned }),
-              );
-              scope.shadowEntities.set(id, cloned);
-              scope.deletedIds.delete(id);
-              // Route remote component add/remove through the archetype graph so
-              // queries reflect the new component reality. `executeSystems=false`
-              // avoids firing event systems mid-reconcile; the deferred cache
-              // rebuild is flushed by the surrounding update/scope flush.
-              this._reconcileComponentKeys(id, pending.addedKeys, pending.removedKeys);
-            }
-            break;
-          case "delete": {
-            const stale = entity ?? entities.get(id);
-            if (stale) {
-              scope.mutations.set(
-                id,
-                MutationRecord.fromDelete<Entity, EntityDelta>({ entity: stale }),
-              );
-              scope.shadowEntities.delete(id);
-              scope.deletedIds.add(id);
-            }
-            break;
-          }
-        }
+        if (!entity || !ecs.hasEntity(id)) continue;
         this._reconcilingIds.add(id);
+        ecs.replace(id, clonePlainValue(entity));
       }
       this._pendingReconcile.clear();
     });
@@ -796,17 +634,11 @@ export class ECSDurableObject<
     configuration.registerSystems?.(this.ecs);
 
     // TODO make this generic parameter ECS
-    this.router = new TempoWsRouter<
-      ECS<
-        RuntimeContext<UserSession, Context>,
-        UpdateArguments,
-        Actions,
-        Tags,
-        Entity,
-        EntityDelta
-      >,
-      WebSocket
-    >(this.log, configuration.serviceRegistry, new TempoRouterConfiguration());
+    this.router = new TempoWsRouter<ECS<RuntimeWorld<G>>, WebSocket>(
+      this.log,
+      configuration.serviceRegistry,
+      new TempoRouterConfiguration(),
+    );
     if (configuration.hooks) {
       this.router.useHooks(configuration.hooks);
     }
@@ -865,7 +697,7 @@ export class ECSDurableObject<
       // readonly), so the fully-resolved object must exist first. resolveContext may
       // be async (e.g. a DB lookup) and may throw — the throw propagates to the
       // caller (handler 500) or, on the wake path, to blockConcurrencyWhile's catch.
-      let resolved: Context | ContextSeed | undefined;
+      let resolved: G["state"] | ContextSeed | undefined;
       if (seed !== undefined) {
         resolved = config.resolveContext ? await config.resolveContext(seed) : seed;
       }
@@ -1005,12 +837,15 @@ export class ECSDurableObject<
    * provider for this call (must be serializable to cross the RPC boundary); when
    * omitted, the setup-time provider is used.
    */
-  async stepTick(args?: UpdateArguments): Promise<void> {
+  async stepTick(args?: G["args"]): Promise<void> {
+    if (!(await this._ensureRestored())) {
+      throw new Error("stepTick on a durable object that was never set up");
+    }
     await this.ready();
     // SAFETY: `[]` is the empty argument list used when no per-tick args
     // provider is registered; it is a valid `UpdateArguments` (which defaults to
     // `[]`) and is spread into `ecs.update(...)` as the no-arguments case.
-    const tickArgs = args ?? ((this._tickArgsProvider?.() ?? []) as UpdateArguments);
+    const tickArgs = args ?? ((this._tickArgsProvider?.() ?? []) as G["args"]);
     await this._runTick(tickArgs);
   }
 
@@ -1322,7 +1157,7 @@ export class ECSDurableObject<
     const alreadyInit = this.ecs.initialized;
     for (const id of entitiesMap(doc).keys()) {
       this._addEntityFromDoc(id, doc, root);
-      if (alreadyInit) this._pendingReconcile.set(id, { type: "insert" });
+      if (alreadyInit) this._pendingReconcile.add(id);
     }
     if (root === this._defaultRoot && !this._seeded) {
       this._seeded = true;
@@ -1346,7 +1181,7 @@ export class ECSDurableObject<
         } else {
           // add or re-add: pull the entity into the ECS from this shard.
           this._addEntityFromDoc(id, doc, root);
-          this._pendingReconcile.set(id, { type: "insert" });
+          this._pendingReconcile.add(id);
         }
       }
     };
@@ -1381,7 +1216,7 @@ export class ECSDurableObject<
           // Local eviction: drop it from this world without deleting it from
           // the shard doc, where it still lives for other lobbies.
           this._reconcilingIds.add(id);
-          this.ecs.delete(entity);
+          this.ecs.delete(id);
         }
         // Plain delete (not _untrackEntityRoot): the shard is already tearing
         // down, so there is no pin left to release for it.
@@ -1399,7 +1234,7 @@ export class ECSDurableObject<
     this._trackEntityRoot(id, root);
     // SAFETY: `map` is this entity's component Y.Map, populated by
     // `writeEntityInsert` (which skips only the `id` key, backfilled below).
-    const raw = map.toJSON() as Entity;
+    const raw = map.toJSON() as G["entity"];
     // ensure id is set (it is the map key, dropped from the component data)
     if (!raw.id) raw.id = id;
     // If entity doesn't exist locally, register it in the ECS archetype graph.
@@ -1417,7 +1252,7 @@ export class ECSDurableObject<
     if (entity) {
       // Already deleted in the doc; the flush handler only updates the store.
       this._reconcilingIds.add(id);
-      this.ecs.delete(entity);
+      this.ecs.delete(id);
     }
     this._unobserveEntity(id);
     this._untrackEntityRoot(id);
@@ -1436,61 +1271,22 @@ export class ECSDurableObject<
       const entity = this._entityStore.get(id);
       if (!entity) return;
 
-      const pending = this._getOrCreatePendingUpdate(id);
+      this._pendingReconcile.add(id);
       for (const key of event.keysChanged) {
         const change = event.changes.keys.get(key);
-        const existed = key in entity;
         // SAFETY: `key` names one of this entity's Y.Map components and the value
         // is that cell's current content, so `entity` keeps mirroring the doc.
-        const component = key as keyof Entity;
+        const component = key as keyof G["entity"];
         if (change && change.action === "delete") {
           delete entity[component];
         } else {
           // SAFETY: as above, the cell under `key` holds that component's value.
-          entity[component] = map.get(key) as Entity[keyof Entity];
+          entity[component] = map.get(key) as G["entity"][keyof G["entity"]];
         }
-        applyKeyChange(pending, key, change?.action, existed);
       }
     };
     map.observe(handler);
     this._entityObserverCleanups.set(id, () => map.unobserve(handler));
-  }
-
-  /**
-   * Get (or create) the pending "update" reconcile entry for `id`, merging into
-   * an existing update entry so multiple remote bursts before the next scope
-   * accumulate their added/removed keys.
-   */
-  private _getOrCreatePendingUpdate(id: string): PendingUpdateEntry {
-    const existing = this._pendingReconcile.get(id);
-    if (existing && existing.type === "update") return existing;
-    const entry = {
-      type: "update" as const,
-      addedKeys: new Set<string>(),
-      removedKeys: new Set<string>(),
-    };
-    this._pendingReconcile.set(id, entry);
-    return entry;
-  }
-
-  /**
-   * Translate a set of added/removed component keys into archetype transitions
-   * via the ECS API. `addComponent`/`removeComponent` are the only methods that
-   * transform archetype membership; routing through them keeps the archetype
-   * graph consistent after a remote component add/remove. Reserved keys
-   * (`id`/`tags`) are skipped, and the ECS no-ops for unknown component ids.
-   */
-  private _reconcileComponentKeys(id: string, addedKeys: Set<string>, removedKeys: Set<string>) {
-    if (!this.ecs) return;
-    for (const key of componentKeysToReconcile(addedKeys)) {
-      // SAFETY: `key` is a Y.Map component name with `id`/`tags` filtered out,
-      // and the ECS no-ops for a key that is not a registered component.
-      this.ecs.addComponent(id, key as Exclude<keyof Entity, "tags">, false);
-    }
-    for (const key of componentKeysToReconcile(removedKeys)) {
-      // SAFETY: same filtered component-name contract as the add loop above.
-      this.ecs.removeComponent(id, key as Exclude<keyof Entity, "tags">, false);
-    }
   }
 
   private _unobserveEntity(id: string) {
@@ -1520,7 +1316,7 @@ export class ECSDurableObject<
    * otherwise it defaults to the lobby's own shard. Update/Delete records carry no
    * entity, so they resolve to the entity's remembered home shard.
    */
-  private _rootForMutation(id: string, mutation: MutationRecord<Entity, EntityDelta>): string {
+  private _rootForMutation(id: string, mutation: MutationRecord<G["entity"], G["delta"]>): string {
     if (mutation.tag === MutationType.Insert) {
       const entity = mutation.value.entity;
       return entity.sk ?? this._entityRoot.get(id) ?? this._defaultRoot;
@@ -1537,7 +1333,7 @@ export class ECSDurableObject<
    */
   private _writeMutationToDoc(
     id: string,
-    mutation: MutationRecord<Entity, EntityDelta>,
+    mutation: MutationRecord<G["entity"], G["delta"]>,
     doc: Doc,
     root: string,
   ) {
@@ -1753,7 +1549,7 @@ export class ECSDurableObject<
     // SAFETY: `[]` is the empty argument list used when no per-tick args
     // provider is registered; it is a valid `UpdateArguments` (which defaults to
     // `[]`) and is spread into `ecs.update(...)` as the no-arguments case.
-    const args = (this._tickArgsProvider?.() ?? []) as UpdateArguments;
+    const args = (this._tickArgsProvider?.() ?? []) as G["args"];
     for (let i = 0; i < count; i++) await this._runTick(args);
   }
 
@@ -1764,7 +1560,7 @@ export class ECSDurableObject<
    * the {@link alarm} loop and the manual {@link stepTick} RPC. Does NOT touch the
    * alarm schedule — the caller owns (re)scheduling.
    */
-  private async _runTick(args: UpdateArguments): Promise<void> {
+  private async _runTick(args: G["args"]): Promise<void> {
     this._tickCount++;
 
     // Hysteresis teardown: close shards whose grace period elapsed with no pins.

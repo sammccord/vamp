@@ -4,7 +4,7 @@ import {
   type BaseEntity,
   ECS,
   type ECSOptions,
-  type GenericAction,
+  type DefineWorld,
   MutationRecord,
   MutationType,
 } from "@vampgg/ecs";
@@ -24,7 +24,8 @@ import { createInterestBroadcast, type InterestSub } from "../src/interest.ts";
 type TestEntity = BaseEntity & { position?: { x: number; y: number } };
 type TestDelta = Partial<TestEntity>;
 type TestReq = { viewerId?: string };
-type World = ECS<{}, [], GenericAction, number, TestEntity, TestDelta>;
+type TestWorldTypes = DefineWorld<{ entity: TestEntity; delta: TestDelta }>;
+type World = ECS<TestWorldTypes>;
 
 const AOI_RADIUS_SQ = 100 * 100;
 
@@ -76,12 +77,7 @@ function makeWorld(): World {
         break;
     }
   };
-  const ecs = new ECS<{}, [], GenericAction, number, TestEntity, TestDelta>(
-    entities,
-    mutate,
-    {},
-    options,
-  );
+  const ecs = new ECS<TestWorldTypes>(entities, mutate, {}, options);
   ecs.initialize();
   return ecs;
 }

@@ -31,19 +31,17 @@ describe("entity-doc: sharded entity set", () => {
     expect(map?.get("pos")).toEqual({ x: 1, y: 2 });
   });
 
-  it("re-insert from a co-subscriber reuses the existing nested map", () => {
+  it("re-insert from a co-subscriber reuses the nested map and replaces its fields", () => {
     const a = new Doc();
     const b = new Doc();
     a.transact(() => writeEntityInsert(a, "e1", { hp: 10 }));
     sync(a, b);
+    const map = entitiesMap(b).get("e1");
     b.transact(() => writeEntityInsert(b, "e1", { mp: 5 }));
     sync(a, b);
 
-    for (const doc of [a, b]) {
-      const map = entitiesMap(doc).get("e1");
-      expect(map?.get("hp")).toBe(10);
-      expect(map?.get("mp")).toBe(5);
-    }
+    expect(entitiesMap(b).get("e1")).toBe(map);
+    for (const doc of [a, b]) expect(entitiesMap(doc).get("e1")?.toJSON()).toEqual({ mp: 5 });
   });
 
   it("writeUpdate sets component keys; undefined deletes them", () => {
@@ -68,7 +66,15 @@ describe("entity-doc: sharded entity set", () => {
     expect(entitiesMap(doc).get("e1")?.toJSON()).toEqual({
       health: { points: 7, max: 10 },
       children: ["c1", "c2"],
+      mp: 5,
     });
+  });
+
+  it("writeEntityInsert treats the entity as a full snapshot", () => {
+    const doc = new Doc();
+    doc.transact(() => writeEntityInsert(doc, "e1", { hp: 10, mp: 5 }));
+    doc.transact(() => writeEntityInsert(doc, "e1", { hp: 9 }));
+    expect(entitiesMap(doc).get("e1")?.toJSON()).toEqual({ hp: 9 });
   });
 
   it("writeUpdate on an unknown id is a no-op", () => {

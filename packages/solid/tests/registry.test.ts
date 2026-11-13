@@ -42,7 +42,7 @@ describe("createQueryRegistry membership", () => {
       // structural leave: removing the faction component moves e2 to an archetype
       // that no longer matches — the case `subscribe(Q)` cannot observe.
       const leave = await world.withScope(() => {
-        world.put("e2", { faction: undefined }, true);
+        world.removeComponents("e2", "faction");
       });
       registry.update(leave.mutations);
       flush();

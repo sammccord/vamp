@@ -49,12 +49,14 @@ const options: ECSOptions<Entity, Delta> = {
 
 function createWorld() {
   const entities = new Map<string, Entity>();
-  const world = new ECS<{}, [], { tag: number; value: unknown }, number, Entity, Delta>(
-    entities,
-    createBaseMutator(entities, options),
-    {},
-    options,
-  );
+  const world = new ECS<{
+    state: {};
+    args: [];
+    actions: { tag: number; value: unknown };
+    tags: number;
+    entity: Entity;
+    delta: Delta;
+  }>(entities, createBaseMutator(entities, options), {}, options);
   world.initialize();
   return { world, entities };
 }

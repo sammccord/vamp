@@ -55,8 +55,9 @@ export function cloneComponentValue<T>(value: T): T {
 }
 
 /**
- * Write an entity's component data into the shard's entity set: create-or-reuse
- * its nested map and populate component keys. Reuse (rather than replace) means
+ * Write an entity's full component data into the shard's entity set:
+ * create-or-reuse its nested map, set every component it has, and delete any it
+ * no longer has. Reuse (rather than replace) means
  * an entity already created by a co-subscriber is shared, never duplicated.
  * Assumes a surrounding transaction.
  */
@@ -67,15 +68,21 @@ export function writeEntityInsert<E extends object>(doc: Doc, id: string, entity
     map = new YMap<unknown>();
     entities.set(id, map);
   }
+  const present = new Set<string>();
   for (const key in entity) {
     // `id` is the map key — storing it as a component too is pure redundancy.
     // Readers backfill it from the key (`_addEntityFromDoc`, `ECSStorage.entity`).
     if (key === "id") continue;
     if (Object.prototype.hasOwnProperty.call(entity, key)) {
       const val = entity[key];
-      if (val !== undefined) map.set(key, cloneComponentValue(val));
+      if (val !== undefined) {
+        map.set(key, cloneComponentValue(val));
+        present.add(key);
+      }
     }
   }
+  // The entity is a full snapshot: a component it no longer has is removed.
+  for (const key of [...map.keys()]) if (!present.has(key)) map.delete(key);
 }
 
 /**
@@ -118,8 +125,8 @@ export function writeMergedUpdate<E extends object, D>(
   const write = new Set<string>();
   for (const key in delta) {
     if (key === "id" || !Object.prototype.hasOwnProperty.call(delta, key)) continue;
-    if (delta[key] === undefined) map.delete(key);
-    else write.add(key);
+    // `undefined` means "unchanged" in a delta (removal is a snapshot Insert).
+    if (delta[key] !== undefined) write.add(key);
   }
   for (const key in entity) {
     if (!write.delete(key)) continue;

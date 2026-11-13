@@ -41,111 +41,85 @@ export function applyArrayDelta<T>(base: T[], d?: ArrayDelta<T>): T[];
 export function applyPoolDelta<T>(base: T, delta: Record<string, number>): T;
 export function accumulateArrayDelta<T>(to: ArrayDelta<T> | undefined, from: ArrayDelta<T>): ArrayDelta<T>;
 export function accumulatePoolDelta(to: Record<string, number> | undefined, from: Record<string, number>): Record<string, number>;
-export type BehaviorTreeSystemOptions<State, UpdateArguments extends unknown[], Actions, Tags extends number, E, D, C extends number = number, T extends number = number> = {
+export interface WorldTypes {
+  entity: object;
+  delta: unknown;
+  state: object;
+  args: unknown[];
+  actions: { tag: number };
+  tags: number;
+}
+type World<W extends WorldTypes> = { __world: W };
+export type BehaviorTreeSystemOptions<W extends WorldTypes, C extends number = number, T extends number = number> = {
   query: Query | ((b: QueryBuilder) => QueryBuilder);
-  brain: keyof E & string;
-  tree: keyof E & string;
-  conditions: Readonly<Record<C, (world: unknown, entity: E, args: readonly number[]) => boolean>>;
-  tasks: Readonly<Record<T, (world: unknown, entity: E, args: readonly number[]) => Actions | Actions[] | undefined>>;
-  random: (world: unknown) => { getUniform(): number; getWeightedValue(data: Record<number, number>): string | number | undefined };
-  now: (world: unknown) => number;
-  target?: (intent: Actions, agentId: string) => string | undefined;
+  brain: keyof W["entity"] & string;
+  tree: keyof W["entity"] & string;
+  conditions: Readonly<Record<C, (world: World<W>, entity: W["entity"], args: readonly number[]) => boolean>>;
+  tasks: Readonly<Record<T, (world: World<W>, entity: W["entity"], args: readonly number[]) => W["actions"] | W["actions"][] | undefined>>;
+  random: (world: World<W>) => { getUniform(): number; getWeightedValue(data: Record<number, number>): string | number | undefined };
+  now: (world: World<W>) => number;
+  target?: (intent: W["actions"], agentId: string) => string | undefined;
 };
-export function createBehaviorTreeSystem<State, UpdateArguments extends unknown[], Actions, Tags extends number, E, D, C extends number = number, T extends number = number>(
-  options: BehaviorTreeSystemOptions<State, UpdateArguments, Actions, Tags, E, D, C, T>,
-): ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>;
+export function createBehaviorTreeSystem<W extends WorldTypes, C extends number = number, T extends number = number>(
+  options: BehaviorTreeSystemOptions<W, C, T>,
+): ArchetypeSystem<W>;
 export function applyReplaceDelta<T extends object>(base: T, delta: Partial<T>): T;
 export function accumulateReplaceDelta<D extends object>(to: D | undefined, from: D): D;
 
 export type Query = { __query: true };
 export type QueryBuilder = { __builder: true; every(...components: number[]): QueryBuilder };
-export type EntitySystem<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown> = {
+export type EntitySystem<W extends WorldTypes = WorldTypes> = {
   type: 0;
   query: Query;
-  execute(entities: Array<string>, world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, ...args: UpdateArguments): void;
+  execute(entities: Array<string>, world: World<W>, ...args: W["args"]): void;
 };
-export type ArchetypeSystem<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown> = {
+export type ArchetypeSystem<W extends WorldTypes = WorldTypes> = {
   type: 1;
   query: Query;
-  execute(archetypes: Set<unknown>, world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, ...args: UpdateArguments): void;
+  execute(archetypes: Set<unknown>, world: World<W>, ...args: W["args"]): void;
 };
-export type Behavior<State, UpdateArguments extends unknown[], Actions extends { tag: number }, Tags extends number = number, E = unknown, D = unknown> = {
+export type Behavior<W extends WorldTypes = WorldTypes> = {
   type: 4;
   query: Query;
   tag: number;
-  handler: (world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, entity: E, event: { detail: Actions }) => void | Promise<void>;
+  handler: (world: World<W>, entity: W["entity"], event: { detail: W["actions"] }) => void | Promise<void>;
   priority: number | undefined;
 };
-export type BehaviorHandler<State, UpdateArguments extends unknown[], Actions extends { tag: number }, Tags extends number = number, E = unknown, D = unknown, Tag extends Actions["tag"] = Actions["tag"]> =
-  (world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, entity: E, event: { detail: Extract<Actions, { tag: Tag }> }) => void | Promise<void>;
-export type System<State, UpdateArguments extends unknown[], Actions extends { tag: number }, Tags extends number = number, E = unknown, D = unknown> =
-  | EntitySystem<State, UpdateArguments, Actions, Tags, E, D>
-  | ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>
-  | Behavior<State, UpdateArguments, Actions, Tags, E, D>;
-export function createEntitySystem<State, UpdateArguments extends unknown[], Actions, Tags extends number = number, E = unknown, D = unknown>(
-  execute: EntitySystem<State, UpdateArguments, Actions, Tags, E, D>["execute"],
+export type BehaviorHandler<W extends WorldTypes = WorldTypes, Tag extends W["actions"]["tag"] = W["actions"]["tag"]> =
+  (world: World<W>, entity: W["entity"], event: { detail: Extract<W["actions"], { tag: Tag }> }) => void | Promise<void>;
+export type System<W extends WorldTypes = WorldTypes> = EntitySystem<W> | ArchetypeSystem<W> | Behavior<W>;
+export function createEntitySystem<W extends WorldTypes = WorldTypes>(
+  execute: EntitySystem<W>["execute"],
   query: Query | ((b: QueryBuilder) => QueryBuilder),
-): EntitySystem<State, UpdateArguments, Actions, Tags, E, D>;
-export function createArchetypeSystem<State, UpdateArguments extends unknown[], ReturnArguments, Actions, Tags extends number = number, E = unknown, D = unknown>(
-  execute: (archetypes: Set<unknown>, world: { __state: State; __ua: UpdateArguments; __actions: Actions; __tags: Tags; __e: E; __d: D }, ...args: UpdateArguments) => ReturnArguments,
+): EntitySystem<W>;
+export function createArchetypeSystem<W extends WorldTypes = WorldTypes>(
+  execute: ArchetypeSystem<W>["execute"],
   query: Query | ((b: QueryBuilder) => QueryBuilder),
-): ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>;
-export function createBehavior<State, UpdateArguments extends unknown[], Actions extends { tag: number }, Tags extends number = number, E = unknown, D = unknown, Tag extends Actions["tag"] = Actions["tag"]>(
+): ArchetypeSystem<W>;
+export function createBehavior<W extends WorldTypes = WorldTypes, Tag extends W["actions"]["tag"] = W["actions"]["tag"]>(
   tag: Tag,
-  handler: BehaviorHandler<State, UpdateArguments, Actions, Tags, E, D, Tag>,
+  handler: BehaviorHandler<W, Tag>,
   query: Query | ((b: QueryBuilder) => QueryBuilder),
   priority?: number,
-): Behavior<State, UpdateArguments, Actions, Tags, E, D>;
+): Behavior<W>;
 `;
 
 const WORKER_STUB = `
-export class ECSDurableObject<
-  UserSession extends {} = {},
-  Context extends {} = {},
-  UpdateArguments extends Array<unknown> = [],
-  Actions = unknown,
-  Tags extends number = number,
-  Entity = unknown,
-  EntityDelta = unknown,
-  Env = unknown,
-> {}
+import type { WorldTypes } from "@vampgg/ecs";
+export interface GameTypes extends WorldTypes {
+  session: object;
+}
+export class ECSDurableObject<G extends GameTypes = GameTypes, Env = unknown> {
+  __g?: G;
+  __env?: Env;
+}
 export class ECSStorage<E = unknown> {}
-export type RPCContext<
-  UserSession extends {},
-  Context extends Record<string, unknown>,
-  UpdateArguments extends Array<unknown>,
-  Actions,
-  Tags extends number = number,
-  Entity = unknown,
-  EntityDelta = unknown,
-> = [unknown, unknown];
-export interface ECSRuntimeConfiguration<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
-  UpdateArguments extends Array<unknown> = [],
-  Actions = unknown,
-  Tags extends number = number,
-  Entity = unknown,
-  EntityDelta = unknown,
-> {}
-export function defineECSRuntime<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
-  UpdateArguments extends Array<unknown> = [],
-  Actions = unknown,
-  Tags extends number = number,
-  Entity = unknown,
-  EntityDelta = unknown,
->(
-  provider: () => ECSRuntimeConfiguration<
-    UserSession,
-    Context,
-    UpdateArguments,
-    Actions,
-    Tags,
-    Entity,
-    EntityDelta
-  >,
+export type RPCContext<G extends GameTypes = GameTypes> = [{ __g: G }, unknown];
+export interface ECSRuntimeConfiguration<G extends GameTypes = GameTypes> {
+  __g?: G;
+}
+export function defineECSRuntime<G extends GameTypes = GameTypes>(
+  provider: () => ECSRuntimeConfiguration<G>,
 ): void;
 `;
 
