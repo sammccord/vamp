@@ -458,6 +458,44 @@ describe("ECSDurableObject — connection teardown", () => {
   });
 });
 
+describe("ECSDurableObject — socket edge cases", () => {
+  test("saveSession keeps the framework's keys on the socket attachment", async () => {
+    configureRuntime();
+    const instance = newDO(makeCtx(makeStorage()), makeEnv(makeStub()));
+    await instance.setup("room1");
+    const ws = makeWs({ "__vamp:interest": { messageId: "m", methodId: 1 }, name: "old" });
+
+    instance.ecs.context._.saveSession(ws, { name: "new" });
+
+    expect(ws.deserializeAttachment()).toEqual({
+      name: "new",
+      "__vamp:interest": { messageId: "m", methodId: 1 },
+    });
+  });
+
+  test("webSocketClose never echoes a reserved close code", async () => {
+    configureRuntime();
+    const instance = newDO(makeCtx(makeStorage()), makeEnv(makeStub()));
+    await instance.setup("room1");
+    const ws = makeWs();
+
+    await instance.webSocketClose(ws, 1006, "", false);
+
+    expect(ws._closed?.code).toBe(1000);
+  });
+
+  test("an oversized frame closes the socket with 1009", async () => {
+    configureRuntime();
+    const ws = makeWs();
+    const instance = newDO(makeCtx(makeStorage(), [ws]), makeEnv(makeStub()));
+    await instance.setup("room1");
+
+    await instance.webSocketMessage(ws, new Uint8Array(5 * 1024 * 1024).buffer);
+
+    expect(ws._closed?.code).toBe(1009);
+  });
+});
+
 describe("ECSDurableObject — request-scoped catch-up tick", () => {
   test("_maybeTick advances catch-up frames while a player is connected", async () => {
     configureRuntime({ tickIntervalMs: 50, registerSystems: registerNSystem });

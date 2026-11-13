@@ -3,7 +3,7 @@ import {
   type BaseEntity,
   type ECS,
   type MutationBatch,
-  type MutationRecord,
+  MutationRecord,
   MutationType,
 } from "@vampgg/ecs";
 import { createEventIterator } from "@vampgg/utils/create-event-iterator";
@@ -173,8 +173,20 @@ export function createInterestBroadcast<
    * `ArrayBuffer` because the (Cloudflare) WebSocket accepts `ArrayBuffer | string`,
    * not an `ArrayBufferView`.
    */
+  // A batch delivered to many observers is the same object (see
+  // ECS.routeMutations), so its payload is encoded once and reused.
+  const encodedBatches = new WeakMap<MutationBatch<E, D>, Uint8Array>();
+  function encode(batch: MutationBatch<E, D>): Uint8Array {
+    let data = encodedBatches.get(batch);
+    if (data === undefined) {
+      data = config.encodeBatch(batch);
+      encodedBatches.set(batch, data);
+    }
+    return data;
+  }
+
   function frame(methodId: number, messageId: string, batch: MutationBatch<E, D>): ArrayBuffer {
-    const bytes = encodeServerStreamFrame({ methodId, messageId, data: config.encodeBatch(batch) });
+    const bytes = encodeServerStreamFrame({ methodId, messageId, data: encode(batch) });
     // SAFETY: `encodeServerStreamFrame` returns `new Uint8Array(Message.encode(...))`,
     // a freshly-allocated, exact-size `Uint8Array`, so `bytes.buffer` is a plain
     // (non-shared) `ArrayBuffer`.
@@ -182,28 +194,86 @@ export function createInterestBroadcast<
   }
 
   /**
-   * Register the generator-free interest observer for one connection and return
-   * its unsubscribe. The `deliver` path frames the filtered batch and writes it
-   * straight to the live socket, so it keeps working after a hibernation wake
-   * (when the original `observe` generator is gone).
+   * Register the generator-free interest observer for one connection. The
+   * `deliver` path frames the batch and writes it straight to the live socket,
+   * so it keeps working after a hibernation wake (when the original `observe`
+   * generator is gone).
+   *
+   * With a `canSee` policy the observer tracks which entities its client holds
+   * (`visible`, seeded by the caller) and rewrites each batch so the client
+   * stays in sync as things move: an entity entering view arrives as a full
+   * Insert, one leaving view as a Delete. When the viewer entity itself changes,
+   * every entity is re-tested, so keep `canSee` cheap.
    */
-  function registerInterestObserver(world: W, ws: WebSocket, sub: InterestSub): () => void {
+  function registerInterestObserver(
+    world: W,
+    ws: WebSocket,
+    sub: InterestSub,
+    visible: Set<string>,
+  ): () => void {
     const { messageId, methodId, viewerId } = sub;
+    const send = (batch: MutationBatch<E, D>): void => {
+      if (batch.size === 0) return;
+      try {
+        // readyState 1 === OPEN; skip a closing/closed socket.
+        if (ws.readyState === 1) ws.send(frame(methodId, messageId, batch));
+      } catch {
+        /* best-effort: socket may be gone */
+      }
+    };
+    if (config.canSee === undefined) {
+      return world.observeMutations({ interested: () => true, deliver: send });
+    }
+
+    const sees = (id: string, entity: E | undefined): boolean =>
+      entity !== undefined && canSee(world, viewerId, id, entity);
     return world.observeMutations({
       interested: (id: string, mutation: MutationRecord<E, D>): boolean => {
-        // On delete the entity is gone from the world; read its last state from
-        // the mutation payload, not world.entity(id).
-        const target =
-          mutation.tag === MutationType.Delete ? mutation.value.entity : world.entity(id);
-        return target ? canSee(world, viewerId, id, target) : false;
+        if (mutation.tag === MutationType.Delete) return visible.has(id);
+        if (id === viewerId) return true;
+        return visible.has(id) || sees(id, world.entity(id));
       },
       deliver: (batch: MutationBatch<E, D>): void => {
-        try {
-          // readyState 1 === OPEN; skip a closing/closed socket.
-          if (ws.readyState === 1) ws.send(frame(methodId, messageId, batch));
-        } catch {
-          /* best-effort: socket may be gone */
+        const out: MutationBatch<E, D> = new Map();
+        // Whether `out` differs from `batch`; an unchanged batch is sent as-is so
+        // its encoding is shared with other observers.
+        let rewritten = false;
+        const put = (id: string, mutation: MutationRecord<E, D>): void => {
+          out.set(id, mutation);
+          if (batch.get(id) !== mutation) rewritten = true;
+        };
+        for (const [id, mutation] of batch) {
+          if (mutation.tag === MutationType.Delete) {
+            if (visible.delete(id)) put(id, mutation);
+            else rewritten = true;
+            continue;
+          }
+          const entity = world.entity(id);
+          if (entity !== undefined && sees(id, entity)) {
+            const entering = !visible.has(id);
+            visible.add(id);
+            put(id, entering ? MutationRecord.fromInsert<E, D>({ entity }) : mutation);
+          } else if (visible.delete(id)) {
+            put(id, MutationRecord.fromDelete<E, D>({ entity: entity ?? { id } }));
+          } else {
+            rewritten = true;
+          }
         }
+        if (viewerId !== undefined && batch.has(viewerId)) {
+          // The viewer moved: entities outside this batch may have entered or
+          // left its view.
+          for (const [id, entity] of world.entities) {
+            if (batch.has(id)) continue;
+            const inView = sees(id, entity);
+            if (inView && !visible.has(id)) {
+              visible.add(id);
+              put(id, MutationRecord.fromInsert<E, D>({ entity }));
+            } else if (!inView && visible.delete(id)) {
+              put(id, MutationRecord.fromDelete<E, D>({ entity }));
+            }
+          }
+        }
+        send(rewritten ? out : batch);
       },
     });
   }
@@ -215,7 +285,10 @@ export function createInterestBroadcast<
    * own to drive cleanup.
    */
   function subscribeConnection(world: W, ws: WebSocket, sub: InterestSub): () => void {
-    const unobserve = registerInterestObserver(world, ws, sub);
+    // The client already holds what it could see before the wake; assume that
+    // is what it can see now.
+    const visible = new Set(interestSnapshot(world, sub.viewerId).keys());
+    const unobserve = registerInterestObserver(world, ws, sub, visible);
     registerConnectionTeardown(ws, () => {
       unobserve();
       clearSub(ws);
@@ -258,15 +331,22 @@ export function createInterestBroadcast<
 
     // Register the generator-free observer BEFORE the snapshot so no committed
     // mutation is missed between snapshot and registration.
-    const unobserve = registerInterestObserver(world, ws, { messageId, methodId, viewerId });
+    const visible = new Set<string>();
+    const unobserve = registerInterestObserver(
+      world,
+      ws,
+      { messageId, methodId, viewerId },
+      visible,
+    );
 
     // Interest-filtered initial snapshot, sent through the same framed path the
     // live observer uses (NOT via a generator yield), so the resume path and the
     // snapshot path are identical bytes on the wire.
+    // Always sent, even when empty: a replica treats the first frame of a
+    // stream as the authoritative world and drops anything absent from it.
     const snapshot = interestSnapshot(world, viewerId);
-    if (snapshot.size > 0 && ws.readyState === 1) {
-      ws.send(frame(methodId, messageId, snapshot));
-    }
+    for (const id of snapshot.keys()) visible.add(id);
+    if (ws.readyState === 1) ws.send(frame(methodId, messageId, snapshot));
 
     // Park: hold the server stream open WITHOUT yielding (live frames are pushed
     // generator-free above). The router ends this generator — running the

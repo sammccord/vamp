@@ -1,6 +1,12 @@
 export type { Archetype } from "./Archetype";
 export { clonePlainValue } from "./clone";
 export {
+  EntityDeletedError,
+  EntityNotExistError,
+  EntityUndefinedError,
+  WorldNotInitializedError,
+} from "./Errors";
+export {
   accumulateArrayDelta,
   accumulatePoolDelta,
   accumulateReplaceDelta,
@@ -30,8 +36,7 @@ export {
   createBaseMutator,
 } from "./mutator";
 export { type AccumulateDeltaFn, type MergeDeltaFn, type MutationScope } from "./MutationScope";
-export type { Query, QueryBuilder } from "./Query";
-export * from "./Query";
+export { createBuilder, query, type Query, type QueryBuilder } from "./Query";
 export {
   createQueryMembershipTracker,
   type QueryMembershipTracker,

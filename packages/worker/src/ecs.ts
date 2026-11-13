@@ -15,7 +15,7 @@ import { Message } from "@vampgg/utils/bebop";
 import type { ContextLogger } from "@vampgg/utils/context-logger";
 import { PinoLogger } from "@vampgg/utils/pino-logger";
 import { TempoWsRouter } from "@vampgg/utils/ws-router";
-import { HookRegistry, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
+import { HookRegistry, TempoError, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
 import { DurableObject } from "cloudflare:workers";
 import { YStreamClient, type YStreamClientOptions } from "y-durablestream";
@@ -30,6 +30,32 @@ import {
   raceWithBoundedTimer,
   shouldCompactThisTick,
 } from "./reconcile-helpers";
+
+/** Socket-attachment keys the framework owns (e.g. the interest subscription). */
+const FRAMEWORK_KEY_PREFIX = "__vamp:";
+
+/**
+ * `session` plus any framework-owned keys already on the socket's attachment,
+ * so saving an app session never wipes framework state that must survive a
+ * hibernation wake.
+ */
+function withFrameworkKeys<UserSession extends {}>(
+  ws: WebSocket,
+  session: UserSession,
+): UserSession {
+  const previous: unknown = ws.deserializeAttachment();
+  if (!(previous instanceof Object)) return session;
+  const merged: UserSession = { ...session };
+  for (const [key, value] of Object.entries(previous)) {
+    if (key.startsWith(FRAMEWORK_KEY_PREFIX) && !(key in merged)) {
+      Object.assign(merged, { [key]: value });
+    }
+  }
+  return merged;
+}
+
+/** Close codes a peer may report but an endpoint must never send (RFC 6455 §7.4.1). */
+const RESERVED_CLOSE_CODES = new Set([1005, 1006, 1015]);
 
 export type RuntimeContext<UserSession extends {}, Context extends {}> = Context & {
   // internal properties extended by ecs runtime, available to ecs systems for low-level usage
@@ -96,9 +122,13 @@ export interface ECSRuntimeConfiguration<
   Entity extends BaseEntity<Tags> = BaseEntity<Tags>,
   EntityDelta = unknown,
 > {
-  // Custom logger to use with tempo rpc.
+  // Logger for the durable object and its tempo rpc router. Defaults to a pino
+  // logger named "ecs".
   logger?: ContextLogger;
-  // The yjs document to connect to, defaults to 'global'.
+  /**
+   * @deprecated Has no effect. Entities are sharded by their `sk` root (see
+   * `loadShard`), not by a named document.
+   */
   document?: string;
   // This lobby DO's OWN namespace binding name (e.g. "GAME_ECS"). Required for
   // live cross-lobby sync: a shard provider RPCs `onShardUpdate` back on this
@@ -584,6 +614,7 @@ export class ECSDurableObject<
     if (this.ecs) return;
 
     this._namespace = namespace;
+    if (configuration.logger) this._log = configuration.logger;
     // The lobby's own shard. Locally-spawned entities default their `root` here;
     // the lobby owns + writes it, and also subscribes to participants' shards.
     this._defaultRoot = `game/${this._namespace}`;
@@ -631,7 +662,7 @@ export class ECSDurableObject<
         _: {
           sessions,
           saveSession(ws: WebSocket, session: UserSession) {
-            ws.serializeAttachment(session);
+            ws.serializeAttachment(withFrameworkKeys(ws, session));
             // Lexical capture: safe when invoked unbound (was `this.sessions`,
             // which threw AFTER serializeAttachment had already mutated the
             // attachment — a partial write).
@@ -1578,7 +1609,7 @@ export class ECSDurableObject<
     try {
       if (!this.ecs || !this.router) {
         this.log.error("Received message on uninitialized DO");
-        this._sendFramedError(ws, "uninitialized");
+        this._sendFramedError(ws, "uninitialized", message);
         return;
       }
       // Request-scoped tick: advance the world to ~now (catch-up, capped) before
@@ -1590,15 +1621,30 @@ export class ECSDurableObject<
       // frame fails decode inside `process` and lands in the catch below.
       await this.router.process(message as ArrayBuffer, Message({}), [this.ecs, ws]);
     } catch (err) {
+      if (err instanceof TempoError && err.status === TempoStatusCode.RESOURCE_EXHAUSTED) {
+        // Oversized frame: its call cannot be answered, so close with 1009
+        // ("message too big") and let the client fail its in-flight calls.
+        this.log.warn("Closing socket after oversized frame", { error: err.message });
+        try {
+          ws.close(1009, "message too big");
+        } catch {
+          /* socket may already be gone */
+        }
+        return;
+      }
       this.log.error("Error processing WebSocket message", {}, toError(err));
-      this._sendFramedError(ws, "internal");
+      this._sendFramedError(ws, "internal", message);
     }
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
     this.log.debug("WebSocket closing", { code, reason, wasClean });
     await this._teardownConnection(ws);
-    ws.close(code, "Durable Object is closing WebSocket");
+    try {
+      ws.close(RESERVED_CLOSE_CODES.has(code) ? 1000 : code, "Durable Object is closing WebSocket");
+    } catch {
+      /* socket may already be gone */
+    }
   }
 
   async webSocketError(ws: WebSocket, cause: unknown) {
@@ -1646,11 +1692,22 @@ export class ECSDurableObject<
    * router's framed-error envelope (status + msg) so the client transport
    * surfaces it as a failed call rather than a hang.
    */
-  private _sendFramedError(ws: WebSocket, msg: string): void {
+  private _sendFramedError(ws: WebSocket, msg: string, request: string | ArrayBuffer): void {
     try {
       // readyState 1 === OPEN; skip if not open.
       if (ws.readyState !== 1) return;
-      const frame = Message({ status: TempoStatusCode.INTERNAL, msg });
+      // Echo the request's ids when it decodes, so the client can match the
+      // error to its call instead of waiting on it.
+      let messageId: string | undefined;
+      let methodId: number | undefined;
+      if (request instanceof ArrayBuffer) {
+        try {
+          ({ messageId, methodId } = Message.decode(new Uint8Array(request)));
+        } catch {
+          /* undecodable: nothing to correlate */
+        }
+      }
+      const frame = Message({ status: TempoStatusCode.INTERNAL, msg, messageId, methodId });
       ws.send(new Uint8Array(Message.encode(frame)));
     } catch {
       /* best-effort: socket may be gone */

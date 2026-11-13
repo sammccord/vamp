@@ -42,8 +42,9 @@ export abstract class CoreChannel extends BaseChannel {
   /** Per-call response listeners keyed by messageId (response demultiplexing). */
   public readonly events = new EventEmitter<Record<string, (message: Message) => void>>();
   /**
-   * Reject callbacks for in-flight unary / client-stream calls, keyed by
-   * messageId. Lets close()/error() settle parked requests instead of hanging.
+   * Failure callbacks for every in-flight call (unary, client-stream, and the
+   * server/duplex streams), keyed by messageId. Lets close() and a dropped
+   * connection settle them instead of leaving them parked.
    */
   public readonly pending = new Map<string, (cause: unknown) => void>();
   protected closed = false;
@@ -129,10 +130,20 @@ export abstract class CoreChannel extends BaseChannel {
     const err = reason ?? new TempoError(TempoStatusCode.CANCELLED, "channel disposed");
     this.closeReason = err;
     this.onClosing(err);
-    for (const reject of this.pending.values()) reject(err);
-    this.pending.clear();
+    this.failInFlight(err);
     this.events.removeAllListeners();
     this.closeTransport();
+  }
+
+  /**
+   * Fail every in-flight call and stream with `reason` without disposing the
+   * channel. A transport that can reconnect calls this when its connection
+   * drops; the next call reconnects.
+   */
+  protected failInFlight(reason: TempoError): void {
+    const failures = [...this.pending.values()];
+    this.pending.clear();
+    for (const fail of failures) fail(reason);
   }
 
   public override async removeCredential(): Promise<void> {
@@ -317,8 +328,16 @@ export abstract class CoreChannel extends BaseChannel {
   ): AsyncGenerator<BebopRecord, void, undefined> {
     const messageId = init.messageId!;
     return createEventIterator<BebopRecord>(({ emit, cancel, error }) => {
+      if (this.closed) {
+        error(this.closeReason ?? new TempoError(TempoStatusCode.CANCELLED, "channel disposed"));
+        return;
+      }
       let terminated = false;
       let onAbort: (() => void) | undefined;
+      this.pending.set(messageId, (cause) => {
+        terminated = true; // the connection is gone; there is no server to tell
+        error(cause);
+      });
       const eventHandler = async (message: Message) => {
         try {
           if (message.status === TempoStatusCode.CANCELLED) {
@@ -346,6 +365,7 @@ export abstract class CoreChannel extends BaseChannel {
       this.events.on(messageId, eventHandler);
       void this.sendFrame(init);
       return () => {
+        this.pending.delete(messageId);
         this.events.off(messageId, eventHandler);
         if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
         if (terminated || this.closed) return;
@@ -379,8 +399,16 @@ export abstract class CoreChannel extends BaseChannel {
         void this.sendFrame(Message({ ...init, data: this.serializeStreamItem(method, value) }));
       },
       ({ emit, cancel, error }) => {
+        if (this.closed) {
+          error(this.closeReason ?? new TempoError(TempoStatusCode.CANCELLED, "channel disposed"));
+          return;
+        }
         let terminated = false;
         let onAbort: (() => void) | undefined;
+        this.pending.set(messageId, (cause) => {
+          terminated = true;
+          error(cause);
+        });
         const eventHandler = async (message: Message) => {
           try {
             if (message.status === TempoStatusCode.CANCELLED) {
@@ -404,6 +432,7 @@ export abstract class CoreChannel extends BaseChannel {
         }
         this.events.on(messageId, eventHandler);
         return () => {
+          this.pending.delete(messageId);
           this.events.off(messageId, eventHandler);
           if (onAbort) options?.controller?.signal.removeEventListener("abort", onAbort);
           if (this.cancelDuplexOnCleanup && !terminated && !this.closed) {

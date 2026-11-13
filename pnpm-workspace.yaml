@@ -32,9 +32,9 @@ catalog:
   typedfastbitset: ^0.8.0
   typescript: ^5
   undici-types: ^8.0.2
-  vite: npm:@voidzero-dev/vite-plus-core@latest
+  vite: npm:@voidzero-dev/vite-plus-core@0.1.24
   vite-plus: ^0.1.24
-  vitest: npm:@voidzero-dev/vite-plus-test@latest
+  vitest: npm:@voidzero-dev/vite-plus-test@0.1.24
   webextension-polyfill: ^0.12.0
   websocket-ts: ^2.2.1
   wrangler: ^4.74.0

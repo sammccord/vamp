@@ -79,4 +79,14 @@ describe("createQueryRegistry membership", () => {
       dispose();
     });
   });
+
+  it("one builder function shared by several acquirers is tracked once", () => {
+    const world = createWorld(options());
+    world.initialize();
+    const registry = createQueryRegistry(world);
+    const withFaction = (q: QueryBuilder) => q.every(components.faction);
+    const first = registry.acquire(withFaction);
+    const second = registry.acquire(withFaction);
+    expect(second.ids).toBe(first.ids);
+  });
 });

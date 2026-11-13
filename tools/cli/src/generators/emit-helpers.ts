@@ -25,7 +25,8 @@ const REPLACE: DeltaStrategy = {
 /**
  * Delta strategy per component type. Counters add fields together, so types
  * whose values must not be summed (behavior trees, brains) replace instead.
- * Unlisted types with a `<Type>Delta` default to {@link COUNTER}.
+ * An unlisted type with a `<Type>Delta` counts only when every field is a
+ * numeric scalar; anything else (strings, arrays, nested messages) replaces.
  */
 const DELTA_STRATEGIES: ReadonlyMap<string, DeltaStrategy> = new Map([
   ["Pool", COUNTER],
@@ -39,7 +40,26 @@ const DELTA_STRATEGIES: ReadonlyMap<string, DeltaStrategy> = new Map([
 function deltaStrategy(field: SchemaField, schema: ParsedSchema): DeltaStrategy | undefined {
   if (field.isArray || isScalar(field.typeName)) return undefined;
   if (!schema.definitions.has(`${field.typeName}Delta`)) return undefined;
-  return DELTA_STRATEGIES.get(field.typeName) ?? COUNTER;
+  const known = DELTA_STRATEGIES.get(field.typeName);
+  if (known) return known;
+  const fields = schema.definitions.get(field.typeName)?.fields ?? [];
+  return fields.length > 0 && fields.every(isNumericScalar) ? COUNTER : REPLACE;
+}
+
+const NUMERIC_SCALARS: ReadonlySet<string> = new Set([
+  "byte",
+  "uint8",
+  "uint16",
+  "int16",
+  "uint32",
+  "int32",
+  "float32",
+  "float64",
+]);
+
+/** A field a counter can add to: a non-array numeric scalar (not a 64-bit bigint). */
+function isNumericScalar(field: SchemaField): boolean {
+  return !field.isArray && !field.isMap && NUMERIC_SCALARS.has(field.typeName);
 }
 
 /** True when the entity has at least one array field (so the shared array applier is needed). */

@@ -24,8 +24,12 @@ function setup() {
   const world: World = new ECS(entities, createBaseMutator(entities, options), {}, options);
   world.initialize();
 
+  const encoded = { count: 0 };
   const broadcast = createInterestBroadcast<World, unknown>({
-    encodeBatch: (batch) => new TextEncoder().encode([...batch.keys()].join(",")),
+    encodeBatch: (batch) => {
+      encoded.count++;
+      return new TextEncoder().encode([...batch.keys()].join(","));
+    },
   });
   const method: BebopMethodAny = {
     name: "observe",
@@ -72,7 +76,7 @@ function setup() {
       Message({}),
       [world, ws],
     );
-  return { world, router, broadcast, socket, call };
+  return { world, router, broadcast, socket, call, encoded };
 }
 
 describe("interest observe teardown through TempoWsRouter", () => {
@@ -102,7 +106,18 @@ describe("interest observe teardown through TempoWsRouter", () => {
     expect(world.observerCount).toBe(1);
 
     await world.withScope(() => world.insert({ id: "e", hp: 1 }));
-    expect(bob.frames.filter((m) => m.status === TempoStatusCode.OK)).toHaveLength(1);
+    // The (empty) snapshot, then the live frame for the insert.
+    expect(bob.frames.filter((m) => m.status === TempoStatusCode.OK)).toHaveLength(2);
     expect(bob.frames.some((m) => m.status === TempoStatusCode.CANCELLED)).toBe(false);
+  });
+
+  test("a commit broadcast to several observers is encoded once", async () => {
+    const { world, socket, call, encoded } = setup();
+    void call(socket().ws, "cccccccc-cccc-cccc-cccc-cccccccccccc");
+    void call(socket().ws, "dddddddd-dddd-dddd-dddd-dddddddddddd");
+    await sleep(10);
+    encoded.count = 0;
+    await world.withScope(() => world.insert({ id: "e", hp: 1 }));
+    expect(encoded.count).toBe(1);
   });
 });

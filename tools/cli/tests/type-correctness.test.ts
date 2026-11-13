@@ -217,15 +217,43 @@ describe("delta strategy per component type", () => {
     typeName,
     constantValue,
   });
+  const scalar = (name: string, typeName: string) => ({
+    name,
+    typeId: -5,
+    isArray: false,
+    isMap: false,
+    typeName,
+  });
   const { entity, schema } = schemaFixture(
-    [field("health", "Pool", 1), field("brain", "Brain", 2), field("stats", "Stats", 3)],
+    [
+      field("health", "Pool", 1),
+      field("brain", "Brain", 2),
+      field("stats", "Stats", 3),
+      field("label", "Label", 4),
+    ],
     [
       ["Pool", { name: "Pool", kind: "message", fields: [] }],
       ["PoolDelta", { name: "PoolDelta", kind: "message", fields: [] }],
       ["Brain", { name: "Brain", kind: "message", fields: [] }],
       ["BrainDelta", { name: "BrainDelta", kind: "message", fields: [] }],
-      ["Stats", { name: "Stats", kind: "message", fields: [] }],
+      [
+        "Stats",
+        {
+          name: "Stats",
+          kind: "message",
+          fields: [scalar("str", "uint32"), scalar("dex", "float32")],
+        },
+      ],
       ["StatsDelta", { name: "StatsDelta", kind: "message", fields: [] }],
+      [
+        "Label",
+        {
+          name: "Label",
+          kind: "message",
+          fields: [scalar("text", "string"), scalar("size", "uint32")],
+        },
+      ],
+      ["LabelDelta", { name: "LabelDelta", kind: "message", fields: [] }],
     ],
   );
   const out = emitHelpers(entity, schema);
@@ -236,10 +264,15 @@ describe("delta strategy per component type", () => {
     expect(out).toContain("to.brain = accumulateReplaceDelta(to.brain, from.brain);");
   });
 
-  it("keeps Pool and unlisted types on the additive counter", () => {
+  it("keeps Pool and all-numeric unlisted types on the additive counter", () => {
     expect(out).toContain("entity.health = applyPoolDelta(");
     expect(out).toContain("entity.stats = applyPoolDelta(");
     expect(out).toContain("to.stats = accumulatePoolDelta(");
+  });
+
+  it("replaces an unlisted type with any non-numeric field", () => {
+    expect(out).toContain("entity.label = applyReplaceDelta(entity.label ?? {}, delta.label);");
+    expect(out).toContain("to.label = accumulateReplaceDelta(to.label, from.label);");
   });
 
   it("imports only the helpers in use", () => {

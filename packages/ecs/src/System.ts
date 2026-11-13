@@ -115,9 +115,11 @@ export type System<
   | Behavior<State, UpdateArguments, Actions, Tags, E, D>;
 
 /**
- * An entity system is a system that will be executed for each archetype matching the query.
- * In other words, it may be executed multiple times in each update.
- * If you need the system to only execute once in each update, use the `ArchetypeSystem` created by `createArchetypeSystem`
+ * An entity system runs once per update with the ids of every entity matching
+ * the query, snapshotted before it runs (an entity it moves into another
+ * matching archetype is not visited twice). The array is reused between updates,
+ * so do not keep a reference to it. Use `createArchetypeSystem` to work per
+ * archetype instead.
  * @param execute
  * @param query
  * @returns
@@ -179,8 +181,10 @@ export function createArchetypeSystem<
 
 /**
  * An event system runs reactively (via {@link ECS.subscribe}) whenever an entity
- * matching `query` changes, rather than every update cycle. The executor receives
- * the matching entity ids.
+ * matching `query` changes, rather than every update cycle. The executor
+ * receives the ids that changed, including an entity that was just deleted
+ * (reading it then returns `undefined`). `subscribe(system, true)` also runs it
+ * once over every current match.
  * @param execute
  * @param query
  * @returns

@@ -47,9 +47,18 @@ export function createQueryRegistry<E extends BaseEntity, D>(
 ): QueryRegistry<E, D> {
   const tracker: QueryMembershipTracker = createQueryMembershipTracker(world);
   const entries = new Map<Query, Entry>();
+  // Builder callbacks map to one Query each, so components sharing a hoisted
+  // builder share one tracked query instead of tracking a copy apiece.
+  const built = new WeakMap<(builder: QueryBuilder) => QueryBuilder, Query>();
 
   function acquire(input: QueryInput): QueryHandle {
-    const q = input instanceof Function ? buildQuery(input) : input;
+    let q: Query;
+    if (input instanceof Function) {
+      q = built.get(input) ?? buildQuery(input);
+      built.set(input, q);
+    } else {
+      q = input;
+    }
     let entry = entries.get(q);
     if (!entry) {
       // `track` seeds the member set from the world's current matches.

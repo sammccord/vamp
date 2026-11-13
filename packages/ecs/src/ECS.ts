@@ -13,6 +13,7 @@ import {
   WorldNotInitializedError,
 } from "./Errors";
 import { CustomAction, type GenericAction } from "./Actions";
+import { clonePlainValue } from "./clone";
 import { type AccumulateDeltaFn, type MergeDeltaFn, MutationScope } from "./MutationScope";
 import type { Query, QueryBuilder } from "./Query";
 import { query } from "./Query";
@@ -33,6 +34,15 @@ type TagsDelta<Tags extends number> = Tags[] | ArrayDelta<Tags>;
 function isTagsDelta<Tags extends number>(value: unknown): value is TagsDelta<Tags> {
   return Array.isArray(value) || Object(value) === value;
 }
+
+/** Remove `item` from `list` if present. Idempotent, so a second unsubscribe is a no-op. */
+function removeItem<T>(list: T[], item: T): void {
+  const index = list.indexOf(item);
+  if (index !== -1) list.splice(index, 1);
+}
+
+/** The world each registered query belongs to; a query's archetype set is per world. */
+const queryOwners = new WeakMap<Query, object>();
 
 export type EntityCallback = (entity: string, archetype: Archetype) => Promise<void>;
 
@@ -233,13 +243,20 @@ export class ECS<
     const observers = this._observers;
     if (observers.size === 0 || mutations.size === 0) return;
     for (const observer of observers) {
-      let batch: MutationBatch<E, D> | undefined;
+      const interested: string[] = [];
       for (const [id, mutation] of mutations) {
-        if (observer.interested(id, mutation, this)) {
-          (batch ??= new Map()).set(id, mutation);
-        }
+        if (observer.interested(id, mutation, this)) interested.push(id);
       }
-      if (batch !== undefined) observer.deliver(batch);
+      if (interested.length === 0) continue;
+      // An observer that wants everything gets the batch itself, so observers
+      // can share work keyed on it (e.g. encode once per commit, not per socket).
+      if (interested.length === mutations.size) {
+        observer.deliver(mutations);
+        continue;
+      }
+      const batch: MutationBatch<E, D> = new Map();
+      for (const id of interested) batch.set(id, mutations.get(id)!);
+      observer.deliver(batch);
     }
   }
 
@@ -376,14 +393,28 @@ export class ECS<
    * scope.
    */
   public entity(id: string): E | undefined {
-    // Check scope's shadow entities first
-    if (this.context.scope) {
-      const shadow = this.context.scope.getShadowEntity(id);
-      if (shadow === null) return undefined; // Deleted in scope
-      if (shadow !== undefined) return shadow; // Found in scope
-      // Fall through to real entities if not in scope
-    }
-    return this._entities.get(id);
+    const scope = this.context.scope;
+    if (scope === undefined) return this._entities.get(id);
+    return this._scopedEntity(scope, id) ?? undefined;
+  }
+
+  /**
+   * `id` as `scope` sees it: its shadow if it has one, `null` if deleted in the
+   * scope chain, else the parent's view (or the store) with this scope's pending
+   * delta applied. That merged copy is cached as the shadow, so later updates in
+   * the scope merge into it too.
+   */
+  private _scopedEntity(scope: MutationScope<E, D>, id: string): E | undefined | null {
+    const shadow = scope.getShadowEntity(id);
+    if (shadow !== undefined) return shadow;
+    const base = scope.parent ? this._scopedEntity(scope.parent, id) : this._entities.get(id);
+    if (!base) return base;
+    const pending = scope.mutations.get(id);
+    if (pending?.tag !== MutationType.Update) return base;
+    const merged = clonePlainValue(base);
+    this.options.mergeDelta(merged, pending.value.delta);
+    scope.shadowEntities.set(id, merged);
+    return merged;
   }
 
   /** Live `Map<id, entity>` of all committed entities. Treat as read-only. */
@@ -478,6 +509,7 @@ export class ECS<
    * so observers never see a torn read.
    */
   public insert(entity: E): E {
+    if (entity.id && this.entityArchetype.has(entity.id)) return this.replace(entity.id, entity);
     // An empty id (e.g. a materialized delta's default) means "generate one".
     const id = this.createEntity(undefined, entity.id || undefined, false);
     // Work on a copy when we had to generate an id, so we never mutate the
@@ -549,8 +581,10 @@ export class ECS<
       const key = component as keyof E;
       const entityValue = entity[key];
 
-      // are we changing the component structure into another archetype?
-      if (mutating && deltaValue === undefined) {
+      // `undefined` removes the component only when mutating; otherwise the key
+      // is absent from the change.
+      if (deltaValue === undefined && !mutating) continue;
+      if (deltaValue === undefined) {
         base[key] = undefined;
         this._removeComponent(id, component, false);
         executing = true;
@@ -649,6 +683,7 @@ export class ECS<
    * matches. Returns an unsubscribe function.
    */
   public subscribe(system: EventSystem, emit = false): () => void {
+    this._claimQuery(system.query);
     this.subscriptions.push(system);
 
     if (this.initialized) {
@@ -662,15 +697,12 @@ export class ECS<
       this._executeEventSystem(system);
     }
 
-    return () =>
-      this.subscriptions.splice(
-        this.subscriptions.findIndex((s) => s === system),
-        1,
-      )[0];
+    return () => removeItem(this.subscriptions, system);
   }
 
   /** Register a lifecycle system run when a matching entity is created. Returns an unsubscribe function. */
   public onCreate(system: LifecycleSystem) {
+    this._claimQuery(system.query);
     this.handleCreate.push(system);
     if (this.initialized) {
       traverseArchetypeGraph(this.rootArchetype, (archetype) => {
@@ -678,15 +710,12 @@ export class ECS<
         return true;
       });
     }
-    return () =>
-      this.handleCreate.splice(
-        this.handleCreate.findIndex((s) => s === system),
-        1,
-      )[0];
+    return () => removeItem(this.handleCreate, system);
   }
 
   /** Register a lifecycle system run when a matching entity is deleted. Returns an unsubscribe function. */
   public onDelete(system: LifecycleSystem) {
+    this._claimQuery(system.query);
     this.handleDelete.push(system);
     if (this.initialized) {
       traverseArchetypeGraph(this.rootArchetype, (archetype) => {
@@ -694,55 +723,59 @@ export class ECS<
         return true;
       });
     }
-    return () =>
-      this.handleDelete.splice(
-        this.handleDelete.findIndex((s) => s === system),
-        1,
-      )[0];
+    return () => removeItem(this.handleDelete, system);
   }
 
-  private _executeEventSystems(archetype: Archetype) {
+  /** Bind `query` to this world; its archetype set cannot be shared across worlds. */
+  private _claimQuery(query: Query): void {
+    const owner = queryOwners.get(query);
+    if (owner !== undefined && owner !== this) {
+      throw new Error(
+        "This query is already registered with another ECS world. A query collects one world's archetypes; build a separate system or query per world.",
+      );
+    }
+    queryOwners.set(query, this);
+  }
+
+  /**
+   * Notify every event system whose query matches `archetype` that `entity`
+   * changed. Each system receives only the changed id, so a change costs
+   * O(subscribers), not O(matching entities).
+   */
+  private _executeEventSystems(archetype: Archetype, entity: string) {
     const systems = this.subscriptions;
     for (let s = 0, sl = systems.length; s < sl; s++) {
       const system = systems[s];
-      if (system.query.archetypes.has(archetype)) this._executeEventSystem(system);
+      // A fresh array per call: execute() may re-enter this path synchronously.
+      if (system.query.archetypes.has(archetype)) system.execute([entity]);
     }
   }
 
+  /** Run `sys` once over every entity it currently matches. */
   private _executeEventSystem(sys: EventSystem) {
-    const archetypes = sys.query.archetypes;
-
-    // Pre-calculate total entity count
-    let totalEntities = 0;
-    for (const arch of archetypes) {
-      totalEntities += arch.entities.size;
-    }
-
-    // Fresh, non-escaping array. The result is consumed synchronously inside
-    // sys.execute() and never handed to a query() caller. We deliberately do NOT
-    // reuse a scratch buffer here (unlike the per-entity systems in update()):
-    // an event system's execute() can synchronously re-fire the SAME event
-    // system (e.g. by mutating an entity), and a reused buffer would be clobbered
-    // mid-iteration. A fresh array keeps this path re-entrancy-safe while still
-    // honoring the no-escape invariant from proposal 07.
-    const entities = new Array<string>(totalEntities);
-    let entityIndex = 0;
-
-    // Direct iteration over Set is faster than spreading
-    for (const arch of archetypes) {
-      for (const entity of arch.entities) {
-        entities[entityIndex++] = entity;
-      }
-    }
+    const entities: string[] = [];
+    for (const arch of sys.query.archetypes)
+      for (const entity of arch.entities) entities.push(entity);
     sys.execute(entities);
   }
 
+  /**
+   * Run and clear the deferred queue. Actions deferred while it runs wait for
+   * the next update. Every action runs once even if an earlier one throws; the
+   * first error is rethrown after the queue drains.
+   */
   private _executeDeferred() {
     if (this.deferred.length === 0) return;
-    for (let i = 0; i < this.deferred.length; i++) {
-      this.deferred[i]();
+    const actions = this.deferred.splice(0);
+    let failure: { error: unknown } | undefined;
+    for (const action of actions) {
+      try {
+        action();
+      } catch (error) {
+        failure ??= { error };
+      }
     }
-    this.deferred.length = 0;
+    if (failure) throw failure.error;
   }
 
   private _executeDeferredCacheRebuilds() {
@@ -781,11 +814,39 @@ export class ECS<
     }
   }
 
+  /** Remember `id`'s archetype before the active scope first moves it. */
+  private _recordArchetype(id: string): void {
+    const scope = this.context.scope;
+    if (scope && !scope.archetypeUndo.has(id)) {
+      scope.archetypeUndo.set(id, this.entityArchetype.get(id) ?? null);
+    }
+  }
+
+  /** Put every entity an aborted scope moved back where it was. */
+  private _rollbackArchetypes(scope: MutationScope<E, D>): void {
+    for (const [id, prev] of scope.archetypeUndo) {
+      const current = this.entityArchetype.get(id);
+      if (current === (prev ?? undefined)) continue;
+      current?.entities.delete(id);
+      if (prev) {
+        prev.entities.add(id);
+        this.entityArchetype.set(id, prev);
+        this.deletedEntities.delete(id);
+        this._deferredCacheRebuilds.add(id);
+      } else {
+        this.entityArchetype.delete(id);
+        this.entityBehaviorCache.delete(id);
+        this._deferredCacheRebuilds.delete(id);
+      }
+    }
+  }
+
   private _transformEntityForComponent(
     current: Archetype,
     entity: string,
     componentId: number,
   ): Archetype {
+    this._recordArchetype(entity);
     current.entities.delete(entity);
 
     const adjacent = current.adjacent.get(componentId);
@@ -804,6 +865,7 @@ export class ECS<
   }
 
   private _transformEntityForTag(current: Archetype, entity: string, tagId: number): Archetype {
+    this._recordArchetype(entity);
     current.entities.delete(entity);
 
     const tagAdjacent = current.tagAdjacent.get(tagId);
@@ -903,6 +965,7 @@ export class ECS<
    * A system may not be executed if it's `Query` does not match any `Archetype`s.
    */
   registerSystem(system: System<State, UpdateArguments, Actions, Tags, E, D>) {
+    this._claimQuery(system.query);
     this.systems.push(system);
 
     if (this.initialized) {
@@ -912,11 +975,7 @@ export class ECS<
       });
     }
 
-    return () =>
-      this.systems.splice(
-        this.systems.findIndex((s) => s === system),
-        1,
-      )[0];
+    return () => removeItem(this.systems, system);
   }
 
   // Register a behavior (system) for a specific event type
@@ -924,9 +983,10 @@ export class ECS<
    * Register an event-driven {@link Behavior}, keyed by its action tag and run by
    * {@link act}. Use the `createBehavior` helper to build one. Registering after
    * {@link initialize} invalidates the behavior caches so the new behavior is
-   * picked up by already-seen archetypes.
+   * picked up by already-seen archetypes. Returns an unsubscribe function.
    */
-  registerBehavior(behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>): void {
+  registerBehavior(behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>): () => void {
+    this._claimQuery(behavior.query);
     if (!this.behaviors.has(behavior.tag)) {
       this.behaviors.set(behavior.tag, []);
     }
@@ -950,6 +1010,20 @@ export class ECS<
       this.archetypeBehaviorCache.clear();
       this.rebuildAllBehaviorCaches();
     }
+    return () => this._unregisterBehavior(behavior);
+  }
+
+  private _unregisterBehavior(
+    behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>,
+  ): void {
+    const list = this.behaviors.get(behavior.tag);
+    if (!list || list.indexOf(behavior) === -1) return;
+    removeItem(list, behavior);
+    if (list.length === 0) this.behaviors.delete(behavior.tag);
+    if (this.initialized) {
+      this.archetypeBehaviorCache.clear();
+      this.rebuildAllBehaviorCaches();
+    }
   }
 
   private rebuildAllBehaviorCaches(): void {
@@ -961,10 +1035,10 @@ export class ECS<
   // Rebuild behavior cache for a specific entity - O(a * b * q) where a = archetypes, b = behaviors, q = query complexity
   // Now uses archetype-level caching, so each archetype is only evaluated once
   rebuildBehaviorCache(entityId: string): void {
-    const entity = this.entities.get(entityId);
-    if (!entity) return;
-
-    const entityArchetype = this.entityArchetype.get(entityId)!;
+    // Keyed on archetype membership, not the committed store, so an entity
+    // inserted in the open scope gets its behaviors immediately.
+    const entityArchetype = this.entityArchetype.get(entityId);
+    if (!entityArchetype) return;
 
     // Check if we've already computed behaviors for this archetype
     let cache = this.archetypeBehaviorCache.get(entityArchetype);
@@ -1028,22 +1102,18 @@ export class ECS<
         system.execute(archetypes, this, ...args);
       }
       if (system.type === SystemType.Entity) {
-        // Reuse one scratch buffer per system, refilled in place per archetype,
-        // instead of allocating a fresh `[...arch.entities]` array each time.
-        // The buffer is transient (valid only for this execute call) and never
-        // escapes to query() callers.
+        // Snapshot every match before executing, so an entity the system moves
+        // into another matching archetype is not processed twice. The scratch
+        // buffer is reused per system and valid only for this execute call.
         let buf = this._systemScratch.get(system);
         if (buf === undefined) {
           buf = [];
           this._systemScratch.set(system, buf);
         }
-        // iterating archetypes in case a system adds/removes a component, producing a new archetype that matches the system's query
-        for (const arch of archetypes) {
-          let i = 0;
-          for (const entity of arch.entities) buf[i++] = entity;
-          buf.length = i;
-          system.execute(buf, this, ...args);
-        }
+        let i = 0;
+        for (const arch of archetypes) for (const entity of arch.entities) buf[i++] = entity;
+        buf.length = i;
+        if (i > 0) system.execute(buf, this, ...args);
       }
     }
 
@@ -1189,6 +1259,7 @@ export class ECS<
     const parent = this.context.scope;
     let settle: (() => void) | undefined;
     if (parent) {
+      scope.parent = parent;
       scope.initializeFromParent(parent);
       parent.children.push(new Promise<void>((resolve) => (settle = resolve)));
     }
@@ -1211,8 +1282,13 @@ export class ECS<
 
       try {
         // Transactional commit: only on success. An aborted scope leaves no trace.
-        if (succeeded) {
+        if (!succeeded) {
+          this._rollbackArchetypes(scope);
+        } else {
           if (parent) {
+            for (const [id, prev] of scope.archetypeUndo) {
+              if (!parent.archetypeUndo.has(id)) parent.archetypeUndo.set(id, prev);
+            }
             // Merge up; the outermost scope owns the commit and the broadcast.
             for (const [id, mutation] of scope.mutations) {
               parent.applyMutation(id, mutation);
@@ -1268,11 +1344,12 @@ export class ECS<
     }
 
     const archetype = prefabricate;
+    this._recordArchetype(entity);
     archetype.entities.add(entity);
     this.entityArchetype.set(entity, archetype);
 
     if (executeSystems) {
-      this._executeEventSystems(archetype);
+      this._executeEventSystems(archetype, entity);
       this._handleCreate(entity);
     }
     return entity;
@@ -1296,6 +1373,7 @@ export class ECS<
 
     const archetype = this.entityArchetype.get(entity);
     if (!archetype) return;
+    this._recordArchetype(entity);
     archetype.entities.delete(entity);
     // much faster than delete operator, but achieves the same (ish)
     // an alternative is to leave it be, and use archetype.entitySet.has(entity) as a check for entity being deleted, but that too is a little slower.
@@ -1310,7 +1388,7 @@ export class ECS<
       // Set iterates in insertion order; drop the oldest id.
       this.deletedEntities.delete(this.deletedEntities.values().next().value!);
     }
-    this._executeEventSystems(archetype);
+    this._executeEventSystems(archetype, entity);
     this._handleDelete(entity, archetype);
   }
 
@@ -1334,6 +1412,7 @@ export class ECS<
     if (this.entityArchetype.get(entity) === prefabricate) return;
 
     // Transform resets all components on the entity to that of the prefab..
+    this._recordArchetype(entity);
     this.entityArchetype.get(entity)?.entities.delete(entity);
     const archetype = prefabricate;
     archetype.entities.add(entity);
@@ -1343,7 +1422,7 @@ export class ECS<
     // of the update cycle, matching addComponent/removeComponent) so
     // act()/actWithBubbling don't run the OLD archetype's stale behavior set.
     this._deferredCacheRebuilds.add(entity);
-    this._executeEventSystems(archetype);
+    this._executeEventSystems(archetype, entity);
   }
 
   /**
@@ -1383,7 +1462,7 @@ export class ECS<
       const next = this._transformEntityForComponent(archetype, entity, component);
       // Defer cache rebuilding to batch multiple component changes
       this._deferredCacheRebuilds.add(entity);
-      if (executeSystems) this._executeEventSystems(next);
+      if (executeSystems) this._executeEventSystems(next, entity);
     }
   }
 
@@ -1409,7 +1488,7 @@ export class ECS<
       const next = this._transformEntityForComponent(archetype, entity, component);
       // Defer cache rebuilding to batch multiple component changes
       this._deferredCacheRebuilds.add(entity);
-      if (executeSystems) this._executeEventSystems(next);
+      if (executeSystems) this._executeEventSystems(next, entity);
     }
   }
 
@@ -1444,7 +1523,7 @@ export class ECS<
 
     const next = this._transformEntityForTag(archetype, entity, tag);
     this._deferredCacheRebuilds.add(entity);
-    if (executeSystems) this._executeEventSystems(next);
+    if (executeSystems) this._executeEventSystems(next, entity);
   }
 
   /**
@@ -1458,13 +1537,13 @@ export class ECS<
 
     const next = this._transformEntityForTag(archetype, entity, tag);
     this._deferredCacheRebuilds.add(entity);
-    if (executeSystems) this._executeEventSystems(next);
+    if (executeSystems) this._executeEventSystems(next, entity);
   }
 
   executeEventSystems(id: string) {
     this._assertEntity(id);
     const archetype = this.entityArchetype.get(id);
-    if (archetype) this._executeEventSystems(archetype);
+    if (archetype) this._executeEventSystems(archetype, id);
   }
 
   public parent(id: string, childId: string): Pick<E, "id" | "children"> | undefined {

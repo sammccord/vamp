@@ -81,9 +81,14 @@ export interface ProcessTransport {
   ): Promise<AsyncGenerator<BebopRecord, void, unknown>>;
   /** Mutate the response envelope after the OK headers are populated. */
   decorateResponse?(response: Message): void;
-  /** Stamp messageId/timestamp/methodId from the request onto error frames. */
-  stampErrorResponse?: boolean;
 }
+
+/**
+ * Returned by the stream invokers for a frame that continues an already-open
+ * client or duplex stream. The frame is delivered to the open invocation, and
+ * no response is sent for it: the call that opened the stream owns the reply.
+ */
+const CONTINUATION: unique symbol = Symbol("continuation");
 
 /** Options for {@link RouterCore.writeStreamFrames}. */
 export interface StreamWriteOptions {
@@ -177,16 +182,15 @@ export class RouterCore {
     context: ServerContext,
     method: BebopMethodAny,
     contentType: BebopContentType,
-  ): Promise<BebopRecord> {
+  ): Promise<BebopRecord | typeof CONTINUATION> {
     await this.setAuthContext(request, context);
     if (this.host.getHooks() !== undefined) {
       await this.host.getHooks()!.executeRequestHooks(context);
     }
     const messageId = request.messageId!;
-    const stream = this.clientStreams.get(messageId);
-    if (stream) {
+    if (this.clientStreams.has(messageId)) {
       this.events.emit(messageId, request);
-      return await stream;
+      return CONTINUATION;
     }
     const generator = () => {
       return createEventIterator<BebopRecord>(({ emit, cancel }) => {
@@ -263,16 +267,15 @@ export class RouterCore {
     context: ServerContext,
     method: BebopMethodAny,
     contentType: BebopContentType,
-  ): Promise<AsyncGenerator<BebopRecord, void, unknown>> {
+  ): Promise<AsyncGenerator<BebopRecord, void, unknown> | typeof CONTINUATION> {
     await this.setAuthContext(request, context);
     if (this.host.getHooks() !== undefined) {
       await this.host.getHooks()!.executeRequestHooks(context);
     }
     const messageId = request.messageId!;
-    const stream = this.clientStreams.get(messageId);
-    if (stream) {
+    if (this.clientStreams.has(messageId)) {
       this.events.emit(messageId, request);
-      return stream;
+      return CONTINUATION;
     }
 
     if (!TempoUtil.isAsyncGeneratorFunction(method.invoke.bind(method))) {
@@ -442,27 +445,33 @@ export class RouterCore {
           case MethodType.Unary:
             record = await this.invokeUnaryMethod(request, serverContext, method, contentType);
             break;
-          case MethodType.ClientStream:
-            record = await this.invokeClientStreamMethod(
+          case MethodType.ClientStream: {
+            const result = await this.invokeClientStreamMethod(
               request,
               serverContext,
               method,
               contentType,
             );
+            if (result === CONTINUATION) return;
+            record = result;
             break;
+          }
           case MethodType.ServerStream:
             recordGenerator = transport.invokeServerStream
               ? await transport.invokeServerStream(request, serverContext, method)
               : await this.invokeServerStreamMethod(request, serverContext, method, contentType);
             break;
-          case MethodType.DuplexStream:
-            recordGenerator = await this.invokeDuplexStreamMethod(
+          case MethodType.DuplexStream: {
+            const result = await this.invokeDuplexStreamMethod(
               request,
               serverContext,
               method,
               contentType,
             );
+            if (result === CONTINUATION) return;
+            recordGenerator = result;
             break;
+          }
           default:
             throw new TempoError(
               TempoStatusCode.INTERNAL,
@@ -531,8 +540,10 @@ export class RouterCore {
           this.host.logger.error(message, undefined, e);
         }
       } else if (e instanceof Error) {
-        message = e.message;
-        this.host.logger.error(message, undefined, e);
+        // A non-Tempo error is an implementation failure; its message may carry
+        // internals, so it reaches the client only when explicitly allowed.
+        this.host.logger.error(e.message, undefined, e);
+        message = this.host.transmitInternalErrors === true ? e.message : "internal error";
       }
       const hooks = this.host.getHooks();
       if (e instanceof Error && hooks !== undefined) {
@@ -540,13 +551,13 @@ export class RouterCore {
       }
       // cleanup any lingering event emitters
       this.clientStreams.delete(request.messageId!);
+      // Always correlate the error with its request: without the messageId the
+      // client cannot match the frame and the call hangs.
       response.status = status;
       response.msg = message;
-      if (transport.stampErrorResponse) {
-        response.messageId = request.messageId;
-        response.timestamp = request.timestamp;
-        response.methodId = request.methodId;
-      }
+      response.messageId = request.messageId;
+      response.timestamp = request.timestamp;
+      response.methodId = request.methodId;
       await transport.send(response);
     }
   }

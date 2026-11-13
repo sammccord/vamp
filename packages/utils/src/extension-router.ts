@@ -264,7 +264,6 @@ export class TempoExtensionRouter<
 
     await this.core.processRequest(request, response, ctx, {
       send,
-      stampErrorResponse: true,
       decorateResponse: (message) => {
         message.msg = "";
       },
