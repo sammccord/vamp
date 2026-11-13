@@ -1,5 +1,13 @@
 # basic
 
+## 0.0.1-beta.14
+
+### Patch Changes
+
+- Updated dependencies [700378d]
+  - @vampgg/utils@1.0.0-beta.9
+  - @vampgg/worker@1.0.0-beta.13
+
 ## 0.0.1-beta.13
 
 ### Patch Changes
