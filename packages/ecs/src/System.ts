@@ -1,8 +1,8 @@
 import type { Archetype } from "./Archetype";
 import type { ECS } from "./ECS";
-import type { CustomAction, GenericAction } from "./Actions";
+import type { CustomAction } from "./Actions";
 import { query as buildQuery, type Query, type QueryBuilder } from "./Query";
-import type { BaseEntity } from "./types";
+import type { WorldTypes } from "./types";
 
 /**
  * Discriminator for the {@link System} union. Numeric values are load-bearing
@@ -22,36 +22,14 @@ export type BaseSystem = {
   readonly query: Query;
 };
 
-export type EntitySystem<
-  State extends Record<string, unknown>,
-  UpdateArguments extends unknown[],
-  Actions extends GenericAction,
-  Tags extends number = number,
-  E extends BaseEntity<Tags> = BaseEntity<Tags>,
-  D = unknown,
-> = BaseSystem & {
+export type EntitySystem<W extends WorldTypes = WorldTypes> = BaseSystem & {
   readonly type: SystemType.Entity;
-  execute(
-    entities: Array<string>,
-    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
-    ...args: UpdateArguments
-  ): void;
+  execute(entities: Array<string>, world: ECS<W>, ...args: W["args"]): void;
 };
 
-export type ArchetypeSystem<
-  State extends Record<string, unknown>,
-  UpdateArguments extends unknown[],
-  Actions extends GenericAction,
-  Tags extends number = number,
-  E extends BaseEntity<Tags> = BaseEntity<Tags>,
-  D = unknown,
-> = BaseSystem & {
+export type ArchetypeSystem<W extends WorldTypes = WorldTypes> = BaseSystem & {
   readonly type: SystemType.Archetype;
-  execute(
-    archetypes: Set<Archetype>,
-    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
-    ...args: UpdateArguments
-  ): void;
+  execute(archetypes: Set<Archetype>, world: ECS<W>, ...args: W["args"]): void;
 };
 
 export type EventSystem = BaseSystem & {
@@ -64,55 +42,36 @@ export type LifecycleSystem = BaseSystem & {
   execute(entity: string): void;
 };
 
-export type Behavior<
-  State extends Record<string, unknown>,
-  UpdateArguments extends unknown[],
-  Actions extends GenericAction,
-  Tags extends number = number,
-  E extends BaseEntity<Tags> = BaseEntity<Tags>,
-  D = unknown,
-> = BaseSystem & {
+export type Behavior<W extends WorldTypes = WorldTypes> = BaseSystem & {
   readonly type: SystemType.Behavior;
   tag: number;
   handler: (
-    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
-    entity: E,
-    event: CustomAction<Actions>,
+    world: ECS<W>,
+    entity: W["entity"],
+    event: CustomAction<W["actions"]>,
   ) => void | Promise<void>;
   priority: number | undefined; // Higher priority runs first
 };
 
 /**
  * The handler {@link createBehavior} accepts: `event.detail` is narrowed to the
- * `Actions` member whose tag is `Tag`.
+ * `W["actions"]` member whose tag is `Tag`.
  */
 export type BehaviorHandler<
-  State extends Record<string, unknown>,
-  UpdateArguments extends unknown[],
-  Actions extends GenericAction,
-  Tags extends number = number,
-  E extends BaseEntity<Tags> = BaseEntity<Tags>,
-  D = unknown,
-  Tag extends Actions["tag"] = Actions["tag"],
+  W extends WorldTypes = WorldTypes,
+  Tag extends W["actions"]["tag"] = W["actions"]["tag"],
 > = (
-  world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
-  entity: E,
-  event: CustomAction<Extract<Actions, { tag: Tag }>>,
+  world: ECS<W>,
+  entity: W["entity"],
+  event: CustomAction<Extract<W["actions"], { tag: Tag }>>,
 ) => void | Promise<void>;
 
-export type System<
-  State extends Record<string, unknown>,
-  UpdateArguments extends unknown[],
-  Actions extends GenericAction,
-  Tags extends number = number,
-  E extends BaseEntity<Tags> = BaseEntity<Tags>,
-  D = unknown,
-> =
-  | EntitySystem<State, UpdateArguments, Actions, Tags, E, D>
-  | ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D>
+export type System<W extends WorldTypes = WorldTypes> =
+  | EntitySystem<W>
+  | ArchetypeSystem<W>
   | EventSystem
   | LifecycleSystem
-  | Behavior<State, UpdateArguments, Actions, Tags, E, D>;
+  | Behavior<W>;
 
 /**
  * An entity system runs once per update with the ids of every entity matching
@@ -124,21 +83,10 @@ export type System<
  * @param query
  * @returns
  */
-export function createEntitySystem<
-  State extends Record<string, unknown>,
-  UpdateArguments extends unknown[],
-  Actions extends GenericAction,
-  Tags extends number = number,
-  E extends BaseEntity<Tags> = BaseEntity<Tags>,
-  D = unknown,
->(
-  execute: (
-    entities: Array<string>,
-    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
-    ...args: UpdateArguments
-  ) => void,
+export function createEntitySystem<W extends WorldTypes = WorldTypes>(
+  execute: (entities: Array<string>, world: ECS<W>, ...args: W["args"]) => void,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
-): EntitySystem<State, UpdateArguments, Actions, Tags, E, D> {
+): EntitySystem<W> {
   query = query instanceof Function ? buildQuery(query) : query;
   return Object.freeze({
     execute,
@@ -155,22 +103,10 @@ export function createEntitySystem<
  * @param queryParams
  * @returns
  */
-export function createArchetypeSystem<
-  State extends Record<string, unknown>,
-  UpdateArguments extends unknown[],
-  ReturnArguments,
-  Actions extends GenericAction,
-  Tags extends number = number,
-  E extends BaseEntity<Tags> = BaseEntity<Tags>,
-  D = unknown,
->(
-  execute: (
-    archetypes: Set<Archetype>,
-    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
-    ...args: UpdateArguments
-  ) => ReturnArguments,
+export function createArchetypeSystem<W extends WorldTypes = WorldTypes>(
+  execute: (archetypes: Set<Archetype>, world: ECS<W>, ...args: W["args"]) => void,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
-): ArchetypeSystem<State, UpdateArguments, Actions, Tags, E, D> {
+): ArchetypeSystem<W> {
   query = query instanceof Function ? buildQuery(query) : query;
   return Object.freeze({
     execute,
@@ -225,7 +161,7 @@ export function createLifecycleSystem(
  * Create an event-driven {@link Behavior} for {@link ECS.registerBehavior}, keyed
  * by an action `tag`. When {@link ECS.act} dispatches that tag to an entity
  * matching `query`, `handler(world, entity, event)` runs with `event.detail`
- * narrowed to the `Actions` member for `tag`. An optional `priority` orders
+ * narrowed to the `W["actions"]` member for `tag`. An optional `priority` orders
  * behaviors sharing a tag.
  * @param tag action tag this behavior responds to
  * @param handler runs against the world + struck entity + action payload
@@ -233,26 +169,21 @@ export function createLifecycleSystem(
  * @param priority higher runs first among behaviors for the same tag
  */
 export function createBehavior<
-  State extends Record<string, unknown>,
-  UpdateArguments extends unknown[],
-  Actions extends GenericAction,
-  Tags extends number = number,
-  E extends BaseEntity<Tags> = BaseEntity<Tags>,
-  D = unknown,
-  Tag extends Actions["tag"] = Actions["tag"],
+  W extends WorldTypes = WorldTypes,
+  Tag extends W["actions"]["tag"] = W["actions"]["tag"],
 >(
   tag: Tag,
-  handler: BehaviorHandler<State, UpdateArguments, Actions, Tags, E, D, Tag>,
+  handler: BehaviorHandler<W, Tag>,
   query: Query | ((buildQuery: QueryBuilder) => QueryBuilder),
   priority?: number,
-): Behavior<State, UpdateArguments, Actions, Tags, E, D> {
+): Behavior<W> {
   query = query instanceof Function ? buildQuery(query) : query;
   return Object.freeze({
     tag,
     // SAFETY: ECS.act looks behaviors up by the dispatched action's own tag
     // (ECS.ts behavior cache), so this handler only ever receives actions whose
-    // tag is `Tag`, i.e. `Extract<Actions, { tag: Tag }>`.
-    handler: handler as Behavior<State, UpdateArguments, Actions, Tags, E, D>["handler"],
+    // tag is `Tag`, i.e. `Extract<W["actions"], { tag: Tag }>`.
+    handler: handler as Behavior<W>["handler"],
     query,
     priority,
     type: SystemType.Behavior,

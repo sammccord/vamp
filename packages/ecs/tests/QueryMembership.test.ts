@@ -31,7 +31,14 @@ function accumulateDelta(from: EntityDelta, to: EntityDelta): EntityDelta {
 }
 
 type State = { scope?: MutationScope<Entity, EntityDelta> };
-type World = ECS<State, [], { tag: number; value: unknown }, number, Entity, EntityDelta>;
+type World = ECS<{
+  state: State;
+  args: [];
+  actions: { tag: number; value: unknown };
+  tags: number;
+  entity: Entity;
+  delta: EntityDelta;
+}>;
 
 function makeWorld(): World {
   const entities = new Map<string, Entity>();

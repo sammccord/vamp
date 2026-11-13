@@ -20,8 +20,8 @@ export function emitInterest(): string {
  * scope what each observer sees, or omit \`config\` for a global broadcast.
  */
 export function createGameInterestBroadcast<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
 >(
   config: Partial<

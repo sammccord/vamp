@@ -12,8 +12,8 @@ export function emitGameContext(): string {
  * the \`[ECS, WebSocket]\` tuple carrying the live world.
  */
 export type GameContext<
-  UserSession extends {} = {},
-  Context extends Record<string, unknown> = {},
+  UserSession extends object = {},
+  Context extends object = {},
   UpdateArguments extends Array<unknown> = [],
-> = RPCContext<UserSession, Context, UpdateArguments, Actions, Tags, Entity, EntityDelta>;`;
+> = RPCContext<GameServerTypes<UserSession, Context, UpdateArguments>>;`;
 }

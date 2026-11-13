@@ -23,6 +23,15 @@ import {
 } from "../src/index.ts";
 import { treeFingerprint } from "../src/behavior-tree/evaluate.ts";
 
+type TestWorld = {
+  state: State;
+  args: [];
+  actions: Action;
+  tags: number;
+  entity: Entity;
+  delta: Delta;
+};
+
 type Entity = {
   id?: string;
   children?: string[];
@@ -34,7 +43,7 @@ type Delta = { hp?: number; brain?: Brain; behaviorTree?: BehaviorTree };
 type Action = { tag: 1; value: { target: string; damage: number } };
 
 type State = { scope?: MutationScope<Entity, Delta> };
-type World = ECS<State, [], Action, number, Entity, Delta>;
+type World = ECS<TestWorld>;
 
 const components = { id: 1, children: 2, hp: 3, brain: 4, behaviorTree: 5 };
 const Condition = { Hurt: 1 } as const;
@@ -54,7 +63,7 @@ function world(seed: number) {
   };
   let tick = 0;
   const random = new RNGClass().setSeed(seed);
-  const ecs: World = new ECS<State, [], Action, number, Entity, Delta>(
+  const ecs: World = new ECS<TestWorld>(
     entities,
     mutate,
     {},
@@ -75,7 +84,7 @@ function world(seed: number) {
     for (const [id, record] of mutations) mutate(id, record);
   });
   ecs.registerBehavior(
-    createBehavior<State, [], Action, number, Entity, Delta>(
+    createBehavior<TestWorld>(
       1,
       async (w: World, entity: Entity, event: CustomAction<Action>) => {
         await Promise.resolve();
@@ -85,7 +94,7 @@ function world(seed: number) {
     ),
   );
   ecs.registerSystem(
-    createBehaviorTreeSystem<State, [], Action, number, Entity, Delta>({
+    createBehaviorTreeSystem<TestWorld>({
       query: (q: QueryBuilder) => q.every(components.brain),
       brain: "brain",
       tree: "behaviorTree",

@@ -12,7 +12,7 @@ import {
   EntityUndefinedError,
   WorldNotInitializedError,
 } from "./Errors";
-import { CustomAction, type GenericAction } from "./Actions";
+import { CustomAction } from "./Actions";
 import { clonePlainValue } from "./clone";
 import { type AccumulateDeltaFn, type MergeDeltaFn, MutationScope } from "./MutationScope";
 import type { Query, QueryBuilder } from "./Query";
@@ -25,7 +25,13 @@ import {
   SystemType,
 } from "./System";
 import type { ArrayDelta } from "./delta";
-import { type BaseEntity, type EntityMutator, MutationRecord, MutationType } from "./types";
+import {
+  type BaseEntity,
+  type EntityMutator,
+  MutationRecord,
+  MutationType,
+  type WorldTypes,
+} from "./types";
 
 /** A tags delta: a replacement tag list, or the ArrayDelta set/add/remove form. */
 type TagsDelta<Tags extends number> = Tags[] | ArrayDelta<Tags>;
@@ -63,7 +69,7 @@ export interface ECSOptions<E extends BaseEntity, D> {
   accumulateDelta: AccumulateDeltaFn<D>;
 }
 
-export type StateWithScope<C extends Record<string, unknown>, E extends BaseEntity, D> = C & {
+export type StateWithScope<C extends object, E extends BaseEntity, D> = C & {
   scope?: MutationScope<E, D>;
 };
 
@@ -90,14 +96,7 @@ export type FlushHandler<E, D> = (
  * the flush handler is the single authoritative write, mutation observers are the
  * many filtered readers. Both consume the same coalesced `Map<id, MutationRecord>`.
  */
-export interface MutationObserver<
-  State extends Record<string, unknown>,
-  UpdateArguments extends Array<unknown>,
-  Actions extends GenericAction,
-  Tags extends number,
-  E extends BaseEntity<Tags>,
-  D,
-> {
+export interface MutationObserver<W extends WorldTypes = WorldTypes> {
   /**
    * Is this single committed mutation relevant to this observer? Called once per
    * (observer × mutation) per routed flush. Close over the observer's
@@ -113,12 +112,12 @@ export interface MutationObserver<
    */
   interested(
     entityId: string,
-    mutation: MutationRecord<E, D>,
-    world: ECS<State, UpdateArguments, Actions, Tags, E, D>,
+    mutation: MutationRecord<W["entity"], W["delta"]>,
+    world: ECS<W>,
   ): boolean;
 
   /** Deliver the non-empty interested subset. Called at most once per routed flush. */
-  deliver(batch: MutationBatch<E, D>): void;
+  deliver(batch: MutationBatch<W["entity"], W["delta"]>): void;
 }
 
 /**
@@ -139,14 +138,7 @@ export interface MutationObserver<
  * @typeParam E - The consumer's entity shape (must extend {@link BaseEntity}).
  * @typeParam D - The delta shape used by `put`/`upsert` and mutation coalescing.
  */
-export class ECS<
-  State extends Record<string, unknown>,
-  UpdateArguments extends Array<unknown>,
-  Actions extends GenericAction,
-  Tags extends number = number,
-  E extends BaseEntity<Tags> = BaseEntity<Tags>,
-  D = unknown,
-> {
+export class ECS<W extends WorldTypes = WorldTypes> {
   protected readonly rootArchetype: Archetype = createArchetype(
     "root",
     new TypedFastBitSet(),
@@ -162,21 +154,12 @@ export class ECS<
   ]);
   private readonly _archetypeOf = new Map<string, Archetype>();
   private readonly _deletedEntities = new Set<string>();
-  private readonly _systems: System<State, UpdateArguments, Actions, Tags, E, D>[] = [];
+  private readonly _systems: System<W>[] = [];
   private readonly _subscriptions: EventSystem[] = [];
-  private readonly _behaviors = new Map<
-    number,
-    Behavior<State, UpdateArguments, Actions, Tags, E, D>[]
-  >();
-  private readonly _entityBehaviorCache = new Map<
-    string,
-    Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>
-  >();
+  private readonly _behaviors = new Map<number, Behavior<W>[]>();
+  private readonly _entityBehaviorCache = new Map<string, Map<number, Behavior<W>[]>>();
   // Cache behaviors at the archetype level to avoid redundant query evaluation
-  private readonly archetypeBehaviorCache = new Map<
-    Archetype,
-    Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>
-  >();
+  private readonly archetypeBehaviorCache = new Map<Archetype, Map<number, Behavior<W>[]>>();
   // Defer cache rebuilding until end of update cycle
   private readonly _deferredCacheRebuilds = new Set<string>();
   // Cache `upsert`/`query(q => q.every(...))` shapes by their sorted component-id
@@ -192,10 +175,7 @@ export class ECS<
   // so a system MUST NOT retain it past the call. `query()` never returns this
   // buffer (it owns a fresh array), so the no-escape invariant from proposal 07
   // is preserved. Keyed by system so each per-entity system gets its own.
-  private readonly _systemScratch = new WeakMap<
-    System<State, UpdateArguments, Actions, Tags, E, D>,
-    string[]
-  >();
+  private readonly _systemScratch = new WeakMap<System<W>, string[]>();
   private readonly _handleCreate: LifecycleSystem[] = [];
   private readonly _handleDelete: LifecycleSystem[] = [];
   private readonly _deferred: (() => void)[] = [];
@@ -206,15 +186,12 @@ export class ECS<
   }
 
   /** Registered per-update systems, in run order. */
-  get systems(): ReadonlyArray<System<State, UpdateArguments, Actions, Tags, E, D>> {
+  get systems(): ReadonlyArray<System<W>> {
     return this._systems;
   }
 
   /** Registered behaviors keyed by action tag, highest priority first. */
-  get behaviors(): ReadonlyMap<
-    number,
-    ReadonlyArray<Behavior<State, UpdateArguments, Actions, Tags, E, D>>
-  > {
+  get behaviors(): ReadonlyMap<number, ReadonlyArray<Behavior<W>>> {
     return this._behaviors;
   }
 
@@ -223,22 +200,18 @@ export class ECS<
     return this._initialized;
   }
 
-  private _scopeOpenCallbacks = new Set<(scope: MutationScope<E, D>) => void>();
-  private _flushHandler: FlushHandler<E, D> | null = null;
+  private _scopeOpenCallbacks = new Set<(scope: MutationScope<W["entity"], W["delta"]>) => void>();
+  private _flushHandler: FlushHandler<W["entity"], W["delta"]> | null = null;
   // Interest-managed broadcast registry. Per-world (per DO): not a module global,
   // so colocated worlds never cross-feed. Holds the remote observers that
   // `routeMutations` fans committed batches out to.
-  private readonly _observers = new Set<
-    MutationObserver<State, UpdateArguments, Actions, Tags, E, D>
-  >();
+  private readonly _observers = new Set<MutationObserver<W>>();
 
   /**
    * Register a mutation observer for interest-managed broadcast. Returns an
    * unsubscribe function. Per-world (per DO). See {@link MutationObserver}.
    */
-  observeMutations(
-    observer: MutationObserver<State, UpdateArguments, Actions, Tags, E, D>,
-  ): () => void {
+  observeMutations(observer: MutationObserver<W>): () => void {
     this._observers.add(observer);
     return () => {
       this._observers.delete(observer);
@@ -260,7 +233,7 @@ export class ECS<
    * after the authoritative flush, so observers never see uncommitted state.
    * Also public as an escape hatch for apps that route only certain scopes.
    */
-  routeMutations(mutations: MutationBatch<E, D>): void {
+  routeMutations(mutations: MutationBatch<W["entity"], W["delta"]>): void {
     const observers = this._observers;
     if (observers.size === 0 || mutations.size === 0) return;
     for (const observer of observers) {
@@ -275,7 +248,7 @@ export class ECS<
         observer.deliver(mutations);
         continue;
       }
-      const batch: MutationBatch<E, D> = new Map();
+      const batch: MutationBatch<W["entity"], W["delta"]> = new Map();
       for (const id of interested) batch.set(id, mutations.get(id)!);
       observer.deliver(batch);
     }
@@ -286,10 +259,13 @@ export class ECS<
    * initial interest-filtered snapshot an `observe` RPC yields first, and for
    * re-sync frames when a viewer's interest set changes.
    */
-  snapshotMutations(predicate: (id: string, entity: E) => boolean): MutationBatch<E, D> {
-    const batch: MutationBatch<E, D> = new Map();
+  snapshotMutations(
+    predicate: (id: string, entity: W["entity"]) => boolean,
+  ): MutationBatch<W["entity"], W["delta"]> {
+    const batch: MutationBatch<W["entity"], W["delta"]> = new Map();
     for (const [id, entity] of this._entities) {
-      if (predicate(id, entity)) batch.set(id, MutationRecord.fromInsert<E, D>({ entity }));
+      if (predicate(id, entity))
+        batch.set(id, MutationRecord.fromInsert<W["entity"], W["delta"]>({ entity }));
     }
     return batch;
   }
@@ -309,7 +285,7 @@ export class ECS<
    * and capture the committed result. Does not itself open a scope, so it
    * composes inside an existing one.
    */
-  applyMutations(mutations: MutationBatch<E, D>): void {
+  applyMutations(mutations: MutationBatch<W["entity"], W["delta"]>): void {
     for (const [id, record] of mutations) {
       switch (record.tag) {
         case MutationType.Insert:
@@ -330,7 +306,7 @@ export class ECS<
    * Register a callback invoked when a mutation scope is opened (before the scope function runs).
    * Returns an unsubscribe function.
    */
-  onScopeOpen(cb: (scope: MutationScope<E, D>) => void): () => void {
+  onScopeOpen(cb: (scope: MutationScope<W["entity"], W["delta"]>) => void): () => void {
     this._scopeOpenCallbacks.add(cb);
     return () => this._scopeOpenCallbacks.delete(cb);
   }
@@ -340,7 +316,7 @@ export class ECS<
    * The handler receives all coalesced mutations from the scope and is responsible for
    * applying them (to entities, Yjs, etc.). Pass `null` to restore default behavior.
    */
-  setFlushHandler(handler: FlushHandler<E, D> | null): void {
+  setFlushHandler(handler: FlushHandler<W["entity"], W["delta"]> | null): void {
     this._flushHandler = handler;
   }
 
@@ -350,17 +326,17 @@ export class ECS<
   // it prevents unbounded growth under per-frame spawn/despawn churn.
   private static readonly DELETED_RING_CAP = 1024;
 
-  public readonly context: StateWithScope<State, E, D>;
-  protected readonly _entities: Map<string, E>;
-  protected readonly _baseMutate: EntityMutator<E, D>;
-  protected readonly _mutate: EntityMutator<E, D>;
-  protected readonly options: ECSOptions<E, D>;
+  public readonly context: StateWithScope<W["state"], W["entity"], W["delta"]>;
+  protected readonly _entities: Map<string, W["entity"]>;
+  protected readonly _baseMutate: EntityMutator<W["entity"], W["delta"]>;
+  protected readonly _mutate: EntityMutator<W["entity"], W["delta"]>;
+  protected readonly options: ECSOptions<W["entity"], W["delta"]>;
 
   constructor(
-    entities: Map<string, E>,
-    mutate: EntityMutator<E, D>,
-    context: State,
-    options: ECSOptions<E, D>,
+    entities: Map<string, W["entity"]>,
+    mutate: EntityMutator<W["entity"], W["delta"]>,
+    context: W["state"],
+    options: ECSOptions<W["entity"], W["delta"]>,
   ) {
     this._entities = entities;
     this._baseMutate = mutate;
@@ -369,14 +345,16 @@ export class ECS<
     this.context = context;
   }
 
-  private _wrapMutator(baseMutate: EntityMutator<E, D>): EntityMutator<E, D> {
-    return (id: string, mutation: MutationRecord<E, D>) => {
+  private _wrapMutator(
+    baseMutate: EntityMutator<W["entity"], W["delta"]>,
+  ): EntityMutator<W["entity"], W["delta"]> {
+    return (id: string, mutation: MutationRecord<W["entity"], W["delta"]>) => {
       if (this.initialized) {
         const scope = this.context.scope;
         if (scope === undefined && this._flushHandler) {
           // No scope open: commit this mutation on its own, through the same
           // flush + broadcast path a scope commit takes.
-          const batch: MutationBatch<E, D> = new Map([[id, mutation]]);
+          const batch: MutationBatch<W["entity"], W["delta"]> = new Map([[id, mutation]]);
           this._flushHandler(batch, undefined);
           this.routeMutations(batch);
           return;
@@ -411,7 +389,7 @@ export class ECS<
    * staged, not-yet-committed writes — and `undefined` if it was deleted in the
    * scope.
    */
-  public entity(id: string): E | undefined {
+  public entity(id: string): W["entity"] | undefined {
     const scope = this.context.scope;
     if (scope === undefined) return this._entities.get(id);
     return this._scopedEntity(scope, id) ?? undefined;
@@ -423,7 +401,10 @@ export class ECS<
    * delta applied. That merged copy is cached as the shadow, so later updates in
    * the scope merge into it too.
    */
-  private _scopedEntity(scope: MutationScope<E, D>, id: string): E | undefined | null {
+  private _scopedEntity(
+    scope: MutationScope<W["entity"], W["delta"]>,
+    id: string,
+  ): W["entity"] | undefined | null {
     const shadow = scope.getShadowEntity(id);
     if (shadow !== undefined) return shadow;
     const base = scope.parent ? this._scopedEntity(scope.parent, id) : this._entities.get(id);
@@ -447,7 +428,10 @@ export class ECS<
    * {@link insert} a new entity materialized from `delta`. Repeated calls with the
    * same component shape reuse a cached query.
    */
-  public upsert(delta: D, filter: (e: E | undefined, i: number, obj: string[]) => boolean): E {
+  public upsert(
+    delta: W["delta"],
+    filter: (e: W["entity"] | undefined, i: number, obj: string[]) => boolean,
+  ): W["entity"] {
     const components: number[] = [];
     for (const component in delta) {
       if (delta[component] === undefined) continue;
@@ -523,17 +507,17 @@ export class ECS<
    * is returned. The insert mutation is recorded before create/event systems fire
    * so observers never see a torn read.
    */
-  public insert(entity: E): E {
+  public insert(entity: W["entity"]): W["entity"] {
     if (entity.id && this._archetypeOf.has(entity.id)) return this.replace(entity.id, entity);
     // An empty id (e.g. a materialized delta's default) means "generate one".
     const id = this._createEntity(undefined, entity.id || undefined, false);
     // Work on a copy when we had to generate an id, so we never mutate the
     // caller's object. The caller gets the id via the returned `committed`.
-    const committed: E = entity.id ? entity : { ...entity, id };
+    const committed: W["entity"] = entity.id ? entity : { ...entity, id };
     // Record the insert mutation FIRST so observers (event/lifecycle systems
     // fired below) never see a state where the archetype already has the
     // component but the entity's data has not yet been committed — a torn read.
-    this._mutate(id, MutationRecord.fromInsert<E, D>({ entity: committed }));
+    this._mutate(id, MutationRecord.fromInsert<W["entity"], W["delta"]>({ entity: committed }));
     for (const component in committed) {
       if (component === "tags") continue;
       if (committed[component] === undefined) continue;
@@ -555,13 +539,14 @@ export class ECS<
    * membership follows the snapshot. Unlike delete + insert, no delete/create
    * lifecycle systems fire. Falls back to {@link insert} for an unknown id.
    */
-  public replace(id: string, entity: E): E {
+  public replace(id: string, entity: W["entity"]): W["entity"] {
     if (!this.hasEntity(id)) return this.insert({ ...entity, id });
-    const committed: E = entity.id === id ? entity : { ...entity, id };
-    this._mutate(id, MutationRecord.fromInsert<E, D>({ entity: committed }));
+    const committed: W["entity"] = entity.id === id ? entity : { ...entity, id };
+    this._mutate(id, MutationRecord.fromInsert<W["entity"], W["delta"]>({ entity: committed }));
     for (const name in this.options.components) {
       // SAFETY: `options.components` is keyed by entity field names.
-      if (committed[name as keyof E] === undefined) this._removeComponent(id, name, false);
+      if (committed[name as keyof W["entity"]] === undefined)
+        this._removeComponent(id, name, false);
       else this._addComponent(id, name, false);
     }
     this._reconcileTags(id, committed.tags ?? []);
@@ -575,30 +560,30 @@ export class ECS<
    * Keys whose value is `undefined` are ignored; use {@link removeComponents}
    * to remove a component.
    */
-  public put(id: string | undefined, delta: D): E {
+  public put(id: string | undefined, delta: W["delta"]): W["entity"] {
     if (!id) return this.insert(this.options.materializeDelta(delta));
     const entity = this.entity(id);
     if (!entity || entity.id !== id) {
-      // SAFETY: BaseEntity carries `id?: string`, so `{ id }` is a valid Partial<E>.
-      return this.insert(this.options.materializeDelta(delta, { id } as Partial<E>));
+      // SAFETY: BaseEntity carries `id?: string`, so `{ id }` is a valid Partial<W["entity"]>.
+      return this.insert(this.options.materializeDelta(delta, { id } as Partial<W["entity"]>));
     }
     let added = false;
     for (const component in delta) {
       if (component === "tags" || delta[component] === undefined) continue;
-      // SAFETY: delta keys are entity field names (the delta record `D` mirrors
-      // `E` field by field), so each non-"tags" delta key is a key of `E`.
-      if (entity[component as keyof E] === undefined) {
+      // SAFETY: delta keys are entity field names (the delta record `W["delta"]` mirrors
+      // `W["entity"]` field by field), so each non-"tags" delta key is a key of `W["entity"]`.
+      if (entity[component as keyof W["entity"]] === undefined) {
         this._addComponent(id, component, false);
         added = true;
       }
     }
-    // SAFETY: `delta` is the consumer's delta record (`D`), an object keyed by
+    // SAFETY: `delta` is the consumer's delta record (`W["delta"]`), an object keyed by
     // field name; this reads its optional `tags` field, the one delta key handled
     // outside the component loop above. `isTagsDelta` parses it before use.
     const tagsDelta = (delta as { tags?: unknown }).tags;
-    const retagged = isTagsDelta<Tags>(tagsDelta) && this._reconcileTags(id, tagsDelta);
+    const retagged = isTagsDelta<W["tags"]>(tagsDelta) && this._reconcileTags(id, tagsDelta);
 
-    this._mutate(id, MutationRecord.fromUpdate<E, D>({ delta }));
+    this._mutate(id, MutationRecord.fromUpdate<W["entity"], W["delta"]>({ delta }));
     if (added || retagged) this._notify(id);
     return this.entity(id) ?? entity;
   }
@@ -608,10 +593,13 @@ export class ECS<
    * after the change. Recorded as a full snapshot, since a delta cannot carry a
    * removal over the wire.
    */
-  public removeComponents(id: string, ...components: Array<keyof E & string>): E | undefined {
+  public removeComponents(
+    id: string,
+    ...components: Array<keyof W["entity"] & string>
+  ): W["entity"] | undefined {
     const entity = this.entity(id);
     if (!entity) return undefined;
-    const next: E = { ...entity };
+    const next: W["entity"] = { ...entity };
     let changed = false;
     for (const component of components) {
       if (component === "id" || next[component] === undefined) continue;
@@ -625,10 +613,10 @@ export class ECS<
    * Delete the entity `id`, recording a delete mutation. Returns its last
    * state, or `undefined` if it does not exist.
    */
-  public delete(id: string): E | undefined {
+  public delete(id: string): W["entity"] | undefined {
     const entity = this.entity(id);
     if (entity === undefined) return undefined;
-    this._mutate(id, MutationRecord.fromDelete<E, D>({ entity }));
+    this._mutate(id, MutationRecord.fromDelete<W["entity"], W["delta"]>({ entity }));
     this._deleteEntity(id);
     return entity;
   }
@@ -824,7 +812,7 @@ export class ECS<
   }
 
   /** Put every entity an aborted scope moved back where it was. */
-  private _rollbackArchetypes(scope: MutationScope<E, D>): void {
+  private _rollbackArchetypes(scope: MutationScope<W["entity"], W["delta"]>): void {
     for (const [id, prev] of scope.archetypeUndo) {
       const current = this._archetypeOf.get(id);
       if (current === (prev ?? undefined)) continue;
@@ -885,13 +873,13 @@ export class ECS<
   }
 
   /** Move `id` to the archetype for its new tag set; returns whether it moved. */
-  private _reconcileTags(id: string, tagsDelta: TagsDelta<Tags>): boolean {
+  private _reconcileTags(id: string, tagsDelta: TagsDelta<W["tags"]>): boolean {
     const archetype = this._archetypeOf.get(id);
     if (!archetype) return false;
-    // SAFETY: an archetype's tag bits are only ever set from `Tags` values
-    // (addTag/removeTag/_reconcileTags all take `Tags`), so every set bit is a `Tags`.
-    const currentTags = archetype.tagMask.array() as Tags[];
-    let targetTags: Tags[];
+    // SAFETY: an archetype's tag bits are only ever set from `W["tags"]` values
+    // (addTag/removeTag/_reconcileTags all take `W["tags"]`), so every set bit is a `W["tags"]`.
+    const currentTags = archetype.tagMask.array() as W["tags"][];
+    let targetTags: W["tags"][];
 
     if (Array.isArray(tagsDelta)) {
       targetTags = tagsDelta;
@@ -967,7 +955,7 @@ export class ECS<
    * Use the `createEntitySystem` or `createArchetypeSystem` helpers to create the system.
    * A system may not be executed if it's `Query` does not match any `Archetype`s.
    */
-  registerSystem(system: System<State, UpdateArguments, Actions, Tags, E, D>) {
+  registerSystem(system: System<W>) {
     this._claimQuery(system.query);
     this._systems.push(system);
 
@@ -988,7 +976,7 @@ export class ECS<
    * {@link initialize} invalidates the behavior caches so the new behavior is
    * picked up by already-seen archetypes. Returns an unsubscribe function.
    */
-  registerBehavior(behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>): () => void {
+  registerBehavior(behavior: Behavior<W>): () => void {
     this._claimQuery(behavior.query);
     if (!this._behaviors.has(behavior.tag)) {
       this._behaviors.set(behavior.tag, []);
@@ -1016,9 +1004,7 @@ export class ECS<
     return () => this._unregisterBehavior(behavior);
   }
 
-  private _unregisterBehavior(
-    behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>,
-  ): void {
+  private _unregisterBehavior(behavior: Behavior<W>): void {
     const list = this._behaviors.get(behavior.tag);
     if (!list || list.indexOf(behavior) === -1) return;
     removeItem(list, behavior);
@@ -1048,11 +1034,11 @@ export class ECS<
 
     if (!cache) {
       // Compute once per archetype, not once per entity
-      cache = new Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>();
+      cache = new Map<number, Behavior<W>[]>();
 
       // For each event type
       for (const [eventType, behaviors] of this._behaviors) {
-        const applicable: Behavior<State, UpdateArguments, Actions, Tags, E, D>[] = [];
+        const applicable: Behavior<W>[] = [];
 
         // Check each behavior
         for (const behavior of behaviors) {
@@ -1095,7 +1081,7 @@ export class ECS<
    * Typically you want to call `update` on each animation frame (`window.requestAnimationFrame`).
    * @throws {WorldNotInitializedError} if `initialized` has not been called
    */
-  update(...args: UpdateArguments) {
+  update(...args: W["args"]) {
     if (!this.initialized) throw new WorldNotInitializedError();
     const systems = this._systems;
     for (let s = 0, sl = systems.length; s < sl; s++) {
@@ -1126,7 +1112,7 @@ export class ECS<
   }
 
   /** Dispatch the same `action` to every id in `entityIds` concurrently (see {@link act}). */
-  async actBatch<Ac extends Actions>(entityIds: string[], action: Ac): Promise<void> {
+  async actBatch<Ac extends W["actions"]>(entityIds: string[], action: Ac): Promise<void> {
     await Promise.all(entityIds.map((id) => this.act(id, action)));
   }
 
@@ -1138,9 +1124,7 @@ export class ECS<
    * and clearing the pending flag keeps those reads correct and avoids a
    * redundant rebuild at the next `update()`.
    */
-  private _ensureBehaviorCache(
-    entityId: string,
-  ): Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]> | undefined {
+  private _ensureBehaviorCache(entityId: string): Map<number, Behavior<W>[]> | undefined {
     if (this._deferredCacheRebuilds.has(entityId)) {
       this._rebuildBehaviorCache(entityId);
       this._deferredCacheRebuilds.delete(entityId);
@@ -1149,10 +1133,7 @@ export class ECS<
   }
 
   /** The behaviors `act(id, ...)` would run for an action with `tag`, in run order. */
-  behaviorsFor(
-    id: string,
-    tag: Actions["tag"],
-  ): ReadonlyArray<Behavior<State, UpdateArguments, Actions, Tags, E, D>> {
+  behaviorsFor(id: string, tag: W["actions"]["tag"]): ReadonlyArray<Behavior<W>> {
     return this._ensureBehaviorCache(id)?.get(tag) ?? EMPTY_BEHAVIORS;
   }
 
@@ -1161,7 +1142,7 @@ export class ECS<
    * same action down to its children (recursive), so acting on a parent cascades
    * to its whole subtree. Resolves `false` if the entity does not exist.
    */
-  async act<Ac extends Actions>(
+  async act<Ac extends W["actions"]>(
     entityId: string,
     payload: Ac,
     action?: CustomAction<Ac>,
@@ -1195,7 +1176,7 @@ export class ECS<
   }
 
   // Act on entity and propagate up the hierarchy
-  async actWithBubbling<Ac extends Actions>(entityId: string, action: Ac): Promise<void> {
+  async actWithBubbling<Ac extends W["actions"]>(entityId: string, action: Ac): Promise<void> {
     let currentId: string | undefined = entityId;
 
     const ac = new CustomAction(action);
@@ -1243,8 +1224,11 @@ export class ECS<
    * Create a new mutation scope for tracking entity changes.
    * Mutations recorded in a scope can be coalesced and flushed together.
    */
-  createScope(): MutationScope<E, D> {
-    return new MutationScope<E, D>(this.options.mergeDelta, this.options.accumulateDelta);
+  createScope(): MutationScope<W["entity"], W["delta"]> {
+    return new MutationScope<W["entity"], W["delta"]>(
+      this.options.mergeDelta,
+      this.options.accumulateDelta,
+    );
   }
 
   /**
@@ -1264,7 +1248,7 @@ export class ECS<
    */
   async withScope<T>(fn: () => T | Promise<T>): Promise<{
     result: T;
-    mutations: Map<string, MutationRecord<E, D>>;
+    mutations: Map<string, MutationRecord<W["entity"], W["delta"]>>;
   }> {
     const scope = this.createScope();
     const parent = this.context.scope;
@@ -1414,8 +1398,8 @@ export class ECS<
   /**
    * Check if the entity has a componentId
    */
-  hasComponent(entity: string, _component: Exclude<keyof E, "tags">): boolean {
-    // SAFETY: component names are string keys of `E` (schema-generated field
+  hasComponent(entity: string, _component: Exclude<keyof W["entity"], "tags">): boolean {
+    // SAFETY: component names are string keys of `W["entity"]` (schema-generated field
     // names), so `_component` is a string and indexes the string-keyed
     // `options.components` map.
     const component = this.options.components[_component as string];
@@ -1457,7 +1441,7 @@ export class ECS<
   /**
    * Check if the entity has a tag
    */
-  hasTag(entity: string, tag: Tags): boolean {
+  hasTag(entity: string, tag: W["tags"]): boolean {
     const entityArchetype = this._archetypeOf.get(entity);
     if (!entityArchetype) return false;
     return entityArchetype.tagMask.has(tag);
@@ -1466,16 +1450,16 @@ export class ECS<
   /**
    * All tags currently assigned to the entity
    */
-  getTags(entity: string): Tags[] {
+  getTags(entity: string): W["tags"][] {
     const entityArchetype = this._archetypeOf.get(entity);
     if (!entityArchetype) return [];
-    // SAFETY: an archetype's tag ids are only ever set from `Tags` values
-    // (addTag/removeTag/_reconcileTags all take `Tags`), so each id is a `Tags`.
-    return entityArchetype.tagIds() as Tags[];
+    // SAFETY: an archetype's tag ids are only ever set from `W["tags"]` values
+    // (addTag/removeTag/_reconcileTags all take `W["tags"]`), so each id is a `W["tags"]`.
+    return entityArchetype.tagIds() as W["tags"][];
   }
 
   /** Move `entity` to the archetype with `tag`; archetype only, no data. */
-  private _addTag(entity: string, tag: Tags): void {
+  private _addTag(entity: string, tag: W["tags"]): void {
     const archetype = this._archetypeOf.get(entity);
     if (!archetype || archetype.tagMask.has(tag)) return;
     this._transformEntityForTag(archetype, entity, tag);
@@ -1483,7 +1467,7 @@ export class ECS<
   }
 
   /** Move `entity` to the archetype without `tag`; archetype only, no data. */
-  private _removeTag(entity: string, tag: Tags): void {
+  private _removeTag(entity: string, tag: W["tags"]): void {
     const archetype = this._archetypeOf.get(entity);
     if (!archetype || !archetype.tagMask.has(tag)) return;
     this._transformEntityForTag(archetype, entity, tag);
@@ -1491,21 +1475,21 @@ export class ECS<
   }
 
   /** Add `tag` to the entity's `tags` and return the entity after the change. */
-  addTag(id: string, tag: Tags): E | undefined {
+  addTag(id: string, tag: W["tags"]): W["entity"] | undefined {
     if (!this.hasEntity(id)) return undefined;
     const tags = this.getTags(id);
     if (tags.includes(tag)) return this.entity(id);
-    // SAFETY: `{ tags }` is a replacement tag list, the form of `D`'s `tags` field.
-    return this.put(id, { tags: [...tags, tag] } as D);
+    // SAFETY: `{ tags }` is a replacement tag list, the form of `W["delta"]`'s `tags` field.
+    return this.put(id, { tags: [...tags, tag] } as W["delta"]);
   }
 
   /** Remove `tag` from the entity's `tags` and return the entity after the change. */
-  removeTag(id: string, tag: Tags): E | undefined {
+  removeTag(id: string, tag: W["tags"]): W["entity"] | undefined {
     if (!this.hasEntity(id)) return undefined;
     const tags = this.getTags(id);
     if (!tags.includes(tag)) return this.entity(id);
-    // SAFETY: `{ tags }` is a replacement tag list, the form of `D`'s `tags` field.
-    return this.put(id, { tags: tags.filter((t) => t !== tag) } as D);
+    // SAFETY: `{ tags }` is a replacement tag list, the form of `W["delta"]`'s `tags` field.
+    return this.put(id, { tags: tags.filter((t) => t !== tag) } as W["delta"]);
   }
 
   private _notify(id: string) {
@@ -1519,18 +1503,18 @@ export class ECS<
    * the child's `parent`, detaching it from any previous parent first. Returns
    * the parent after the change.
    */
-  public parent(id: string, childId: string): E | undefined {
+  public parent(id: string, childId: string): W["entity"] | undefined {
     const parent = this.entity(id);
     const child = this.entity(childId);
     if (!parent || !child) return undefined;
     if (child.parent !== undefined && child.parent !== id) this.unparent(child.parent, childId);
     if (child.parent !== id) {
-      // SAFETY: `{ parent }` sets the scalar `parent` field, the form `D` takes.
-      this.put(childId, { parent: id } as D);
+      // SAFETY: `{ parent }` sets the scalar `parent` field, the form `W["delta"]` takes.
+      this.put(childId, { parent: id } as W["delta"]);
     }
     if (parent.children?.includes(childId)) return this.entity(id);
-    // SAFETY: an ArrayDelta `{ add }`, the form of `D`'s `children` field.
-    return this.put(id, { children: { add: [childId] } } as D);
+    // SAFETY: an ArrayDelta `{ add }`, the form of `W["delta"]`'s `children` field.
+    return this.put(id, { children: { add: [childId] } } as W["delta"]);
   }
 
   /**
@@ -1538,12 +1522,12 @@ export class ECS<
    * clears the child's `parent` if it points at `id`. Returns the parent after
    * the change.
    */
-  public unparent(id: string, childId: string): E | undefined {
+  public unparent(id: string, childId: string): W["entity"] | undefined {
     const parent = this.entity(id);
     if (!parent) return undefined;
     if (this.entity(childId)?.parent === id) this.removeComponents(childId, "parent");
     if (!parent.children?.includes(childId)) return parent;
-    // SAFETY: an ArrayDelta `{ remove }`, the form of `D`'s `children` field.
-    return this.put(id, { children: { remove: [childId] } } as D);
+    // SAFETY: an ArrayDelta `{ remove }`, the form of `W["delta"]`'s `children` field.
+    return this.put(id, { children: { remove: [childId] } } as W["delta"]);
   }
 }

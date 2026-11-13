@@ -13,6 +13,15 @@ import {
   type QueryBuilder,
 } from "../src/index.ts";
 
+type TestWorld = {
+  state: {};
+  args: [];
+  actions: Action;
+  tags: number;
+  entity: Entity;
+  delta: Delta;
+};
+
 interface Entity {
   id?: string;
   tags?: number[];
@@ -30,7 +39,7 @@ type Delta = {
   children?: ArrayDelta<string>;
 };
 type Action = { tag: number; value: unknown };
-type World = ECS<{}, [], Action, number, Entity, Delta>;
+type World = ECS<TestWorld>;
 
 const components = { id: 1, hp: 2, mp: 3 };
 
@@ -139,9 +148,7 @@ describe("behaviors", () => {
   it("run for an entity inserted earlier in the same scope", async () => {
     const { world } = createWorld();
     let runs = 0;
-    world.registerBehavior(
-      createBehavior<{}, [], Action, number, Entity, Delta>(1, () => void runs++, withHp),
-    );
+    world.registerBehavior(createBehavior<TestWorld>(1, () => void runs++, withHp));
     await world.withScope(async () => {
       world.insert({ id: "a", hp: 1 });
       await world.act("a", { tag: 1, value: undefined });
@@ -156,9 +163,7 @@ describe("registration", () => {
     const { world } = createWorld();
     world.insert({ id: "a", hp: 1 });
     let runs = 0;
-    const off = world.registerBehavior(
-      createBehavior<{}, [], Action, number, Entity, Delta>(1, () => void runs++, withHp),
-    );
+    const off = world.registerBehavior(createBehavior<TestWorld>(1, () => void runs++, withHp));
     await world.act("a", { tag: 1, value: undefined });
     off();
     off();
@@ -175,8 +180,8 @@ describe("registration", () => {
 
   it("a second unsubscribe is a no-op", () => {
     const { world } = createWorld();
-    const a = createEntitySystem<{}, [], Action, number, Entity, Delta>(() => {}, withHp);
-    const b = createEntitySystem<{}, [], Action, number, Entity, Delta>(() => {}, withHp);
+    const a = createEntitySystem<TestWorld>(() => {}, withHp);
+    const b = createEntitySystem<TestWorld>(() => {}, withHp);
     const offA = world.registerSystem(a);
     world.registerSystem(b);
     offA();
@@ -185,7 +190,7 @@ describe("registration", () => {
   });
 
   it("rejects a system already registered with another world", () => {
-    const system = createEntitySystem<{}, [], Action, number, Entity, Delta>(() => {}, withHp);
+    const system = createEntitySystem<TestWorld>(() => {}, withHp);
     createWorld().world.registerSystem(system);
     expect(() => createWorld().world.registerSystem(system)).toThrow(/another ECS world/);
   });
@@ -253,7 +258,7 @@ describe("update()", () => {
     const { world } = createWorld();
     const visits = new Map<string, number>();
     world.registerSystem(
-      createEntitySystem<{}, [], Action, number, Entity, Delta>((ids: string[], w: World) => {
+      createEntitySystem<TestWorld>((ids: string[], w: World) => {
         for (const id of ids) {
           visits.set(id, (visits.get(id) ?? 0) + 1);
           if (!w.hasComponent(id, "mp")) w.put(id, { mp: 1 });
@@ -351,7 +356,7 @@ describe("data-level writes", () => {
     world.parent("p", "c");
     const reached: string[] = [];
     world.registerBehavior(
-      createBehavior<{}, [], Action, number, Entity, Delta>(
+      createBehavior<TestWorld>(
         1,
         (_w: World, entity: Entity) => void reached.push(entity.id!),
         withHp,

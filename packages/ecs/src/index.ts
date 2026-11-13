@@ -55,12 +55,14 @@ export {
 } from "./System";
 export {
   type BaseEntity,
+  type DefineWorld,
   type DeleteMutation,
   type EntityMutator,
   type InsertMutation,
   MutationRecord,
   MutationType,
   type UpdateMutation,
+  type WorldTypes,
 } from "./types";
 export {
   type BehaviorSpec,

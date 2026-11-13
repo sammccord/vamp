@@ -1,13 +1,13 @@
 import { ConsoleLogger, MethodType, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
 import { type BebopMethodAny, ServiceRegistry } from "@tempojs/server";
-import { createBaseMutator, ECS, type ECSOptions, type GenericAction } from "@vampgg/ecs";
+import { createBaseMutator, type DefineWorld, ECS, type ECSOptions } from "@vampgg/ecs";
 import { Message } from "@vampgg/utils/bebop";
 import { TempoWsRouter } from "@vampgg/utils/ws-router";
 import { describe, expect, test } from "vitest";
 import { createInterestBroadcast } from "../src/interest.ts";
 
 type Entity = { id?: string; hp?: number };
-type World = ECS<{}, [], GenericAction, number, Entity, Entity>;
+type World = ECS<DefineWorld<{ entity: Entity; delta: Entity }>>;
 
 const METHOD_ID = 7;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

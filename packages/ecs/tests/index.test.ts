@@ -17,6 +17,15 @@ import {
   createLifecycleSystem,
 } from "../src/System.ts";
 
+type TestWorld = {
+  state: TestContext;
+  args: [number];
+  actions: TestAction;
+  tags: number;
+  entity: Entity;
+  delta: EntityDelta;
+};
+
 // Simple test entity type with flat primitive fields
 type Entity = {
   id?: string;
@@ -219,16 +228,11 @@ function createTestECS() {
     deltaTime: 16.67,
   };
 
-  return new ECS<TestContext, [number], TestAction, number, Entity, EntityDelta>(
-    entities,
-    mutate,
-    context,
-    options,
-  );
+  return new ECS<TestWorld>(entities, mutate, context, options);
 }
 
 describe("ECS", () => {
-  let ecs: ECS<TestContext, [number], TestAction, number, Entity, EntityDelta>;
+  let ecs: ECS<TestWorld>;
 
   beforeEach(() => {
     ecs = createTestECS();
@@ -516,14 +520,7 @@ describe("ECS", () => {
     });
 
     test("should register and unregister entity system", () => {
-      const system = createEntitySystem<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const system = createEntitySystem<TestWorld>(
         (_entities, _world, _deltaTime) => {
           // Systems no longer return values
         },
@@ -539,14 +536,7 @@ describe("ECS", () => {
 
     test("should execute entity systems during update", () => {
       const results: string[] = [];
-      const system = createEntitySystem<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const system = createEntitySystem<TestWorld>(
         (entities, _world, _deltaTime) => {
           results.push(`processed-${entities.length}`);
         },
@@ -569,15 +559,7 @@ describe("ECS", () => {
 
     test("should execute archetype systems during update", () => {
       let archetypeCount = 0;
-      const system = createArchetypeSystem<
-        TestContext,
-        [number],
-        void,
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const system = createArchetypeSystem<TestWorld>(
         (archetypes, _world, _deltaTime) => {
           archetypeCount = archetypes.size;
         },
@@ -832,14 +814,7 @@ describe("ECS", () => {
       ecs.initialize();
 
       let executed = false;
-      const system = createEntitySystem<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const system = createEntitySystem<TestWorld>(
         () => {
           executed = true;
         },
@@ -869,14 +844,7 @@ describe("ECS", () => {
 
     test("should register behavior for event type", () => {
       const eventTag = 100;
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {
           // Behavior handler
@@ -893,27 +861,13 @@ describe("ECS", () => {
 
     test("should register multiple behaviors for same event type", () => {
       const eventTag = 101;
-      const behavior1 = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior1 = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {},
         (q: QueryBuilder) => q.every(components.health),
         10,
       );
-      const behavior2 = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior2 = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {},
         (q: QueryBuilder) => q.every(components.level), // level
@@ -931,40 +885,19 @@ describe("ECS", () => {
 
     test("should sort behaviors by priority (higher first)", () => {
       const eventTag = 102;
-      const lowPriority = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const lowPriority = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {},
         (q: QueryBuilder) => q.every(components.health),
         1,
       );
-      const highPriority = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const highPriority = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {},
         (q: QueryBuilder) => q.every(components.health),
         100,
       );
-      const mediumPriority = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const mediumPriority = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {},
         (q: QueryBuilder) => q.every(components.health),
@@ -983,14 +916,7 @@ describe("ECS", () => {
 
     test("should rebuild behavior cache for entity", () => {
       const eventTag = 103;
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {},
         (q: QueryBuilder) => q.every(components.health), // health component
@@ -1006,14 +932,7 @@ describe("ECS", () => {
 
     test("should rebuild cache only for matching entities", () => {
       const eventTag = 104;
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {},
         (q: QueryBuilder) => q.every(components.health, components.level), // health and level
@@ -1042,14 +961,7 @@ describe("ECS", () => {
       let executed = false;
       let receivedEntity: Entity | undefined;
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, entity, _event) => {
           executed = true;
@@ -1073,14 +985,7 @@ describe("ECS", () => {
       const eventTag = 106;
       let executed = false;
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {
           executed = true;
@@ -1102,14 +1007,7 @@ describe("ECS", () => {
       const eventTag = 107;
       const executionOrder: number[] = [];
 
-      const behavior1 = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior1 = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {
           executionOrder.push(1);
@@ -1117,14 +1015,7 @@ describe("ECS", () => {
         (q: QueryBuilder) => q.every(components.health),
         1,
       );
-      const behavior2 = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior2 = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {
           executionOrder.push(2);
@@ -1132,14 +1023,7 @@ describe("ECS", () => {
         (q: QueryBuilder) => q.every(components.health),
         100,
       );
-      const behavior3 = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior3 = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {
           executionOrder.push(3);
@@ -1163,14 +1047,7 @@ describe("ECS", () => {
       const eventTag = 108;
       const executionOrder: number[] = [];
 
-      const behavior1 = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior1 = createBehavior<TestWorld>(
         eventTag,
         (world, entity, event) => {
           executionOrder.push(1);
@@ -1179,14 +1056,7 @@ describe("ECS", () => {
         (q: QueryBuilder) => q.every(components.health),
         100,
       );
-      const behavior2 = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior2 = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {
           executionOrder.push(2);
@@ -1209,14 +1079,7 @@ describe("ECS", () => {
       const eventTag = 109;
       let _receivedData: any;
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, event) => {
           _receivedData = event.detail;
@@ -1245,14 +1108,7 @@ describe("ECS", () => {
       const eventTag = 200;
       const executed: string[] = [];
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, entity, _event) => {
           executed.push(entity.id!);
@@ -1287,14 +1143,7 @@ describe("ECS", () => {
       const eventTag = 201;
       const executed: string[] = [];
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, entity, _event) => {
           executed.push(entity.id!);
@@ -1316,14 +1165,7 @@ describe("ECS", () => {
       const eventTag = 202;
       const executed: string[] = [];
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, entity, _event) => {
           executed.push(entity.id!);
@@ -1348,14 +1190,7 @@ describe("ECS", () => {
       const eventTag = 203;
       const executed: string[] = [];
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, entity, event) => {
           executed.push(entity.id!);
@@ -1382,14 +1217,7 @@ describe("ECS", () => {
       const eventTag = 204;
       const executed: string[] = [];
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, entity, _event) => {
           executed.push(entity.id!);
@@ -1411,14 +1239,7 @@ describe("ECS", () => {
       const eventTag = 205;
       const executed: string[] = [];
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, entity, _event) => {
           executed.push(entity.id!);
@@ -1448,14 +1269,7 @@ describe("ECS", () => {
       const eventTag = 206;
       const executionOrder: number[] = [];
 
-      const behavior1 = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior1 = createBehavior<TestWorld>(
         eventTag,
         async (_world, _entity, _event) => {
           await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1464,14 +1278,7 @@ describe("ECS", () => {
         (q: QueryBuilder) => q.every(components.health),
         100,
       );
-      const behavior2 = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior2 = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {
           executionOrder.push(2);
@@ -1498,14 +1305,7 @@ describe("ECS", () => {
 
     test("should reuse archetype-level behavior cache for entities with same components", () => {
       const eventTag = 301;
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {},
         (q: QueryBuilder) => q.every(components.health, components.level), // health and level
@@ -1536,14 +1336,7 @@ describe("ECS", () => {
       const eventTag = 302;
       const executed: string[] = [];
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, entity, event) => {
           executed.push(entity.id!);
@@ -1584,14 +1377,7 @@ describe("ECS", () => {
       const eventTag = 303;
       let _executionCount = 0;
 
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         eventTag,
         (_world, _entity, _event) => {
           _executionCount++;
@@ -1602,14 +1388,7 @@ describe("ECS", () => {
 
       ecs.registerBehavior(behavior);
 
-      const system = createEntitySystem<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const system = createEntitySystem<TestWorld>(
         (entities, world) => {
           // System that modifies entities during update
           for (const entityId of entities) {
@@ -1652,25 +1431,14 @@ describe("ECS", () => {
       expect(results).toEqual([]);
     });
 
-    test("should handle component operations on non-existent entity", () => {
-      // addComponent and removeComponent don't throw - they're no-ops
-      ecs.put("non-existent", { health: 100 });
-      ecs.removeComponents("non-existent", "health");
-
-      // executeEventSystems should throw
-      expect(() => ecs.executeEventSystems("non-existent")).toThrow();
+    test("removing components from a non-existent entity is a no-op", () => {
+      expect(ecs.removeComponents("non-existent", "health")).toBeUndefined();
+      expect(ecs.hasEntity("non-existent")).toBe(false);
     });
 
     test("should handle system registration before initialization", () => {
       const uninitializedECS = createTestECS();
-      const system = createEntitySystem<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const system = createEntitySystem<TestWorld>(
         () => {
           // System logic
         },
@@ -2006,14 +1774,7 @@ describe("ECS", () => {
 
     test("should run entity system filtered by tags", () => {
       const processed: string[] = [];
-      const system = createEntitySystem<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const system = createEntitySystem<TestWorld>(
         (entities) => {
           processed.push(...entities);
         },
@@ -2225,14 +1986,7 @@ describe("ECS", () => {
       const inserted = ecs.insert({ health: 100 });
 
       const fired: string[] = [];
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         555,
         (_world, entity) => {
           fired.push(entity.id!);
@@ -2248,14 +2002,7 @@ describe("ECS", () => {
 
     test("act() self-heals a freshly inserted entity's behavior cache without a tick", async () => {
       const fired: string[] = [];
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         556,
         (_world, entity) => {
           fired.push(entity.id!);
@@ -2275,14 +2022,7 @@ describe("ECS", () => {
 
     test("act() rebuilds a mutated entity's stale cache (archetype changed) without a tick", async () => {
       const fired: string[] = [];
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         557,
         (_world, entity) => {
           fired.push(entity.id!);
@@ -2312,14 +2052,7 @@ describe("ECS", () => {
 
     test("act() self-heal clears the pending rebuild so the next update() does not redo it", async () => {
       let rebuildCount = 0;
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         558,
         (_world, _entity) => {},
         (q: QueryBuilder) => q.every(components.health),
@@ -2345,14 +2078,7 @@ describe("ECS", () => {
 
     test("actWithBubbling() self-heals a freshly inserted entity's behavior cache without a tick", async () => {
       const fired: string[] = [];
-      const behavior = createBehavior<
-        TestContext,
-        [number],
-        TestAction,
-        number,
-        Entity,
-        EntityDelta
-      >(
+      const behavior = createBehavior<TestWorld>(
         559,
         (_world, entity) => {
           fired.push(entity.id!);
@@ -2448,7 +2174,7 @@ describe("ECS", () => {
 
       const seen: string[] = [];
       ecs.registerSystem(
-        createEntitySystem<TestContext, [number], TestAction, number, Entity, EntityDelta>(
+        createEntitySystem<TestWorld>(
           (entities) => {
             for (const e of entities) seen.push(e);
           },
@@ -2470,7 +2196,7 @@ describe("ECS", () => {
 
       let bufRef: string[] | null = null;
       ecs.registerSystem(
-        createEntitySystem<TestContext, [number], TestAction, number, Entity, EntityDelta>(
+        createEntitySystem<TestWorld>(
           (entities) => {
             bufRef = entities; // capture the (transient) buffer reference
           },
@@ -2620,7 +2346,7 @@ describe("ECS", () => {
       const ranOn: string[] = [];
       // Behavior applies only to archetypes that have `mana`.
       ecs.registerBehavior(
-        createBehavior<TestContext, [number], TestAction, number, Entity, EntityDelta>(
+        createBehavior<TestWorld>(
           tagEvent,
           (_w, entity) => {
             ranOn.push(entity.id!);
@@ -2704,7 +2430,7 @@ describe("ECS", () => {
 });
 
 describe("Interest-managed broadcast (observeMutations)", () => {
-  let ecs: ECS<TestContext, [number], TestAction, number, Entity, EntityDelta>;
+  let ecs: ECS<TestWorld>;
 
   beforeEach(() => {
     ecs = createTestECS();

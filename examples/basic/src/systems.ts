@@ -19,6 +19,7 @@ import {
   type EntityDelta,
   type GameConditions,
   type GameTasks,
+  type GameWorld,
 } from "./game.core.generated";
 
 /** What the hostile AI reads from the world context: its seeded RNG and frame clock. */
@@ -35,14 +36,7 @@ export type AIContext = { random: BehaviorRandom; frame: number };
  * `defineGameECSRuntime` enforces this), while tests can pass a plain context
  * carrying the {@link AIContext} fields.
  */
-type World<Context extends AIContext = AIContext> = ECS<
-  Context,
-  [],
-  Actions,
-  Tags,
-  Entity,
-  EntityDelta
->;
+type World<Context extends AIContext = AIContext> = ECS<GameWorld<Context>>;
 
 // Fixed timestep assumptions for the deterministic stress benchmark. Velocity is
 // integrated as an integer per frame because `Vec2Delta` is a signed-int CRDT

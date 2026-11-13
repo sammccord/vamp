@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  type DefineWorld,
   ECS,
   type ECSOptions,
   type EntityMutator,
@@ -65,7 +66,12 @@ function createWorld() {
     mergeDelta,
     accumulateDelta,
   };
-  const world = new ECS(entities, mutate, {}, options);
+  const world = new ECS<DefineWorld<{ entity: Entity; delta: EntityDelta }>>(
+    entities,
+    mutate,
+    {},
+    options,
+  );
   world.initialize();
   return world;
 }

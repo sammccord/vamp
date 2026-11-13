@@ -53,16 +53,16 @@ interface InterestAttachment {
 }
 
 /** Extract the entity type `E` from an ECS world type. */
-type EntityOf<W> = W extends ECS<any, any, any, any, infer E, any> ? E : never;
+type EntityOf<W> = W extends ECS<infer T> ? T["entity"] : never;
 /** Extract the delta type `D` from an ECS world type. */
-type DeltaOf<W> = W extends ECS<any, any, any, any, any, infer D> ? D : never;
+type DeltaOf<W> = W extends ECS<infer T> ? T["delta"] : never;
 
 /**
  * The injected policy + codec for {@link createInterestBroadcast}. `W` is the ECS
  * world type; `Req` the observe request record; `E`/`D` are inferred from `W`.
  */
 export interface InterestBroadcastConfig<
-  W extends ECS<any, any, any, any, any, any>,
+  W extends ECS<any>,
   Req,
   E extends BaseEntity<any> = EntityOf<W>,
   D = DeltaOf<W>,
@@ -90,7 +90,7 @@ export interface InterestBroadcastConfig<
 }
 
 /** The wired broadcast surface returned by {@link createInterestBroadcast}. */
-export interface InterestBroadcast<W extends ECS<any, any, any, any, any, any>, Req, Yield> {
+export interface InterestBroadcast<W extends ECS<any>, Req, Yield> {
   /**
    * Delegate target for the RPC `observe` method:
    * `public async *observe(r, ctx) { yield* broadcast.observe(r, ctx); }`.
@@ -114,7 +114,7 @@ export interface InterestBroadcast<W extends ECS<any, any, any, any, any, any>, 
  * all six ECS type parameters.
  */
 export function createInterestBroadcast<
-  W extends ECS<any, any, any, any, any, any>,
+  W extends ECS<any>,
   Req,
   Yield = never,
   E extends BaseEntity<any> = EntityOf<W>,
