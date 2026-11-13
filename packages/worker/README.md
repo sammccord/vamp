@@ -99,7 +99,22 @@ still hibernates — no continuous duration charges, no per-tick `setAlarm` writ
 > time-based systems run on activity, not wall-clock. Omit `tickIntervalMs` for a
 > purely reactive world; use it when the acting player is the one who needs the
 > simulation stepped. For continuous simulation regardless of input, drive `stepTick`
-> from your own external scheduler.
+> from an alarm (below) or an external scheduler.
+
+For wall-clock simulation, schedule a Durable Object alarm in your subclass and
+step from it. `stepTick` restores the world from storage first, so it works on a
+DO that was evicted with no players connected. Each alarm wakes the DO and each
+`setAlarm` is a storage write, so pick the cadence with
+[`BILLING.md`](./BILLING.md) in mind.
+
+```ts
+export class Game extends GameECS {
+  async alarm() {
+    await this.stepTick();
+    await this.ctx.storage.setAlarm(Date.now() + 1000); // 1 Hz
+  }
+}
+```
 
 `ECSDurableObject` bootstraps via the RPC-safe `setup(ns, seed)` (idempotent;
 resolves once the ECS is seeded + initialized) — `ready()` awaits that separately.

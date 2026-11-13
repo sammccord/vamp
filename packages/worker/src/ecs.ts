@@ -360,82 +360,98 @@ export class ECSDurableObject<
     this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
 
     // Hibernation recovery: if this isolate was recreated to service live sockets,
-    // the runtime ran only this constructor — `ecs`/`router`/`doc`/`client` are all
-    // at their field initializers. Re-bootstrap before any handler runs. We block
-    // concurrency so `webSocketMessage`/`alarm` cannot observe a half-initialized
-    // runtime. A cold DO with no live sockets stays lazy and is bootstrapped on its
-    // first HTTP upgrade as before.
+    // the runtime ran only this constructor and the world does not exist yet.
+    // Re-bootstrap before any handler runs; blocking concurrency keeps
+    // `webSocketMessage` from observing a half-initialized runtime. Without
+    // sockets the DO stays lazy: its first HTTP upgrade or `stepTick` (e.g. from
+    // an alarm) bootstraps it.
     if (hibernating.length > 0) {
-      // `blockConcurrencyWhile` runs to completion before any handler (including
-      // webSocketMessage/alarm) is delivered, so the runtime tracks this promise;
-      // we `void` the returned promise and log re-bootstrap failures rather than
-      // letting them float as an unhandled rejection.
       void this.ctx
-        .blockConcurrencyWhile(async () => {
-          const namespace = await this.ctx.storage.get<string>("__vamp:namespace");
-          if (namespace === undefined) {
-            // No persisted namespace: the DO was never initialized (or storage was
-            // wiped). Leave the runtime undefined; webSocketMessage surfaces a framed
-            // error rather than a thrown "uninitialized".
+        .blockConcurrencyWhile(() => this._ensureRestored())
+        .then((restored) => {
+          if (!restored)
             this.log.error("Hibernation wake with live sockets but no persisted namespace");
-            return;
-          }
-          // Restore the runtime context seed persisted at first bootstrap so
-          // `resolveContext` can re-derive the world's context with fresh data.
-          // Absent (older DOs / never seeded) yields `undefined`, which falls back
-          // to the static `config.context` — identical to the pre-seed behavior.
-          const seed = await this.ctx.storage.get<ContextSeed>("__vamp:context");
-          // Read the persisted shard sets BEFORE setup(): initialize() opens the
-          // lobby's own default shard and re-persists `__vamp:shards` for that root
-          // alone, which would clobber the additional players' roots (character/*
-          // etc.) before we can read them. Capturing first keeps the full set.
-          const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
-          const persistedSubscribed = await this.ctx.storage.get<string[]>("__vamp:subscribed");
-          await this.setup(namespace, seed);
-          // Re-subscribe the persisted shard set so a hibernation-recreated DO
-          // re-aggregates the same multi-provider world. setup()/initialize()
-          // already re-opened the lobby's own default shard; restore re-opens the
-          // additional players' shards (character/* etc.). A restored shard's pin
-          // is released once it proves entity-empty (_untrackEntityRoot →
-          // _maybeReleaseShard), after which the reap cycle tears it down — unless
-          // it is explicitly subscribed (see below), which exempts it.
-          if (persistedShards && this.shards) this.shards.restore(persistedShards);
-          // Restore the explicit-subscription SET only — do NOT re-acquire. A
-          // subscribed root always carries its OR-pin, so it is already in the
-          // persisted `__vamp:shards` set re-acquired above; re-acquiring here
-          // would leak a second pin. Repopulating the set makes the
-          // `_maybeReleaseShard` exemption effective post-wake so a subscribed
-          // shard that churns to entity-empty is not torn down.
-          if (persistedSubscribed && this.shards) {
-            for (const root of persistedSubscribed) this._subscribedRoots.add(root);
-          }
-          // Re-persist the full restored active set: initialize() clobbered
-          // `__vamp:shards` down to the default root, so without this a SECOND
-          // hibernation wake would read the truncated set and drop the additional
-          // shards again.
-          if (this.shards) this._persistActiveShards();
-          // Re-register restored shards for notify-push (the wake was triggered by
-          // a live socket, so we have players and should receive live updates).
-          this._syncRegistrations();
-          // Rebuild per-connection ECS observers from each live socket's durable
-          // attachment, so the generator-free interest-managed broadcast resumes
-          // after wake WITHOUT the original `observe` generator (destroyed with
-          // the isolate). The app reads its persisted subscription from the
-          // attachment inside the hook and re-registers via `observeMutations`.
-          if (this._rehydrateConnection && this.ecs) {
-            for (const ws of hibernating) {
-              try {
-                this._rehydrateConnection(this.ecs, ws);
-              } catch (err) {
-                this.log.error("Error rehydrating connection on wake", {}, toError(err));
-              }
-            }
-          }
         })
         .catch((err) => {
           this.log.error("Hibernation re-bootstrap failed", {}, toError(err));
         });
     }
+  }
+
+  private _restoring: Promise<boolean> | undefined;
+
+  /**
+   * Rebuild the world from persisted state if this isolate has not set it up
+   * yet (after eviction or hibernation). Resolves `true` once the world exists,
+   * `false` if this DO was never set up. Concurrent callers share one restore.
+   */
+  private _ensureRestored(): Promise<boolean> {
+    if (this.ecs) return Promise.resolve(true);
+    this._restoring ??= this._restore().finally(() => {
+      this._restoring = undefined;
+    });
+    return this._restoring;
+  }
+
+  private async _restore(): Promise<boolean> {
+    const namespace = await this.ctx.storage.get<string>("__vamp:namespace");
+    if (namespace === undefined) {
+      // Never set up (or storage was wiped): leave the runtime undefined;
+      // webSocketMessage surfaces a framed error rather than a thrown
+      // "uninitialized".
+      return false;
+    }
+    // Restore the runtime context seed persisted at first bootstrap so
+    // `resolveContext` can re-derive the world's context with fresh data.
+    // Absent (older DOs / never seeded) yields `undefined`, which falls back
+    // to the static `config.context` — identical to the pre-seed behavior.
+    const seed = await this.ctx.storage.get<ContextSeed>("__vamp:context");
+    // Read the persisted shard sets BEFORE setup(): initialize() opens the
+    // lobby's own default shard and re-persists `__vamp:shards` for that root
+    // alone, which would clobber the additional players' roots (character/*
+    // etc.) before we can read them. Capturing first keeps the full set.
+    const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
+    const persistedSubscribed = await this.ctx.storage.get<string[]>("__vamp:subscribed");
+    await this.setup(namespace, seed);
+    // Re-subscribe the persisted shard set so a hibernation-recreated DO
+    // re-aggregates the same multi-provider world. setup()/initialize()
+    // already re-opened the lobby's own default shard; restore re-opens the
+    // additional players' shards (character/* etc.). A restored shard's pin
+    // is released once it proves entity-empty (_untrackEntityRoot →
+    // _maybeReleaseShard), after which the reap cycle tears it down — unless
+    // it is explicitly subscribed (see below), which exempts it.
+    if (persistedShards && this.shards) this.shards.restore(persistedShards);
+    // Restore the explicit-subscription SET only — do NOT re-acquire. A
+    // subscribed root always carries its OR-pin, so it is already in the
+    // persisted `__vamp:shards` set re-acquired above; re-acquiring here
+    // would leak a second pin. Repopulating the set makes the
+    // `_maybeReleaseShard` exemption effective post-wake so a subscribed
+    // shard that churns to entity-empty is not torn down.
+    if (persistedSubscribed && this.shards) {
+      for (const root of persistedSubscribed) this._subscribedRoots.add(root);
+    }
+    // Re-persist the full restored active set: initialize() clobbered
+    // `__vamp:shards` down to the default root, so without this a SECOND
+    // hibernation wake would read the truncated set and drop the additional
+    // shards again.
+    if (this.shards) this._persistActiveShards();
+    // Re-register restored shards for notify-push if players are connected.
+    this._syncRegistrations();
+    // Rebuild per-connection ECS observers from each live socket's durable
+    // attachment, so the generator-free interest-managed broadcast resumes
+    // after wake WITHOUT the original `observe` generator (destroyed with
+    // the isolate). The app reads its persisted subscription from the
+    // attachment inside the hook and re-registers via `observeMutations`.
+    if (this._rehydrateConnection && this.ecs) {
+      for (const ws of this.ctx.getWebSockets()) {
+        try {
+          this._rehydrateConnection(this.ecs, ws);
+        } catch (err) {
+          this.log.error("Error rehydrating connection on wake", {}, toError(err));
+        }
+      }
+    }
+    return true;
   }
 
   get log() {
@@ -822,6 +838,9 @@ export class ECSDurableObject<
    * omitted, the setup-time provider is used.
    */
   async stepTick(args?: G["args"]): Promise<void> {
+    if (!(await this._ensureRestored())) {
+      throw new Error("stepTick on a durable object that was never set up");
+    }
     await this.ready();
     // SAFETY: `[]` is the empty argument list used when no per-tick args
     // provider is registered; it is a valid `UpdateArguments` (which defaults to

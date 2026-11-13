@@ -567,6 +567,26 @@ describe("ECSDurableObject — request-scoped catch-up tick", () => {
   });
 });
 
+describe("ECSDurableObject — alarm-driven ticking", () => {
+  test("stepTick on an evicted DO with no sockets restores the world and ticks it", async () => {
+    configureRuntime({ registerSystems: registerNSystem });
+    const storage = makeStorage();
+    const first = newDO(makeCtx(storage), makeEnv(makeProviderStub()));
+    await first.setup("room1");
+    await first.ecs.withScope(() => first.ecs.insert({ id: "ticker", n: 0 }));
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Evicted: a fresh instance over the same storage, with no hibernated sockets,
+    // woken by an alarm that calls stepTick.
+    const stub = makeProviderStub();
+    Y.applyUpdate(stub.__providerDoc, Y.encodeStateAsUpdate(first.shards.docFor("game/room1")));
+    const woken = newDO(makeCtx(storage), makeEnv(stub));
+    await woken.stepTick();
+
+    expect(woken.ecs.entity("ticker").n).toBe(1);
+  });
+});
+
 describe("ECSDurableObject — runtime tick controls (no alarm)", () => {
   test("setTickInterval enables ticking booted disabled; persists the override", async () => {
     // No tickIntervalMs in the provider config: ticking starts disabled.
