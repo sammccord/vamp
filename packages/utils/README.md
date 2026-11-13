@@ -5,6 +5,16 @@ Low-level utilities for building bebop/tempo-based applications. Provides the sh
 - **bebop** — binary serialization library for fast, compact data interchange
 - **tempo** — typed RPC layer built on top of bebop
 
+## Optional peer dependencies
+
+Three entry points need a package that `@vampgg/utils` does not install. Add the one you import:
+
+| Entry point                                                         | Install                 |
+| ------------------------------------------------------------------- | ----------------------- |
+| `@vampgg/utils/pino-logger`                                         | `pino`                  |
+| `@vampgg/utils/ws-channel`                                          | `websocket-ts`          |
+| `@vampgg/utils/extension-channel`, `@vampgg/utils/extension-router` | `webextension-polyfill` |
+
 ## Development
 
 ```bash

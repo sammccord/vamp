@@ -1,5 +1,5 @@
 import { type BaseEntity } from "@vampgg/ecs";
-import { PinoLogger } from "@vampgg/utils/pino-logger";
+import { ContextLogger } from "@vampgg/utils/context-logger";
 import { TempoLogLevel } from "@tempojs/common";
 import { type Env } from "cloudflare:workers";
 import type { YDocStorage } from "y-durablestream";
@@ -53,7 +53,7 @@ interface SubscriberAddress {
  * (`compactEveryNTicks`) as the backstop for both cases.
  */
 export class ECSStorage<E extends BaseEntity = BaseEntity> extends YStreamProvider<Env> {
-  private static log = new PinoLogger("ecs-storage", TempoLogLevel.Info);
+  private static log = new ContextLogger("ecs-storage", TempoLogLevel.Info);
 
   /**
    * Surface background storage failures (a failed update persist or end-of-life

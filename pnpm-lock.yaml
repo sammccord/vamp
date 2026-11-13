@@ -293,18 +293,9 @@ importers:
       bebop:
         specifier: 'catalog:'
         version: 3.2.3(patch_hash=2c0549a29d39786680a795c9617611206a821638cddca57d181a302f90a7521b)
-      pino:
-        specifier: 'catalog:'
-        version: 10.3.1
       tseep:
         specifier: 'catalog:'
         version: 1.3.1
-      webextension-polyfill:
-        specifier: 'catalog:'
-        version: 0.12.0
-      websocket-ts:
-        specifier: 'catalog:'
-        version: 2.2.1
     devDependencies:
       '@types/bun':
         specifier: 'catalog:'
@@ -321,6 +312,9 @@ importers:
       bebop-tools:
         specifier: 'catalog:'
         version: 3.2.3
+      pino:
+        specifier: 'catalog:'
+        version: 10.3.1
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -330,6 +324,12 @@ importers:
       vitest:
         specifier: npm:@voidzero-dev/vite-plus-test@0.1.24
         version: '@voidzero-dev/vite-plus-test@0.1.24(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(jsdom@26.1.0)(typescript@5.9.3)(vite@8.0.0(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@25.5.0)(esbuild@0.27.3)(jiti@2.6.1)(yaml@2.8.2))(yaml@2.8.2)'
+      webextension-polyfill:
+        specifier: 'catalog:'
+        version: 0.12.0
+      websocket-ts:
+        specifier: 'catalog:'
+        version: 2.2.1
 
   packages/worker:
     dependencies:
@@ -345,9 +345,6 @@ importers:
       '@vampgg/utils':
         specifier: workspace:*
         version: link:../utils
-      pino:
-        specifier: 'catalog:'
-        version: 10.3.1
       tseep:
         specifier: 'catalog:'
         version: 1.3.1

@@ -13,8 +13,7 @@ import {
   type WorldTypes,
 } from "@vampgg/ecs";
 import { Message } from "@vampgg/utils/bebop";
-import type { ContextLogger } from "@vampgg/utils/context-logger";
-import { PinoLogger } from "@vampgg/utils/pino-logger";
+import { ContextLogger } from "@vampgg/utils/context-logger";
 import { TempoWsRouter } from "@vampgg/utils/ws-router";
 import { HookRegistry, TempoError, TempoLogLevel, TempoStatusCode } from "@tempojs/common";
 import { type ServerContext, ServiceRegistry, TempoRouterConfiguration } from "@tempojs/server";
@@ -112,8 +111,8 @@ type PersistedBootstrap = {
  * RPC boundary, so it must be constructed inside the DO isolate.
  */
 export interface ECSRuntimeConfiguration<G extends GameTypes = GameTypes> {
-  // Logger for the durable object and its tempo rpc router. Defaults to a pino
-  // logger named "ecs".
+  // Logger for the durable object and its tempo rpc router. Defaults to a
+  // console logger named "ecs".
   logger?: ContextLogger;
   /**
    * @deprecated Has no effect. Entities are sharded by their `sk` root (see
@@ -224,7 +223,7 @@ export class ECSDurableObject<
   G extends GameTypes = GameTypes,
   Env = CloudflareBindings,
 > extends DurableObject<Env> {
-  static log = new PinoLogger("ecs", TempoLogLevel.Info);
+  static log = new ContextLogger("ecs", TempoLogLevel.Info);
   _log: ContextLogger | undefined;
 
   // User sessions

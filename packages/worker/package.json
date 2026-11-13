@@ -37,7 +37,6 @@
     "@tempojs/server": "catalog:",
     "@vampgg/ecs": "workspace:*",
     "@vampgg/utils": "workspace:*",
-    "pino": "catalog:",
     "tseep": "catalog:",
     "y-durablestream": "catalog:",
     "yjs": "catalog:"
