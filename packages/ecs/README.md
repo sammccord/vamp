@@ -136,11 +136,10 @@ the target **and propagates the same action down to its children**; use
 `actWithBubbling` to travel up through ancestors and `actBatch` for many targets.
 Call `event.preventDefault()` to halt propagation.
 
-Mutators (`insert`, `addComponent`, `transformEntity`, …) defer the behavior-cache
-rebuild to the next `update()`, but `act`/`actWithBubbling` rebuild a pending entity
-on read. You can therefore dispatch immediately after a mutation — even in a purely
-reactive world that never ticks `update()` — without calling `rebuildBehaviorCache`
-yourself.
+You can dispatch immediately after a mutation, even inside the same scope or in a
+purely reactive world that never ticks `update()`: `act` resolves an entity's
+behaviors from its current components. `behaviorsFor(id, tag)` returns the
+behaviors `act` would run.
 
 ```ts
 import { createBehavior } from "@vampgg/ecs";

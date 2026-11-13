@@ -160,12 +160,15 @@ export class ECS<
   private readonly _archetypeIndex = new Map<string, Archetype>([
     [this.rootArchetype.id, this.rootArchetype],
   ]);
-  readonly entityArchetype: Map<string, Archetype> = new Map();
-  readonly deletedEntities = new Set<string>();
-  readonly systems: System<State, UpdateArguments, Actions, Tags, E, D>[] = [];
-  readonly subscriptions: EventSystem[] = [];
-  readonly behaviors = new Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>();
-  readonly entityBehaviorCache = new Map<
+  private readonly _archetypeOf = new Map<string, Archetype>();
+  private readonly _deletedEntities = new Set<string>();
+  private readonly _systems: System<State, UpdateArguments, Actions, Tags, E, D>[] = [];
+  private readonly _subscriptions: EventSystem[] = [];
+  private readonly _behaviors = new Map<
+    number,
+    Behavior<State, UpdateArguments, Actions, Tags, E, D>[]
+  >();
+  private readonly _entityBehaviorCache = new Map<
     string,
     Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>
   >();
@@ -193,9 +196,27 @@ export class ECS<
     System<State, UpdateArguments, Actions, Tags, E, D>,
     string[]
   >();
-  readonly handleCreate: LifecycleSystem[] = [];
-  readonly handleDelete: LifecycleSystem[] = [];
-  readonly deferred: (() => void)[] = [];
+  private readonly _handleCreate: LifecycleSystem[] = [];
+  private readonly _handleDelete: LifecycleSystem[] = [];
+  private readonly _deferred: (() => void)[] = [];
+
+  /** Each live entity's current archetype. */
+  get entityArchetype(): ReadonlyMap<string, Archetype> {
+    return this._archetypeOf;
+  }
+
+  /** Registered per-update systems, in run order. */
+  get systems(): ReadonlyArray<System<State, UpdateArguments, Actions, Tags, E, D>> {
+    return this._systems;
+  }
+
+  /** Registered behaviors keyed by action tag, highest priority first. */
+  get behaviors(): ReadonlyMap<
+    number,
+    ReadonlyArray<Behavior<State, UpdateArguments, Actions, Tags, E, D>>
+  > {
+    return this._behaviors;
+  }
 
   private _initialized = false;
   public get initialized() {
@@ -298,11 +319,9 @@ export class ECS<
         case MutationType.Update:
           this.put(id, record.value.delta);
           break;
-        case MutationType.Delete: {
-          const existing = this.entity(id);
-          if (existing) this.delete(existing);
+        case MutationType.Delete:
+          this.delete(id);
           break;
-        }
       }
     }
   }
@@ -428,11 +447,7 @@ export class ECS<
    * {@link insert} a new entity materialized from `delta`. Repeated calls with the
    * same component shape reuse a cached query.
    */
-  public upsert(
-    delta: D,
-    filter: (e: E | undefined, i: number, obj: string[]) => boolean,
-    mutate = false,
-  ): E {
+  public upsert(delta: D, filter: (e: E | undefined, i: number, obj: string[]) => boolean): E {
     const components: number[] = [];
     for (const component in delta) {
       if (delta[component] === undefined) continue;
@@ -476,7 +491,7 @@ export class ECS<
 
     const entity = matched.find((e, i, obj) => filter(this.entity(e), i, obj));
     if (entity === undefined) return this.insert(this.options.materializeDelta(delta));
-    return this.put(entity, delta, mutate);
+    return this.put(entity, delta);
   }
 
   /**
@@ -509,9 +524,9 @@ export class ECS<
    * so observers never see a torn read.
    */
   public insert(entity: E): E {
-    if (entity.id && this.entityArchetype.has(entity.id)) return this.replace(entity.id, entity);
+    if (entity.id && this._archetypeOf.has(entity.id)) return this.replace(entity.id, entity);
     // An empty id (e.g. a materialized delta's default) means "generate one".
-    const id = this.createEntity(undefined, entity.id || undefined, false);
+    const id = this._createEntity(undefined, entity.id || undefined, false);
     // Work on a copy when we had to generate an id, so we never mutate the
     // caller's object. The caller gets the id via the returned `committed`.
     const committed: E = entity.id ? entity : { ...entity, id };
@@ -526,11 +541,11 @@ export class ECS<
     }
     if (committed.tags) {
       for (const tag of committed.tags) {
-        this.addTag(id, tag, false);
+        this._addTag(id, tag);
       }
     }
-    this.executeEventSystems(id);
-    this._handleCreate(id);
+    this._notify(id);
+    this._runCreateSystems(id);
     return committed;
   }
 
@@ -550,91 +565,72 @@ export class ECS<
       else this._addComponent(id, name, false);
     }
     this._reconcileTags(id, committed.tags ?? []);
-    this.executeEventSystems(id);
+    this._notify(id);
     return committed;
   }
 
   /**
-   * Patch an existing entity by `id` with `delta`, or {@link insert} a new one
-   * (materialized from `delta`) when `id` is missing/unknown. With `mutating:true`,
-   * `undefined` delta keys remove their component (changing the archetype);
-   * otherwise absent keys are left untouched. Returns the pre-change values of the
-   * touched keys.
+   * Patch the entity `id` with `delta` and return it as it is after the change.
+   * An unknown or missing id inserts a new entity materialized from `delta`.
+   * Keys whose value is `undefined` are ignored; use {@link removeComponents}
+   * to remove a component.
    */
-  public put(id: string | undefined, delta: D, mutating = false): E {
+  public put(id: string | undefined, delta: D): E {
     if (!id) return this.insert(this.options.materializeDelta(delta));
     const entity = this.entity(id);
-    // Unknown id: insert under that id rather than a generated one.
     if (!entity || entity.id !== id) {
       // SAFETY: BaseEntity carries `id?: string`, so `{ id }` is a valid Partial<E>.
       return this.insert(this.options.materializeDelta(delta, { id } as Partial<E>));
     }
-    // patch the existing entity
-    let executing = false;
-    const base: Partial<E> = {};
-
+    let added = false;
     for (const component in delta) {
-      if (component === "tags") continue;
-      const deltaValue = delta[component];
+      if (component === "tags" || delta[component] === undefined) continue;
       // SAFETY: delta keys are entity field names (the delta record `D` mirrors
       // `E` field by field), so each non-"tags" delta key is a key of `E`.
-      const key = component as keyof E;
-      const entityValue = entity[key];
-
-      // `undefined` removes the component only when mutating; otherwise the key
-      // is absent from the change.
-      if (deltaValue === undefined && !mutating) continue;
-      if (deltaValue === undefined) {
-        base[key] = undefined;
-        this._removeComponent(id, component, false);
-        executing = true;
-      } else {
-        // TODO maybe _.clone() this to prevent accidental mutation of object components
-        base[key] = entityValue;
-        // If value was previously undefined, add component and execute systems
-        if (entityValue === undefined) {
-          this._addComponent(id, component, false);
-          executing = true;
-        }
+      if (entity[component as keyof E] === undefined) {
+        this._addComponent(id, component, false);
+        added = true;
       }
     }
-
     // SAFETY: `delta` is the consumer's delta record (`D`), an object keyed by
     // field name; this reads its optional `tags` field, the one delta key handled
     // outside the component loop above. `isTagsDelta` parses it before use.
     const tagsDelta = (delta as { tags?: unknown }).tags;
-    if (isTagsDelta<Tags>(tagsDelta)) {
-      this._reconcileTags(id, tagsDelta);
-    }
+    const retagged = isTagsDelta<Tags>(tagsDelta) && this._reconcileTags(id, tagsDelta);
 
     this._mutate(id, MutationRecord.fromUpdate<E, D>({ delta }));
-    if (executing) this.executeEventSystems(id);
-
-    // SAFETY: `base` collects, per touched component name, that component's
-    // pre-change value (or undefined for removed components), so it is a partial
-    // `E` over those keys.
-    return base as E;
+    if (added || retagged) this._notify(id);
+    return this.entity(id) ?? entity;
   }
 
   /**
-   * Remove an entity (looked up by its `.id`), recording a delete mutation.
-   * No-op (with a warning) if the id is missing or unknown.
+   * Remove components (fields) from the entity `id` and return it as it is
+   * after the change. Recorded as a full snapshot, since a delta cannot carry a
+   * removal over the wire.
    */
-  public delete(entity: E) {
-    const id = entity.id;
-    if (id === undefined) {
-      console.warn("no id provided for deletion");
-      return;
+  public removeComponents(id: string, ...components: Array<keyof E & string>): E | undefined {
+    const entity = this.entity(id);
+    if (!entity) return undefined;
+    const next: E = { ...entity };
+    let changed = false;
+    for (const component of components) {
+      if (component === "id" || next[component] === undefined) continue;
+      delete next[component];
+      changed = true;
     }
-    const e = this.entity(id);
-    if (e === undefined) {
-      console.warn("no valid entity provided for deletion");
-      return;
-    }
-    this._mutate(id, MutationRecord.fromDelete<E, D>({ entity: e }));
-    this.deleteEntity(id);
+    return changed ? this.replace(id, next) : entity;
+  }
 
-    return e;
+  /**
+   * Delete the entity `id`, recording a delete mutation. Returns its last
+   * state, or `undefined` if it does not exist.
+   */
+  public delete(id: string): E | undefined {
+    const entity = this.entity(id);
+    if (entity === undefined) return undefined;
+    this._mutate(id, MutationRecord.fromDelete<E, D>({ entity }));
+    this._deleteEntity(id);
+    return entity;
   }
 
   /**
@@ -684,7 +680,7 @@ export class ECS<
    */
   public subscribe(system: EventSystem, emit = false): () => void {
     this._claimQuery(system.query);
-    this.subscriptions.push(system);
+    this._subscriptions.push(system);
 
     if (this.initialized) {
       traverseArchetypeGraph(this.rootArchetype, (archetype) => {
@@ -697,33 +693,33 @@ export class ECS<
       this._executeEventSystem(system);
     }
 
-    return () => removeItem(this.subscriptions, system);
+    return () => removeItem(this._subscriptions, system);
   }
 
   /** Register a lifecycle system run when a matching entity is created. Returns an unsubscribe function. */
   public onCreate(system: LifecycleSystem) {
     this._claimQuery(system.query);
-    this.handleCreate.push(system);
+    this._handleCreate.push(system);
     if (this.initialized) {
       traverseArchetypeGraph(this.rootArchetype, (archetype) => {
         system.query.tryAdd(archetype);
         return true;
       });
     }
-    return () => removeItem(this.handleCreate, system);
+    return () => removeItem(this._handleCreate, system);
   }
 
   /** Register a lifecycle system run when a matching entity is deleted. Returns an unsubscribe function. */
   public onDelete(system: LifecycleSystem) {
     this._claimQuery(system.query);
-    this.handleDelete.push(system);
+    this._handleDelete.push(system);
     if (this.initialized) {
       traverseArchetypeGraph(this.rootArchetype, (archetype) => {
         system.query.tryAdd(archetype);
         return true;
       });
     }
-    return () => removeItem(this.handleDelete, system);
+    return () => removeItem(this._handleDelete, system);
   }
 
   /** Bind `query` to this world; its archetype set cannot be shared across worlds. */
@@ -743,7 +739,7 @@ export class ECS<
    * O(subscribers), not O(matching entities).
    */
   private _executeEventSystems(archetype: Archetype, entity: string) {
-    const systems = this.subscriptions;
+    const systems = this._subscriptions;
     for (let s = 0, sl = systems.length; s < sl; s++) {
       const system = systems[s];
       // A fresh array per call: execute() may re-enter this path synchronously.
@@ -765,8 +761,8 @@ export class ECS<
    * first error is rethrown after the queue drains.
    */
   private _executeDeferred() {
-    if (this.deferred.length === 0) return;
-    const actions = this.deferred.splice(0);
+    if (this._deferred.length === 0) return;
+    const actions = this._deferred.splice(0);
     let failure: { error: unknown } | undefined;
     for (const action of actions) {
       try {
@@ -781,7 +777,7 @@ export class ECS<
   private _executeDeferredCacheRebuilds() {
     if (this._deferredCacheRebuilds.size === 0) return;
     for (const entityId of this._deferredCacheRebuilds) {
-      this.rebuildBehaviorCache(entityId);
+      this._rebuildBehaviorCache(entityId);
     }
     this._deferredCacheRebuilds.clear();
   }
@@ -790,12 +786,17 @@ export class ECS<
     // Iterate every registered query collection in place: no intermediate
     // arrays (the old `[...a, ...b, ...Array.from(...).flat()]` allocated four
     // throwaway arrays on every novel archetype, a hot gameplay path).
-    const { systems, subscriptions, handleCreate, handleDelete } = this;
+    const {
+      _systems: systems,
+      _subscriptions: subscriptions,
+      _handleCreate: handleCreate,
+      _handleDelete: handleDelete,
+    } = this;
     for (let i = 0, l = systems.length; i < l; i++) systems[i].query.tryAdd(archetype);
     for (let i = 0, l = subscriptions.length; i < l; i++) subscriptions[i].query.tryAdd(archetype);
     for (let i = 0, l = handleCreate.length; i < l; i++) handleCreate[i].query.tryAdd(archetype);
     for (let i = 0, l = handleDelete.length; i < l; i++) handleDelete[i].query.tryAdd(archetype);
-    for (const list of this.behaviors.values())
+    for (const list of this._behaviors.values())
       for (let i = 0, l = list.length; i < l; i++) list[i].query.tryAdd(archetype);
     // Keep cached upsert/query shapes current as new archetypes appear; without
     // this a cached query would silently miss entities in archetypes created
@@ -804,10 +805,10 @@ export class ECS<
   }
 
   private _assertEntity(entity: string) {
-    if (!this.entityArchetype.has(entity)) {
+    if (!this._archetypeOf.has(entity)) {
       if (entity === undefined) {
         throw new EntityUndefinedError();
-      } else if (this.deletedEntities.has(entity)) {
+      } else if (this._deletedEntities.has(entity)) {
         throw new EntityDeletedError(entity);
       }
       throw new EntityNotExistError(entity);
@@ -818,24 +819,24 @@ export class ECS<
   private _recordArchetype(id: string): void {
     const scope = this.context.scope;
     if (scope && !scope.archetypeUndo.has(id)) {
-      scope.archetypeUndo.set(id, this.entityArchetype.get(id) ?? null);
+      scope.archetypeUndo.set(id, this._archetypeOf.get(id) ?? null);
     }
   }
 
   /** Put every entity an aborted scope moved back where it was. */
   private _rollbackArchetypes(scope: MutationScope<E, D>): void {
     for (const [id, prev] of scope.archetypeUndo) {
-      const current = this.entityArchetype.get(id);
+      const current = this._archetypeOf.get(id);
       if (current === (prev ?? undefined)) continue;
       current?.entities.delete(id);
       if (prev) {
         prev.entities.add(id);
-        this.entityArchetype.set(id, prev);
-        this.deletedEntities.delete(id);
+        this._archetypeOf.set(id, prev);
+        this._deletedEntities.delete(id);
         this._deferredCacheRebuilds.add(id);
       } else {
-        this.entityArchetype.delete(id);
-        this.entityBehaviorCache.delete(id);
+        this._archetypeOf.delete(id);
+        this._entityBehaviorCache.delete(id);
         this._deferredCacheRebuilds.delete(id);
       }
     }
@@ -860,7 +861,7 @@ export class ECS<
     }
 
     current.entities.add(entity);
-    this.entityArchetype.set(entity, current);
+    this._archetypeOf.set(entity, current);
     return current;
   }
 
@@ -879,13 +880,14 @@ export class ECS<
     }
 
     current.entities.add(entity);
-    this.entityArchetype.set(entity, current);
+    this._archetypeOf.set(entity, current);
     return current;
   }
 
-  private _reconcileTags(id: string, tagsDelta: TagsDelta<Tags>): void {
-    const archetype = this.entityArchetype.get(id);
-    if (!archetype) return;
+  /** Move `id` to the archetype for its new tag set; returns whether it moved. */
+  private _reconcileTags(id: string, tagsDelta: TagsDelta<Tags>): boolean {
+    const archetype = this._archetypeOf.get(id);
+    if (!archetype) return false;
     // SAFETY: an archetype's tag bits are only ever set from `Tags` values
     // (addTag/removeTag/_reconcileTags all take `Tags`), so every set bit is a `Tags`.
     const currentTags = archetype.tagMask.array() as Tags[];
@@ -912,11 +914,12 @@ export class ECS<
     }
 
     for (const tag of currentTags) {
-      if (!targetTags.includes(tag)) this.removeTag(id, tag, false);
+      if (!targetTags.includes(tag)) this._removeTag(id, tag);
     }
     for (const tag of targetTags) {
-      if (!currentTags.includes(tag)) this.addTag(id, tag, false);
+      if (!currentTags.includes(tag)) this._addTag(id, tag);
     }
+    return this._archetypeOf.get(id) !== archetype;
   }
 
   /**
@@ -966,7 +969,7 @@ export class ECS<
    */
   registerSystem(system: System<State, UpdateArguments, Actions, Tags, E, D>) {
     this._claimQuery(system.query);
-    this.systems.push(system);
+    this._systems.push(system);
 
     if (this.initialized) {
       traverseArchetypeGraph(this.rootArchetype, (archetype) => {
@@ -975,7 +978,7 @@ export class ECS<
       });
     }
 
-    return () => removeItem(this.systems, system);
+    return () => removeItem(this._systems, system);
   }
 
   // Register a behavior (system) for a specific event type
@@ -987,11 +990,11 @@ export class ECS<
    */
   registerBehavior(behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>): () => void {
     this._claimQuery(behavior.query);
-    if (!this.behaviors.has(behavior.tag)) {
-      this.behaviors.set(behavior.tag, []);
+    if (!this._behaviors.has(behavior.tag)) {
+      this._behaviors.set(behavior.tag, []);
     }
 
-    const behaviors = this.behaviors.get(behavior.tag)!;
+    const behaviors = this._behaviors.get(behavior.tag)!;
     behaviors.push(behavior);
 
     // Sort by priority (higher first)
@@ -1016,10 +1019,10 @@ export class ECS<
   private _unregisterBehavior(
     behavior: Behavior<State, UpdateArguments, Actions, Tags, E, D>,
   ): void {
-    const list = this.behaviors.get(behavior.tag);
+    const list = this._behaviors.get(behavior.tag);
     if (!list || list.indexOf(behavior) === -1) return;
     removeItem(list, behavior);
-    if (list.length === 0) this.behaviors.delete(behavior.tag);
+    if (list.length === 0) this._behaviors.delete(behavior.tag);
     if (this.initialized) {
       this.archetypeBehaviorCache.clear();
       this.rebuildAllBehaviorCaches();
@@ -1028,16 +1031,16 @@ export class ECS<
 
   private rebuildAllBehaviorCaches(): void {
     for (const entityId of this.entities.keys()) {
-      this.rebuildBehaviorCache(entityId);
+      this._rebuildBehaviorCache(entityId);
     }
   }
 
   // Rebuild behavior cache for a specific entity - O(a * b * q) where a = archetypes, b = behaviors, q = query complexity
   // Now uses archetype-level caching, so each archetype is only evaluated once
-  rebuildBehaviorCache(entityId: string): void {
+  private _rebuildBehaviorCache(entityId: string): void {
     // Keyed on archetype membership, not the committed store, so an entity
     // inserted in the open scope gets its behaviors immediately.
-    const entityArchetype = this.entityArchetype.get(entityId);
+    const entityArchetype = this._archetypeOf.get(entityId);
     if (!entityArchetype) return;
 
     // Check if we've already computed behaviors for this archetype
@@ -1048,7 +1051,7 @@ export class ECS<
       cache = new Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]>();
 
       // For each event type
-      for (const [eventType, behaviors] of this.behaviors) {
+      for (const [eventType, behaviors] of this._behaviors) {
         const applicable: Behavior<State, UpdateArguments, Actions, Tags, E, D>[] = [];
 
         // Check each behavior
@@ -1071,7 +1074,7 @@ export class ECS<
     }
 
     // Just reference the archetype cache
-    this.entityBehaviorCache.set(entityId, cache);
+    this._entityBehaviorCache.set(entityId, cache);
   }
 
   /**
@@ -1094,7 +1097,7 @@ export class ECS<
    */
   update(...args: UpdateArguments) {
     if (!this.initialized) throw new WorldNotInitializedError();
-    const systems = this.systems;
+    const systems = this._systems;
     for (let s = 0, sl = systems.length; s < sl; s++) {
       const system = systems[s];
       const archetypes = system.query.archetypes;
@@ -1139,10 +1142,18 @@ export class ECS<
     entityId: string,
   ): Map<number, Behavior<State, UpdateArguments, Actions, Tags, E, D>[]> | undefined {
     if (this._deferredCacheRebuilds.has(entityId)) {
-      this.rebuildBehaviorCache(entityId);
+      this._rebuildBehaviorCache(entityId);
       this._deferredCacheRebuilds.delete(entityId);
     }
-    return this.entityBehaviorCache.get(entityId);
+    return this._entityBehaviorCache.get(entityId);
+  }
+
+  /** The behaviors `act(id, ...)` would run for an action with `tag`, in run order. */
+  behaviorsFor(
+    id: string,
+    tag: Actions["tag"],
+  ): ReadonlyArray<Behavior<State, UpdateArguments, Actions, Tags, E, D>> {
+    return this._ensureBehaviorCache(id)?.get(tag) ?? EMPTY_BEHAVIORS;
   }
 
   /**
@@ -1215,7 +1226,7 @@ export class ECS<
    * For best performance you try to defer a batched action instead of many small actions, or avoid defering if possbile
    */
   defer(action: () => void) {
-    this.deferred.push(action);
+    this._deferred.push(action);
   }
 
   /**
@@ -1322,7 +1333,7 @@ export class ECS<
       if (shadow === null) return false; // Deleted in scope
       if (shadow !== undefined) return true; // Exists in scope
     }
-    return this.entityArchetype.has(entity);
+    return this._archetypeOf.has(entity);
   }
 
   /**
@@ -1331,7 +1342,7 @@ export class ECS<
    * Previously deleted entity id's will be reused
    * Optionally supply a prefacbricated archetype
    */
-  createEntity(
+  private _createEntity(
     prefabricate: Archetype = this.rootArchetype,
     id?: string,
     executeSystems = true,
@@ -1346,20 +1357,20 @@ export class ECS<
     const archetype = prefabricate;
     this._recordArchetype(entity);
     archetype.entities.add(entity);
-    this.entityArchetype.set(entity, archetype);
+    this._archetypeOf.set(entity, archetype);
 
     if (executeSystems) {
       this._executeEventSystems(archetype, entity);
-      this._handleCreate(entity);
+      this._runCreateSystems(entity);
     }
     return entity;
   }
 
-  protected _handleCreate(entity: string) {
-    for (let i = 0; i < this.handleCreate.length; i++) {
-      const system = this.handleCreate[i];
+  private _runCreateSystems(entity: string) {
+    for (let i = 0; i < this._handleCreate.length; i++) {
+      const system = this._handleCreate[i];
       const archetypes = system.query.archetypes;
-      const archetype = this.entityArchetype.get(entity);
+      const archetype = this._archetypeOf.get(entity);
       if (archetype && archetypes.has(archetype)) system.execute(entity);
     }
   }
@@ -1368,61 +1379,36 @@ export class ECS<
    * Delete an entity, removing it from its current archetype (loosing all of its components).
    * @throws {EntityUndefinedError | EntityDeletedError | EntityNotExistError}
    */
-  deleteEntity(entity: string) {
+  private _deleteEntity(entity: string) {
     this._assertEntity(entity);
 
-    const archetype = this.entityArchetype.get(entity);
+    const archetype = this._archetypeOf.get(entity);
     if (!archetype) return;
     this._recordArchetype(entity);
     archetype.entities.delete(entity);
     // much faster than delete operator, but achieves the same (ish)
     // an alternative is to leave it be, and use archetype.entitySet.has(entity) as a check for entity being deleted, but that too is a little slower.
-    this.entityArchetype.delete(entity);
+    this._archetypeOf.delete(entity);
     // Evict per-entity state BEFORE firing delete handlers so a recycled id
     // cannot inherit a stale behavior cache and handlers cannot resurrect one.
-    this.entityBehaviorCache.delete(entity);
+    this._entityBehaviorCache.delete(entity);
     this._deferredCacheRebuilds.delete(entity);
     // Record as recently-deleted, bounded to a small ring (see DELETED_RING_CAP).
-    this.deletedEntities.add(entity);
-    if (this.deletedEntities.size > ECS.DELETED_RING_CAP) {
+    this._deletedEntities.add(entity);
+    if (this._deletedEntities.size > ECS.DELETED_RING_CAP) {
       // Set iterates in insertion order; drop the oldest id.
-      this.deletedEntities.delete(this.deletedEntities.values().next().value!);
+      this._deletedEntities.delete(this._deletedEntities.values().next().value!);
     }
     this._executeEventSystems(archetype, entity);
-    this._handleDelete(entity, archetype);
+    this._runDeleteSystems(entity, archetype);
   }
 
-  private _handleDelete(entity: string, archetype: Archetype) {
-    for (let i = 0; i < this.handleDelete.length; i++) {
-      const system = this.handleDelete[i];
+  private _runDeleteSystems(entity: string, archetype: Archetype) {
+    for (let i = 0; i < this._handleDelete.length; i++) {
+      const system = this._handleDelete[i];
       const archetypes = system.query.archetypes;
       if (archetype && archetypes.has(archetype)) system.execute(entity);
     }
-  }
-
-  /**
-   * Transform the entity to that of a prefabricated archetype.
-   * Any components added to the entity that does not exist in the prefabricate will be removed.
-   * This is a sligthly faster operation than adding/subtracting components
-   * @throws {EntityUndefinedError | EntityDeletedError | EntityNotExistError}
-   */
-  transformEntity(entity: string, prefabricate: Archetype) {
-    this._assertEntity(entity);
-
-    if (this.entityArchetype.get(entity) === prefabricate) return;
-
-    // Transform resets all components on the entity to that of the prefab..
-    this._recordArchetype(entity);
-    this.entityArchetype.get(entity)?.entities.delete(entity);
-    const archetype = prefabricate;
-    archetype.entities.add(entity);
-    this.entityArchetype.set(entity, archetype);
-    // The entity moved to a different archetype, so the set of behaviors that
-    // apply to it changed. Schedule a behavior-cache rebuild (batched at the end
-    // of the update cycle, matching addComponent/removeComponent) so
-    // act()/actWithBubbling don't run the OLD archetype's stale behavior set.
-    this._deferredCacheRebuilds.add(entity);
-    this._executeEventSystems(archetype, entity);
   }
 
   /**
@@ -1433,27 +1419,15 @@ export class ECS<
     // names), so `_component` is a string and indexes the string-keyed
     // `options.components` map.
     const component = this.options.components[_component as string];
-    const entityArchetype = this.entityArchetype.get(entity);
+    const entityArchetype = this._archetypeOf.get(entity);
 
     if (!entityArchetype) return false;
 
     return entityArchetype && entityArchetype.mask.has(component);
   }
 
-  /**
-   * Adds the componentId to the entity.
-   * The entity will be moved to a different archetype
-   * @throws {EntityUndefinedError | EntityDeletedError | EntityNotExistError}
-   */
-  addComponent(entity: string, _component: Exclude<keyof E, "tags">, executeSystems = true) {
-    // SAFETY: component names are string keys of `E` (schema-generated field
-    // names), so `_component` is a string and indexes the string-keyed
-    // `options.components` map.
-    this._addComponent(entity, _component as string, executeSystems);
-  }
-
   private _addComponent(entity: string, name: string, executeSystems: boolean) {
-    const archetype = this.entityArchetype.get(entity);
+    const archetype = this._archetypeOf.get(entity);
     const component = this.options.components[name];
     // if there's a difference between client entities and server entities
     if (component === undefined) return;
@@ -1466,20 +1440,8 @@ export class ECS<
     }
   }
 
-  /**
-   * Removes the componentId from the entity.
-   * The entity will be moved to a different archetype
-   * @throws {EntityUndefinedError | EntityDeletedError | EntityNotExistError}
-   */
-  removeComponent(entity: string, _component: Exclude<keyof E, "tags">, executeSystems = true) {
-    // SAFETY: component names are string keys of `E` (schema-generated field
-    // names), so `_component` is a string and indexes the string-keyed
-    // `options.components` map.
-    this._removeComponent(entity, _component as string, executeSystems);
-  }
-
   private _removeComponent(entity: string, name: string, executeSystems: boolean) {
-    const archetype = this.entityArchetype.get(entity);
+    const archetype = this._archetypeOf.get(entity);
     const component = this.options.components[name];
 
     if (component === undefined) return;
@@ -1496,7 +1458,7 @@ export class ECS<
    * Check if the entity has a tag
    */
   hasTag(entity: string, tag: Tags): boolean {
-    const entityArchetype = this.entityArchetype.get(entity);
+    const entityArchetype = this._archetypeOf.get(entity);
     if (!entityArchetype) return false;
     return entityArchetype.tagMask.has(tag);
   }
@@ -1505,85 +1467,83 @@ export class ECS<
    * All tags currently assigned to the entity
    */
   getTags(entity: string): Tags[] {
-    const entityArchetype = this.entityArchetype.get(entity);
+    const entityArchetype = this._archetypeOf.get(entity);
     if (!entityArchetype) return [];
     // SAFETY: an archetype's tag ids are only ever set from `Tags` values
     // (addTag/removeTag/_reconcileTags all take `Tags`), so each id is a `Tags`.
     return entityArchetype.tagIds() as Tags[];
   }
 
-  /**
-   * Adds a tag to the entity.
-   * The entity will be moved to a different archetype in the tag graph
-   */
-  addTag(entity: string, tag: Tags, executeSystems = true) {
-    const archetype = this.entityArchetype.get(entity);
-    if (!archetype) return;
-    if (archetype.tagMask.has(tag)) return;
-
-    const next = this._transformEntityForTag(archetype, entity, tag);
+  /** Move `entity` to the archetype with `tag`; archetype only, no data. */
+  private _addTag(entity: string, tag: Tags): void {
+    const archetype = this._archetypeOf.get(entity);
+    if (!archetype || archetype.tagMask.has(tag)) return;
+    this._transformEntityForTag(archetype, entity, tag);
     this._deferredCacheRebuilds.add(entity);
-    if (executeSystems) this._executeEventSystems(next, entity);
   }
 
-  /**
-   * Removes a tag from the entity.
-   * The entity will be moved to a different archetype in the tag graph
-   */
-  removeTag(entity: string, tag: Tags, executeSystems = true) {
-    const archetype = this.entityArchetype.get(entity);
-    if (!archetype) return;
-    if (!archetype.tagMask.has(tag)) return;
-
-    const next = this._transformEntityForTag(archetype, entity, tag);
+  /** Move `entity` to the archetype without `tag`; archetype only, no data. */
+  private _removeTag(entity: string, tag: Tags): void {
+    const archetype = this._archetypeOf.get(entity);
+    if (!archetype || !archetype.tagMask.has(tag)) return;
+    this._transformEntityForTag(archetype, entity, tag);
     this._deferredCacheRebuilds.add(entity);
-    if (executeSystems) this._executeEventSystems(next, entity);
   }
 
-  executeEventSystems(id: string) {
+  /** Add `tag` to the entity's `tags` and return the entity after the change. */
+  addTag(id: string, tag: Tags): E | undefined {
+    if (!this.hasEntity(id)) return undefined;
+    const tags = this.getTags(id);
+    if (tags.includes(tag)) return this.entity(id);
+    // SAFETY: `{ tags }` is a replacement tag list, the form of `D`'s `tags` field.
+    return this.put(id, { tags: [...tags, tag] } as D);
+  }
+
+  /** Remove `tag` from the entity's `tags` and return the entity after the change. */
+  removeTag(id: string, tag: Tags): E | undefined {
+    if (!this.hasEntity(id)) return undefined;
+    const tags = this.getTags(id);
+    if (!tags.includes(tag)) return this.entity(id);
+    // SAFETY: `{ tags }` is a replacement tag list, the form of `D`'s `tags` field.
+    return this.put(id, { tags: tags.filter((t) => t !== tag) } as D);
+  }
+
+  private _notify(id: string) {
     this._assertEntity(id);
-    const archetype = this.entityArchetype.get(id);
+    const archetype = this._archetypeOf.get(id);
     if (archetype) this._executeEventSystems(archetype, id);
   }
 
-  public parent(id: string, childId: string): Pick<E, "id" | "children"> | undefined {
+  /**
+   * Make `childId` a child of `id`: adds it to the parent's `children` and sets
+   * the child's `parent`, detaching it from any previous parent first. Returns
+   * the parent after the change.
+   */
+  public parent(id: string, childId: string): E | undefined {
     const parent = this.entity(id);
     const child = this.entity(childId);
-    if (!parent || !child) return;
-    if (!parent.children) {
-      // SAFETY: the literal is a `children` delta in the ArrayDelta `{ set }` form,
-      // which is the shape `D`'s `children` field takes; `put` routes it through the
-      // configured `mergeDelta`.
-      return this.put(id, {
-        children: {
-          set: [childId],
-        },
-      } as D);
-    } else {
-      if (parent.children.includes(childId)) return parent;
-      // SAFETY: the literal is a `children` delta in the ArrayDelta `{ add }` form,
-      // which is the shape `D`'s `children` field takes; `put` routes it through the
-      // configured `mergeDelta`.
-      return this.put(id, {
-        children: {
-          add: [childId],
-        },
-      } as D);
+    if (!parent || !child) return undefined;
+    if (child.parent !== undefined && child.parent !== id) this.unparent(child.parent, childId);
+    if (child.parent !== id) {
+      // SAFETY: `{ parent }` sets the scalar `parent` field, the form `D` takes.
+      this.put(childId, { parent: id } as D);
     }
+    if (parent.children?.includes(childId)) return this.entity(id);
+    // SAFETY: an ArrayDelta `{ add }`, the form of `D`'s `children` field.
+    return this.put(id, { children: { add: [childId] } } as D);
   }
 
+  /**
+   * Detach `childId` from `id`: removes it from the parent's `children` and
+   * clears the child's `parent` if it points at `id`. Returns the parent after
+   * the change.
+   */
   public unparent(id: string, childId: string): E | undefined {
     const parent = this.entity(id);
-    if (!parent) return;
-    if (parent.children) {
-      // SAFETY: the literal is a `children` delta in the ArrayDelta `{ remove }`
-      // form, which is the shape `D`'s `children` field takes; `put` routes it
-      // through the configured `mergeDelta`.
-      return this.put(id, {
-        children: {
-          remove: [childId],
-        },
-      } as D);
-    }
+    if (!parent) return undefined;
+    if (this.entity(childId)?.parent === id) this.removeComponents(childId, "parent");
+    if (!parent.children?.includes(childId)) return parent;
+    // SAFETY: an ArrayDelta `{ remove }`, the form of `D`'s `children` field.
+    return this.put(id, { children: { remove: [childId] } } as D);
   }
 }

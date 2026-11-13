@@ -6,41 +6,6 @@
  * truth for the logic.
  */
 
-/** Accumulated component-key deltas for a pending remote "update" reconcile. */
-export interface PendingKeyDelta {
-  addedKeys: Set<string>;
-  removedKeys: Set<string>;
-}
-
-/** The Yjs key-change action surfaced by a `YMapEvent`. */
-export type KeyChangeAction = "add" | "update" | "delete" | undefined;
-
-/**
- * Fold a single remote Y.Map key change into a pending update's added/removed
- * key sets. Mirrors the per-entity observer's bookkeeping:
- *
- *  - a delete records a removed key and clears any pending add for it;
- *  - an add (of a key that did not already exist locally) records an added key;
- *  - any set clears a pending removal for that key.
- *
- * `existed` is whether the key was present on the local entity *before* this
- * change was applied. The function mutates `pending` in place.
- */
-export function applyKeyChange(
-  pending: PendingKeyDelta,
-  key: string,
-  action: KeyChangeAction,
-  existed: boolean,
-): void {
-  if (action === "delete") {
-    pending.removedKeys.add(key);
-    pending.addedKeys.delete(key);
-  } else {
-    if (!existed && action === "add") pending.addedKeys.add(key);
-    pending.removedKeys.delete(key);
-  }
-}
-
 /**
  * The doc-level Y.Map name for a shard's entity set: `id → Y.Map` of
  * components. In the root-keyed sharding model this one map is both the
@@ -48,20 +13,6 @@ export function applyKeyChange(
  * its id is a key here. Prefixed so it never collides with entity ids.
  */
 export const GLOBAL_ENTITIES_KEY = "__vamp:entities";
-
-/**
- * The component keys (added/removed) that must be routed through
- * `addComponent`/`removeComponent`, with reserved identity/tag keys removed.
- */
-export const RESERVED_RECONCILE_KEYS: ReadonlySet<string> = new Set(["id", "tags"]);
-
-export function componentKeysToReconcile(keys: Iterable<string>): string[] {
-  const out: string[] = [];
-  for (const key of keys) {
-    if (!RESERVED_RECONCILE_KEYS.has(key)) out.push(key);
-  }
-  return out;
-}
 
 /**
  * Whether the given tick should trigger periodic compaction. `compactEveryNTicks

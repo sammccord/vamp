@@ -24,12 +24,7 @@ import type { Doc, Transaction, Map as YMap, YMapEvent } from "yjs";
 import { entitiesMap, removeEntity, writeEntityInsert, writeMergedUpdate } from "./entity-doc";
 import { toError } from "./errors";
 import { ShardManager } from "./shard-manager";
-import {
-  applyKeyChange,
-  componentKeysToReconcile,
-  raceWithBoundedTimer,
-  shouldCompactThisTick,
-} from "./reconcile-helpers";
+import { raceWithBoundedTimer, shouldCompactThisTick } from "./reconcile-helpers";
 
 /** Socket-attachment keys the framework owns (e.g. the interest subscription). */
 const FRAMEWORK_KEY_PREFIX = "__vamp:";
@@ -77,17 +72,6 @@ export type RPCContext<
   ECS<RuntimeContext<UserSession, Context>, UpdateArguments, Actions, Tags, Entity, EntityDelta>,
   WebSocket,
 ];
-
-/**
- * A remote "update" reconcile entry pending drain into the next scope. Holds the
- * component keys a remote change added/removed so the reconcile path can route
- * them through `addComponent`/`removeComponent`.
- */
-interface PendingUpdateEntry {
-  type: "update";
-  addedKeys: Set<string>;
-  removedKeys: Set<string>;
-}
 
 /** A structured-clone-safe value a context seed may hold: it crosses DO RPC and DO storage. */
 export type ContextSeedValue =
@@ -371,16 +355,9 @@ export class ECSDurableObject<
 
   // Per-instance state synced from the Yjs doc (working copy)
   private _entityStore = new Map<string, Entity>();
-  // Remote changes pending reconciliation into the next scope. "update" entries
-  // also carry the component keys added/removed by the remote change so the
-  // reconcile path can route them through `addComponent`/`removeComponent` and
-  // keep archetype membership consistent.
-  private _pendingReconcile = new Map<
-    string,
-    | { type: "insert"; entity?: Entity }
-    | { type: "update"; addedKeys: Set<string>; removedKeys: Set<string> }
-    | { type: "delete"; entity?: Entity }
-  >();
+  // Ids whose doc state changed remotely since the last scope opened. The next
+  // scope replaces each with its current doc snapshot (see onScopeOpen).
+  private _pendingReconcile = new Set<string>();
   // Entity ids that were reconciled in the currently-flushing scope
   private _reconcilingIds = new Set<string>();
   // Cleanup functions for per-entity Y.Map observers
@@ -729,64 +706,18 @@ export class ECSDurableObject<
       if (acquiredNew) this._persistActiveShards();
     });
 
-    // Scope-open handler: drain pending remote changes into the scope
-    this.ecs.onScopeOpen((scope) => {
-      for (const [id, pending] of this._pendingReconcile) {
+    // Scope-open handler: replay remote changes into the scope as snapshots.
+    // `replace` records an Insert (a remote change carries absolute values, which
+    // an additive delta cannot express) and moves the entity to the archetype its
+    // new component set implies. Marked as reconciled so the flush handler
+    // updates the store without writing the change back to its doc.
+    this.ecs.onScopeOpen(() => {
+      const ecs = this.ecs!;
+      for (const id of this._pendingReconcile) {
         const entity = entities.get(id);
-        switch (pending.type) {
-          case "insert":
-            if (entity) {
-              // Clone once and reuse the same reference for the mutation value
-              // and the shadow (the flush handler copies the shadow into the
-              // store, so a shared reference stays consistent and we avoid the
-              // previous double clone).
-              const cloned = clonePlainValue(entity);
-              scope.mutations.set(
-                id,
-                MutationRecord.fromInsert<Entity, EntityDelta>({ entity: cloned }),
-              );
-              scope.shadowEntities.set(id, cloned);
-              scope.deletedIds.delete(id);
-            }
-            break;
-          case "update":
-            if (entity) {
-              // Clone once and reuse the snapshot for both the mutation value
-              // (broadcast to observers) and the shadow (copied into the store
-              // by the flush handler). Using the live `entity` reference here
-              // would let a later remote observer event mutate the value that a
-              // pending broadcast still holds.
-              const cloned = clonePlainValue(entity);
-              // A remote change arrives as absolute component values, which an
-              // additive delta cannot express, so it travels as a snapshot
-              // Insert; replicas replace the entity in place (`ECS.replace`).
-              scope.mutations.set(
-                id,
-                MutationRecord.fromInsert<Entity, EntityDelta>({ entity: cloned }),
-              );
-              scope.shadowEntities.set(id, cloned);
-              scope.deletedIds.delete(id);
-              // Route remote component add/remove through the archetype graph so
-              // queries reflect the new component reality. `executeSystems=false`
-              // avoids firing event systems mid-reconcile; the deferred cache
-              // rebuild is flushed by the surrounding update/scope flush.
-              this._reconcileComponentKeys(id, pending.addedKeys, pending.removedKeys);
-            }
-            break;
-          case "delete": {
-            const stale = entity ?? entities.get(id);
-            if (stale) {
-              scope.mutations.set(
-                id,
-                MutationRecord.fromDelete<Entity, EntityDelta>({ entity: stale }),
-              );
-              scope.shadowEntities.delete(id);
-              scope.deletedIds.add(id);
-            }
-            break;
-          }
-        }
+        if (!entity || !ecs.hasEntity(id)) continue;
         this._reconcilingIds.add(id);
+        ecs.replace(id, clonePlainValue(entity));
       }
       this._pendingReconcile.clear();
     });
@@ -1322,7 +1253,7 @@ export class ECSDurableObject<
     const alreadyInit = this.ecs.initialized;
     for (const id of entitiesMap(doc).keys()) {
       this._addEntityFromDoc(id, doc, root);
-      if (alreadyInit) this._pendingReconcile.set(id, { type: "insert" });
+      if (alreadyInit) this._pendingReconcile.add(id);
     }
     if (root === this._defaultRoot && !this._seeded) {
       this._seeded = true;
@@ -1346,7 +1277,7 @@ export class ECSDurableObject<
         } else {
           // add or re-add: pull the entity into the ECS from this shard.
           this._addEntityFromDoc(id, doc, root);
-          this._pendingReconcile.set(id, { type: "insert" });
+          this._pendingReconcile.add(id);
         }
       }
     };
@@ -1381,7 +1312,7 @@ export class ECSDurableObject<
           // Local eviction: drop it from this world without deleting it from
           // the shard doc, where it still lives for other lobbies.
           this._reconcilingIds.add(id);
-          this.ecs.delete(entity);
+          this.ecs.delete(id);
         }
         // Plain delete (not _untrackEntityRoot): the shard is already tearing
         // down, so there is no pin left to release for it.
@@ -1417,7 +1348,7 @@ export class ECSDurableObject<
     if (entity) {
       // Already deleted in the doc; the flush handler only updates the store.
       this._reconcilingIds.add(id);
-      this.ecs.delete(entity);
+      this.ecs.delete(id);
     }
     this._unobserveEntity(id);
     this._untrackEntityRoot(id);
@@ -1436,10 +1367,9 @@ export class ECSDurableObject<
       const entity = this._entityStore.get(id);
       if (!entity) return;
 
-      const pending = this._getOrCreatePendingUpdate(id);
+      this._pendingReconcile.add(id);
       for (const key of event.keysChanged) {
         const change = event.changes.keys.get(key);
-        const existed = key in entity;
         // SAFETY: `key` names one of this entity's Y.Map components and the value
         // is that cell's current content, so `entity` keeps mirroring the doc.
         const component = key as keyof Entity;
@@ -1449,48 +1379,10 @@ export class ECSDurableObject<
           // SAFETY: as above, the cell under `key` holds that component's value.
           entity[component] = map.get(key) as Entity[keyof Entity];
         }
-        applyKeyChange(pending, key, change?.action, existed);
       }
     };
     map.observe(handler);
     this._entityObserverCleanups.set(id, () => map.unobserve(handler));
-  }
-
-  /**
-   * Get (or create) the pending "update" reconcile entry for `id`, merging into
-   * an existing update entry so multiple remote bursts before the next scope
-   * accumulate their added/removed keys.
-   */
-  private _getOrCreatePendingUpdate(id: string): PendingUpdateEntry {
-    const existing = this._pendingReconcile.get(id);
-    if (existing && existing.type === "update") return existing;
-    const entry = {
-      type: "update" as const,
-      addedKeys: new Set<string>(),
-      removedKeys: new Set<string>(),
-    };
-    this._pendingReconcile.set(id, entry);
-    return entry;
-  }
-
-  /**
-   * Translate a set of added/removed component keys into archetype transitions
-   * via the ECS API. `addComponent`/`removeComponent` are the only methods that
-   * transform archetype membership; routing through them keeps the archetype
-   * graph consistent after a remote component add/remove. Reserved keys
-   * (`id`/`tags`) are skipped, and the ECS no-ops for unknown component ids.
-   */
-  private _reconcileComponentKeys(id: string, addedKeys: Set<string>, removedKeys: Set<string>) {
-    if (!this.ecs) return;
-    for (const key of componentKeysToReconcile(addedKeys)) {
-      // SAFETY: `key` is a Y.Map component name with `id`/`tags` filtered out,
-      // and the ECS no-ops for a key that is not a registered component.
-      this.ecs.addComponent(id, key as Exclude<keyof Entity, "tags">, false);
-    }
-    for (const key of componentKeysToReconcile(removedKeys)) {
-      // SAFETY: same filtered component-name contract as the add loop above.
-      this.ecs.removeComponent(id, key as Exclude<keyof Entity, "tags">, false);
-    }
   }
 
   private _unobserveEntity(id: string) {

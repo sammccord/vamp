@@ -91,7 +91,7 @@ describe("createQueryMembershipTracker", () => {
 
     // Remove component `a`: the entity still exists but its new archetype no
     // longer matches `every(a)` — the case a `subscribe(Q)` event system misses.
-    world.put("e1", { a: undefined }, true);
+    world.removeComponents("e1", "a");
     const changed = tracker.update(new Map([["e1", { tag: MutationType.Update }]]));
     expect(changed).toHaveLength(1);
     expect(tracked.members.has("e1")).toBe(false);
@@ -103,7 +103,7 @@ describe("createQueryMembershipTracker", () => {
     const tracked = tracker.track(query((b) => b.every(A)));
     expect(tracked.members.has("e1")).toBe(true);
 
-    world.delete({ id: "e1" });
+    world.delete("e1");
     const changed = tracker.update(new Map([["e1", { tag: MutationType.Delete }]]));
     expect(changed).toHaveLength(1);
     expect(tracked.members.has("e1")).toBe(false);
