@@ -12,6 +12,7 @@
   },
   "changesets": [
     "audit-data-integrity-fixes",
+    "audit-followup-fixes",
     "audit-perf-billing-pass",
     "behavior-trees",
     "beta-1-release",
