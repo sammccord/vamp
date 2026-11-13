@@ -1,5 +1,14 @@
 # basic
 
+## 0.0.1-beta.13
+
+### Patch Changes
+
+- Updated dependencies [361df8c]
+  - @vampgg/ecs@1.0.0-beta.8
+  - @vampgg/worker@1.0.0-beta.12
+  - @vampgg/solid@1.0.0-beta.9
+
 ## 0.0.1-beta.12
 
 ### Patch Changes

@@ -29,6 +29,7 @@
     "typed-behavior-handlers",
     "vec-builtins",
     "worker-shard-load-and-bulk-read",
-    "worker-storage-write-methods"
+    "worker-storage-write-methods",
+    "world-types-and-data-level-writes"
   ]
 }
