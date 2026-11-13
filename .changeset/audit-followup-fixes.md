@@ -1,5 +1,5 @@
 ---
-"@vampgg/ecs": minor
+"@vampgg/ecs": major
 "@vampgg/worker": minor
 "@vampgg/utils": minor
 "@vampgg/solid": minor

@@ -1,7 +1,7 @@
 ---
-"@vampgg/ecs": minor
+"@vampgg/ecs": major
 "@vampgg/worker": minor
-"@vampgg/utils": minor
+"@vampgg/utils": major
 "@vampgg/cli": minor
 ---
 
