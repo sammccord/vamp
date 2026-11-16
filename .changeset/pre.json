@@ -29,6 +29,7 @@
     "solid-2-migration",
     "typed-behavior-handlers",
     "vec-builtins",
+    "worker-lobby-status",
     "worker-shard-load-and-bulk-read",
     "worker-storage-write-methods",
     "world-types-and-data-level-writes"

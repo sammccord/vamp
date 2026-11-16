@@ -1,5 +1,12 @@
 # basic
 
+## 0.0.1-beta.15
+
+### Patch Changes
+
+- Updated dependencies [f0c8627]
+  - @vampgg/worker@1.0.0-beta.14
+
 ## 0.0.1-beta.14
 
 ### Patch Changes
