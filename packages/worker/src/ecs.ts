@@ -212,6 +212,45 @@ export function defineECSRuntime<G extends GameTypes = GameTypes>(
   _runtimeProvider = provider;
 }
 
+/** A lobby's request-scoped tick cadence: `0` disables ticking. */
+export interface TickConfig {
+  intervalMs: number;
+  paused: boolean;
+}
+
+/**
+ * A read-only snapshot of one lobby, from {@link ECSDurableObject.status}.
+ *
+ * - `unset`: never set up; there is no world to load.
+ * - `dormant`: set up, but no world in memory (evicted, or never woken in this
+ *   isolate). `tick` is the persisted runtime override, or `undefined` when the
+ *   provider's configured cadence applies.
+ * - `loaded`: the world is in memory.
+ *
+ * `sessions` holds each open socket's saved session, hibernated sockets included.
+ */
+export type LobbyStatus<UserSession = object> =
+  | { state: "unset" }
+  | {
+      state: "dormant";
+      namespace: string;
+      connections: number;
+      sessions: UserSession[];
+      tick: TickConfig | undefined;
+    }
+  | {
+      state: "loaded";
+      namespace: string;
+      connections: number;
+      sessions: UserSession[];
+      tick: TickConfig;
+      entities: number;
+      /** Shard roots the lobby holds open, its own `game/<namespace>` included. */
+      shards: string[];
+      /** Roots subscribed through {@link ECSDurableObject.loadShard}. */
+      subscribed: string[];
+    };
+
 /** The part of `YStreamClient` a lobby drives to sync one shard's doc. */
 export interface ShardSyncClient {
   syncOnce(): Promise<void>;
@@ -411,7 +450,7 @@ export class ECSDurableObject<
     // etc.) before we can read them. Capturing first keeps the full set.
     const persistedShards = await this.ctx.storage.get<string[]>("__vamp:shards");
     const persistedSubscribed = await this.ctx.storage.get<string[]>("__vamp:subscribed");
-    await this.setup(namespace, seed);
+    await this._bootstrap(namespace, seed);
     // Re-subscribe the persisted shard set so a hibernation-recreated DO
     // re-aggregates the same multi-provider world. setup()/initialize()
     // already re-opened the lobby's own default shard; restore re-opens the
@@ -459,6 +498,43 @@ export class ECSDurableObject<
 
   initialized() {
     return this.ecs?.initialized;
+  }
+
+  /**
+   * Snapshot this lobby without waking it: a dormant lobby is reported from
+   * durable storage and stays dormant. See {@link LobbyStatus}.
+   */
+  async status(): Promise<LobbyStatus<G["session"]>> {
+    const connections = this.ctx.getWebSockets().length;
+    const sessions = [...this.sessions.values()];
+    if (this.ecs) {
+      return {
+        state: "loaded",
+        namespace: this._namespace,
+        connections,
+        sessions,
+        tick: { intervalMs: this._tickIntervalMs, paused: this._tickPaused },
+        entities: this.ecs.entities.size,
+        shards: this.shards?.activeRoots() ?? [],
+        subscribed: [...this._subscribedRoots],
+      };
+    }
+    const namespace = await this.ctx.storage.get<string>("__vamp:namespace");
+    if (namespace === undefined) return { state: "unset" };
+    const tick = await this.ctx.storage.get<TickConfig>("__vamp:tick");
+    return { state: "dormant", namespace, connections, sessions, tick };
+  }
+
+  /**
+   * Restore an evicted world before a runtime control acts on it. Without this a
+   * fresh isolate's controls see default fields: `pauseTick` no-ops on interval
+   * 0, `unloadShard` finds no subscription, and `loadShard` has no shard manager.
+   */
+  private async _requireWorld(method: string): Promise<void> {
+    if (!(await this._ensureRestored())) {
+      throw new Error(`${method} on a durable object that was never set up`);
+    }
+    await this.ready();
   }
 
   initialize(
@@ -684,6 +760,20 @@ export class ECSDurableObject<
    * `UserSession` (which survives hibernation via `serializeAttachment`), not here.
    */
   async setup(namespace: string, seed?: ContextSeed, document?: string): Promise<void> {
+    // An evicted lobby wakes the way a hibernated one does: from its persisted
+    // seed, shard set, and subscriptions. Bootstrapping it fresh here would
+    // re-persist the shard set as the default root alone and drop every
+    // `loadShard` subscription.
+    if (!this.ecs && (await this._ensureRestored())) return;
+    await this._bootstrap(namespace, seed, document);
+  }
+
+  /** Build the world from the runtime provider; a no-op once it exists. See {@link setup}. */
+  private async _bootstrap(
+    namespace: string,
+    seed?: ContextSeed,
+    document?: string,
+  ): Promise<void> {
     if (!this.ecs) {
       if (!_runtimeProvider) {
         throw new Error(
@@ -796,6 +886,7 @@ export class ECSDurableObject<
    * with ticking disabled.
    */
   async setTickInterval(intervalMs: number): Promise<void> {
+    await this._requireWorld("setTickInterval");
     this._tickIntervalMs = Math.max(0, Math.floor(intervalMs) || 0);
     if (this._tickIntervalMs > 0) this._tickPaused = false;
     this._persistTickConfig();
@@ -811,6 +902,7 @@ export class ECSDurableObject<
    * No-op if already paused or ticking is not configured.
    */
   async pauseTick(): Promise<void> {
+    await this._requireWorld("pauseTick");
     if (this._tickPaused || this._tickIntervalMs <= 0) return;
     this._tickPaused = true;
     this._persistTickConfig();
@@ -821,6 +913,7 @@ export class ECSDurableObject<
    * Resume paused ticking at its preserved interval. No-op if not paused.
    */
   async resumeTick(): Promise<void> {
+    await this._requireWorld("resumeTick");
     if (!this._tickPaused) return;
     this._tickPaused = false;
     this._persistTickConfig();
@@ -837,10 +930,7 @@ export class ECSDurableObject<
    * omitted, the setup-time provider is used.
    */
   async stepTick(args?: G["args"]): Promise<void> {
-    if (!(await this._ensureRestored())) {
-      throw new Error("stepTick on a durable object that was never set up");
-    }
-    await this.ready();
+    await this._requireWorld("stepTick");
     // SAFETY: `[]` is the empty argument list used when no per-tick args
     // provider is registered; it is a valid `UpdateArguments` (which defaults to
     // `[]`) and is spread into `ecs.update(...)` as the no-arguments case.
@@ -947,8 +1037,10 @@ export class ECSDurableObject<
    * stream in moments later as remote inserts (mirrors the implicit path).
    */
   async loadShard(root: string): Promise<void> {
-    await this.ready();
-    if (this._subscribedRoots.has(root)) return;
+    await this._requireWorld("loadShard");
+    // A subscription whose shard is not open (persisted by an older build that
+    // dropped it on a cold start) is re-opened rather than skipped.
+    if (this._subscribedRoots.has(root) && this.shards.pinned(root)) return;
     this._subscribedRoots.add(root);
     if (!this.shards.pinned(root)) this._acquireShard(root);
     this._persistSubscribedRoots();
@@ -966,6 +1058,7 @@ export class ECSDurableObject<
    * its entities from the world (the entities still live in their provider doc).
    */
   async unloadShard(root: string): Promise<void> {
+    await this._requireWorld("unloadShard");
     if (!this._subscribedRoots.delete(root)) return;
     this._persistSubscribedRoots();
     if (root !== this._defaultRoot && (this._rootEntityCount.get(root) ?? 0) === 0) {

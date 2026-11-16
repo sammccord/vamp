@@ -961,3 +961,147 @@ describe("ECSDurableObject — reconcile and write-through", () => {
     expect(charStub.__pushed).toBeUndefined();
   });
 });
+
+describe("ECSDurableObject — status()", () => {
+  test("reports unset before setup, without persisting anything", async () => {
+    configureRuntime();
+    const storage = makeStorage();
+    const instance = newDO(makeCtx(storage), makeEnv(makeStub()));
+    expect(await instance.status()).toEqual({ state: "unset" });
+    expect(storage._map.size).toBe(0);
+  });
+
+  test("reports a loaded world with its sessions, tick, entities, and shards", async () => {
+    configureRuntime();
+    const storage = makeStorage();
+    const ws = makeWs({ userId: "u1" });
+    const instance = newDO(
+      makeCtx(storage, [ws]),
+      makeEnvByRoot({ "game/room1": makeStub(), "character/alice": makeStub() }),
+    );
+    await instance.setup("room1");
+    instance.sessions.set(ws, { userId: "u1" });
+    await instance.ecs.withScope(() => instance.ecs.insert({ id: "e1", n: 0 }));
+    await instance.setTickInterval(50);
+    await instance.loadShard("character/alice");
+
+    expect(await instance.status()).toEqual({
+      state: "loaded",
+      namespace: "room1",
+      connections: 1,
+      sessions: [{ userId: "u1" }],
+      tick: { intervalMs: 50, paused: false },
+      entities: 1,
+      shards: expect.arrayContaining(["game/room1", "character/alice"]),
+      subscribed: ["character/alice"],
+    });
+  });
+
+  test("reports an evicted lobby from storage and leaves it dormant", async () => {
+    configureRuntime();
+    const storage = makeStorage();
+    const first = newDO(makeCtx(storage), makeEnv(makeStub()));
+    await first.setup("room1");
+    await first.setTickInterval(50);
+    await first.pauseTick();
+
+    const evicted = newDO(makeCtx(storage), makeEnv(makeStub()));
+    expect(await evicted.status()).toEqual({
+      state: "dormant",
+      namespace: "room1",
+      connections: 0,
+      sessions: [],
+      tick: { intervalMs: 50, paused: true },
+    });
+    expect(evicted.ecs).toBeUndefined();
+  });
+
+  test("a dormant lobby without a runtime override reports no tick", async () => {
+    configureRuntime();
+    const storage = makeStorage();
+    await newDO(makeCtx(storage), makeEnv(makeStub())).setup("room1");
+    const evicted = newDO(makeCtx(storage), makeEnv(makeStub()));
+    expect(await evicted.status()).toMatchObject({ state: "dormant", tick: undefined });
+  });
+});
+
+describe("ECSDurableObject — runtime controls on an evicted lobby", () => {
+  async function evictedAfter(prepare: (instance: any) => Promise<void>) {
+    configureRuntime();
+    const storage = makeStorage();
+    const env = makeEnvByRoot({ "game/room1": makeStub(), "character/alice": makeStub() });
+    const first = newDO(makeCtx(storage), env);
+    await first.setup("room1");
+    await prepare(first);
+    return { storage, instance: newDO(makeCtx(storage), env) };
+  }
+
+  test("loadShard restores the world, then subscribes", async () => {
+    const { storage, instance } = await evictedAfter(async () => {});
+    await instance.loadShard("character/alice");
+    expect(instance.ecs).toBeDefined();
+    expect(storage._map.get("__vamp:subscribed")).toEqual(["character/alice"]);
+  });
+
+  test("unloadShard drops a subscription made before eviction", async () => {
+    const { storage, instance } = await evictedAfter((first) => first.loadShard("character/alice"));
+    await instance.unloadShard("character/alice");
+    expect(storage._map.get("__vamp:subscribed")).toEqual([]);
+  });
+
+  test("pauseTick pauses the interval set before eviction", async () => {
+    const { storage, instance } = await evictedAfter((first) => first.setTickInterval(50));
+    await instance.pauseTick();
+    expect(storage._map.get("__vamp:tick")).toEqual({ intervalMs: 50, paused: true });
+  });
+
+  test("controls on a durable object that was never set up throw", async () => {
+    configureRuntime();
+    const instance = newDO(makeCtx(makeStorage()), makeEnv(makeStub()));
+    await expect(instance.loadShard("character/alice")).rejects.toThrow("never set up");
+    await expect(instance.setTickInterval(50)).rejects.toThrow("never set up");
+  });
+});
+
+describe("ECSDurableObject — subscriptions across a cold start", () => {
+  test("a player joining an evicted lobby keeps its loadShard subscriptions", async () => {
+    configureRuntime();
+    const storage = makeStorage();
+    const env = makeEnvByRoot({
+      "game/room1": makeStub(),
+      "character/alice": makeStub(seedDoc("character/alice", [{ id: "a1", x: 1, y: 1 }])),
+    });
+    const first = newDO(makeCtx(storage), env);
+    await first.setup("room1");
+    await first.loadShard("character/alice");
+    await settle();
+
+    // The worker's join handler calls setup() on the evicted lobby.
+    const joined = newDO(makeCtx(storage), env);
+    await joined.setup("room1");
+    await settle();
+
+    expect(joined.ecs.hasEntity("a1")).toBe(true);
+    expect(await joined.status()).toMatchObject({
+      subscribed: ["character/alice"],
+      shards: expect.arrayContaining(["character/alice"]),
+    });
+  });
+
+  test("loadShard re-opens a subscription whose shard is no longer open", async () => {
+    configureRuntime();
+    const storage = makeStorage({
+      "__vamp:namespace": "room1",
+      "__vamp:shards": ["game/room1"],
+      "__vamp:subscribed": ["character/alice"],
+    });
+    const env = makeEnvByRoot({
+      "game/room1": makeStub(),
+      "character/alice": makeStub(seedDoc("character/alice", [{ id: "a1", x: 1, y: 1 }])),
+    });
+    const instance = newDO(makeCtx(storage), env);
+    await instance.loadShard("character/alice");
+    await settle();
+    expect(instance.ecs.hasEntity("a1")).toBe(true);
+  });
+});
